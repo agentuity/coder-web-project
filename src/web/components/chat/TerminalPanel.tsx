@@ -59,6 +59,9 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 		});
 	}, []);
 
+	// Track whether we're connected via Ion (direct) or proxy (subprocess)
+	const isIonModeRef = useRef(false);
+
 	// Connect WebSocket ref (stable across renders)
 	const connectWebSocketRef = useRef<((cols: number, rows: number) => Promise<void>) | null>(null);
 
@@ -67,20 +70,26 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 			try {
 				setStatus('connecting');
 				setError(null);
+				isIonModeRef.current = false;
 
 				// First, try to get an SSH token from our backend
-				const tokenRes = await fetch(`/api/sessions/${sessionId}/terminal/token`, {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-				});
+				let tokenRes: Response | null = null;
+				try {
+					tokenRes = await fetch(`/api/sessions/${sessionId}/terminal/token`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+					});
+				} catch {
+					// Token endpoint unreachable — go straight to fallback
+				}
 
 				let wsUrl: string;
 
-				if (tokenRes.ok) {
+				if (tokenRes?.ok) {
 					// Direct Ion SSH connection
+					isIonModeRef.current = true;
 					const tokenData = (await tokenRes.json()) as { token: string; region: string | null };
 					const region = tokenData.region || '';
-					// Determine Ion host
 					const isDev =
 						window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
 					const ionHost = isDev
@@ -108,14 +117,16 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 					if (terminalRef.current) {
 						terminalRef.current.write('\x1b[32mConnected to SSH session\x1b[0m\r\n');
 					}
-					// Send initial resize (Ion protocol: 0x01 prefix + JSON)
-					const resizeMsg = JSON.stringify({ cols, rows });
-					const encoder = encoderRef.current;
-					const jsonData = encoder.encode(resizeMsg);
-					const message = new Uint8Array(jsonData.length + 1);
-					message[0] = 0x01;
-					message.set(jsonData, 1);
-					ws.send(message);
+					// Only send Ion binary resize protocol when connected to Ion
+					if (isIonModeRef.current) {
+						const resizeMsg = JSON.stringify({ cols, rows });
+						const encoder = encoderRef.current;
+						const jsonData = encoder.encode(resizeMsg);
+						const message = new Uint8Array(jsonData.length + 1);
+						message[0] = 0x01;
+						message.set(jsonData, 1);
+						ws.send(message);
+					}
 				};
 
 				ws.onmessage = (event) => {
@@ -238,20 +249,30 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 				// Terminal input → WebSocket
 				term.onData((data: string) => {
 					if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-						const encoded = encoderRef.current.encode(data);
-						wsRef.current.send(encoded);
+						if (isIonModeRef.current) {
+							// Ion expects raw encoded bytes
+							const encoded = encoderRef.current.encode(data);
+							wsRef.current.send(encoded);
+						} else {
+							// Proxy mode: send as string (piped directly to stdin)
+							wsRef.current.send(data);
+						}
 					}
 				});
 
-				// Terminal resize → WebSocket (Ion protocol: 0x01 prefix + JSON)
+				// Terminal resize → WebSocket
 				term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
 					if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-						const resizeMsg = JSON.stringify({ cols, rows });
-						const jsonData = encoderRef.current.encode(resizeMsg);
-						const message = new Uint8Array(jsonData.length + 1);
-						message[0] = 0x01;
-						message.set(jsonData, 1);
-						wsRef.current.send(message);
+						if (isIonModeRef.current) {
+							// Ion protocol: 0x01 prefix + JSON resize message
+							const resizeMsg = JSON.stringify({ cols, rows });
+							const jsonData = encoderRef.current.encode(resizeMsg);
+							const message = new Uint8Array(jsonData.length + 1);
+							message[0] = 0x01;
+							message.set(jsonData, 1);
+							wsRef.current.send(message);
+						}
+						// Proxy mode: no resize support (subprocess handles it)
 					}
 				});
 			} catch (err) {
