@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, FileCode, ListTodo, Loader2, Terminal as TerminalIcon, Wifi, WifiOff } from 'lucide-react';
+import { Copy, FileCode, GitFork, ListTodo, Loader2, Terminal as TerminalIcon, Wifi, WifiOff } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
@@ -38,6 +38,7 @@ import {
 } from '../ai-elements/prompt-input';
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '../ai-elements/reasoning';
 import { Loader } from '../ai-elements/loader';
+import { useToast } from '../ui/toast';
 
 interface ChatPageProps {
   sessionId: string;
@@ -48,10 +49,25 @@ interface ChatPageProps {
     model: string | null;
     sandboxUrl: string | null;
   };
+  onForkedSession?: (session: {
+    id: string;
+    title: string | null;
+    status: string;
+    agent: string | null;
+    model: string | null;
+    sandboxUrl: string | null;
+    createdAt: string;
+    flagged: boolean | null;
+  }) => void;
 }
 
-export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) {
+export function ChatPage({ sessionId, session: initialSession, onForkedSession }: ChatPageProps) {
   const [session, setSession] = useState(initialSession);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    setSession(initialSession);
+  }, [initialSession]);
 
   // Poll for session readiness when not yet active
   useEffect(() => {
@@ -116,6 +132,7 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
   const [showChanges, setShowChanges] = useState(false);
 	const [showTerminal, setShowTerminal] = useState(false);
 	const [terminalConnected, setTerminalConnected] = useState(false);
+	const [isForking, setIsForking] = useState(false);
 	const isBusy = sessionStatus.type === 'busy';
 
   // Derive display label from selected command
@@ -132,7 +149,7 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
 			? text
 			: `${selectedCommand} ${text}`;
 
-      await fetch(`/api/sessions/${sessionId}/messages`, {
+      const res = await fetch(`/api/sessions/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -140,10 +157,32 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
           model: selectedModel,
         }),
       });
+      if (!res.ok) {
+        throw new Error('Failed to send message');
+      }
     } catch (err) {
       console.error('Failed to send message:', err);
+      toast({ type: 'error', message: 'Failed to send message' });
     } finally {
       setIsSending(false);
+    }
+  };
+
+  const handleFork = async () => {
+    if (isForking) return;
+    setIsForking(true);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/fork`, { method: 'POST' });
+      if (!res.ok) {
+        throw new Error('Failed to fork session');
+      }
+      const newSession = await res.json();
+      onForkedSession?.(newSession);
+    } catch (error) {
+      console.error('Failed to fork session:', error);
+      toast({ type: 'error', message: 'Failed to fork session' });
+    } finally {
+      setIsForking(false);
     }
   };
 
@@ -293,6 +332,22 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
           <h2 className="text-sm font-semibold text-[var(--foreground)]">
             {session.title || 'Untitled Session'}
           </h2>
+          {session.status === 'active' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleFork}
+              className="h-7 w-7 p-0"
+              title="Fork session"
+              disabled={isForking}
+            >
+              {isForking ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <GitFork className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
           <Badge variant="secondary" className="text-[10px]">
             {commandLabel}
           </Badge>
@@ -368,8 +423,8 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
       </div>
 
       {/* Body: messages + optional todo sidebar */}
-			<div className="flex flex-1 overflow-hidden">
-				<Conversation className="flex-1">
+			<div className="flex flex-1 min-w-0 overflow-hidden">
+				<Conversation className="flex-1 min-w-0">
 					<ConversationContent>
 						{messages.length === 0 && !isBusy ? (
 							<ConversationEmptyState>
@@ -466,14 +521,14 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
 
         {/* Todo sidebar */}
         {showTodos && todos.length > 0 && (
-          <div className="w-64 shrink-0">
+          <div className="w-48 md:w-64 shrink-0">
             <TodoPanel todos={todos} />
           </div>
         )}
 
         {/* File changes sidebar */}
         {showChanges && (
-          <div className="w-[480px] shrink-0 border-l border-[var(--border)]">
+          <div className="w-80 md:w-[480px] shrink-0 border-l border-[var(--border)]">
             <FileExplorer sessionId={sessionId} />
           </div>
         )}

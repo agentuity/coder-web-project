@@ -11,6 +11,7 @@ import { SkillsPage } from './components/pages/SkillsPage';
 import { SourcesPage } from './components/pages/SourcesPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { useAPI } from '@agentuity/react';
+import { ToastProvider, useToast } from './components/ui/toast';
 
 interface Session {
   id: string;
@@ -23,9 +24,10 @@ interface Session {
   flagged: boolean | null;
 }
 
-export function App() {
+function AppContent() {
   const { data: authSession, isPending: authLoading } = authClient.useSession();
   const user = authSession?.user;
+  const { toast } = useToast();
   // Coerce proxy values to plain strings to prevent React 19 dev mode
   // from triggering .toString()/.valueOf() on BetterAuth Proxy objects,
   // which would cause 404 requests to /api/auth/display-name/value-of.
@@ -124,15 +126,21 @@ export function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
+      if (!res.ok) {
+        throw new Error('Failed to create session');
+      }
       const session = await res.json();
       setSessions(prev => [session, ...prev]);
       setActiveSessionId(session.id);
       setCurrentPage('chat');
       setShowNewDialog(false);
+    } catch (error) {
+      console.error('Failed to create session:', error);
+      toast({ type: 'error', message: 'Failed to create session' });
     } finally {
       setIsCreating(false);
     }
-  }, [workspaceId]);
+  }, [toast, workspaceId]);
 
   const handleSelectSession = useCallback((id: string) => {
     setActiveSessionId(id);
@@ -157,6 +165,26 @@ export function App() {
     }
   }, []);
 
+  const handleRetrySession = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${id}/retry`, { method: 'POST' });
+      if (!res.ok) {
+        throw new Error('Failed to retry session');
+      }
+      const session = await res.json();
+      setSessions(prev => prev.map(s => (s.id === id ? session : s)));
+    } catch (error) {
+      console.error('Failed to retry session:', error);
+      toast({ type: 'error', message: 'Failed to retry session' });
+    }
+  }, [toast]);
+
+  const handleForkedSession = useCallback((session: Session) => {
+    setSessions(prev => [session, ...prev]);
+    setActiveSessionId(session.id);
+    setCurrentPage('chat');
+  }, []);
+
   // Auth loading state
   if (authLoading) {
     return (
@@ -176,7 +204,13 @@ export function App() {
   // Render current page content
   let content: React.ReactNode;
   if (currentPage === 'chat' && activeSession) {
-    content = <ChatPage sessionId={activeSession.id} session={activeSession} />;
+    content = (
+      <ChatPage
+        sessionId={activeSession.id}
+        session={activeSession}
+        onForkedSession={handleForkedSession}
+      />
+    );
   } else if (currentPage === 'skills' && workspaceId) {
     content = <SkillsPage workspaceId={workspaceId} />;
   } else if (currentPage === 'sources' && workspaceId) {
@@ -209,6 +243,7 @@ export function App() {
         onSelectSession={handleSelectSession}
         onNavigate={handleNavigate}
         onFlagSession={handleFlagSession}
+        onRetrySession={handleRetrySession}
       >
         <ErrorBoundary>{content}</ErrorBoundary>
       </AppShell>
@@ -220,5 +255,13 @@ export function App() {
         isCreating={isCreating}
       />
     </>
+  );
+}
+
+export function App() {
+  return (
+    <ToastProvider>
+      <AppContent />
+    </ToastProvider>
   );
 }

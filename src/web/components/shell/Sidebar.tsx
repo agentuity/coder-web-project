@@ -1,7 +1,9 @@
-import { Plus, Sparkles, Plug, Settings, Star } from 'lucide-react';
+import { Plus, Sparkles, Plug, Settings, Star, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
+import { Badge } from '../ui/badge';
+import { cn } from '../../lib/utils';
 
 interface Session {
   id: string;
@@ -19,7 +21,9 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onNavigate: (page: 'skills' | 'sources' | 'settings') => void;
   onFlagSession?: (id: string, flagged: boolean) => void;
+  onRetrySession?: (id: string) => void;
   currentPage: string;
+  isMobileOpen?: boolean;
 }
 
 function getStatusColor(status: string) {
@@ -31,9 +35,26 @@ function getStatusColor(status: string) {
   }
 }
 
-export function Sidebar({ sessions, activeSessionId, onNewSession, onSelectSession, onNavigate, onFlagSession, currentPage }: SidebarProps) {
+export function Sidebar({
+  sessions,
+  activeSessionId,
+  onNewSession,
+  onSelectSession,
+  onNavigate,
+  onFlagSession,
+  onRetrySession,
+  currentPage,
+  isMobileOpen,
+}: SidebarProps) {
   return (
-    <div className="flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--card)]">
+    <div
+      className={cn(
+        'flex h-full w-64 flex-col border-r border-[var(--border)] bg-[var(--card)]',
+        isMobileOpen
+          ? 'absolute inset-y-0 left-0 z-40 flex md:static md:flex'
+          : 'hidden md:flex',
+      )}
+    >
       <div className="p-3">
         <Button onClick={onNewSession} className="w-full" size="sm">
           <Plus className="mr-2 h-4 w-4" />
@@ -48,33 +69,57 @@ export function Sidebar({ sessions, activeSessionId, onNewSession, onSelectSessi
           {sessions.map((session) => (
             <div
               key={session.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => onSelectSession(session.id)}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelectSession(session.id); } }}
-              className={`group w-full flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors cursor-pointer hover:bg-[var(--accent)] ${
+              className={`group w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)] ${
                 activeSessionId === session.id ? 'bg-[var(--accent)] text-[var(--accent-foreground)]' : 'text-[var(--foreground)]'
               }`}
             >
-              <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
-              <div className="flex-1 truncate">
-                {session.title || 'Untitled Session'}
+              <button
+                type="button"
+                onClick={() => onSelectSession(session.id)}
+                className="flex flex-1 items-center gap-2 truncate text-left"
+              >
+                <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
+                <div className="flex-1 truncate">
+                  {session.title || 'Untitled Session'}
+                </div>
+              </button>
+              <div className="ml-auto flex items-center gap-1">
+                {session.status === 'error' && (
+                  <Badge variant="destructive" className="text-[9px] px-1.5 py-0">
+                    Error
+                  </Badge>
+                )}
+                {session.status === 'error' && onRetrySession && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 w-6 p-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRetrySession(session.id);
+                    }}
+                    title="Retry session"
+                  >
+                    <RefreshCw className="h-3 w-3" />
+                  </Button>
+                )}
+                {onFlagSession ? (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onFlagSession(session.id, !session.flagged);
+                    }}
+                    className="shrink-0 p-0.5 rounded hover:bg-[var(--muted)] transition-colors"
+                    title={session.flagged ? 'Remove flag' : 'Flag session'}
+                  >
+                    <Star className={`h-3 w-3 ${session.flagged ? 'text-yellow-500 fill-yellow-500' : 'text-[var(--muted-foreground)] opacity-0 group-hover:opacity-100'}`} />
+                  </button>
+                ) : (
+                  session.flagged && <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+                )}
               </div>
-              {onFlagSession ? (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onFlagSession(session.id, !session.flagged);
-                  }}
-                  className="shrink-0 p-0.5 rounded hover:bg-[var(--muted)] transition-colors"
-                  title={session.flagged ? 'Remove flag' : 'Flag session'}
-                >
-                  <Star className={`h-3 w-3 ${session.flagged ? 'text-yellow-500 fill-yellow-500' : 'text-[var(--muted-foreground)] opacity-0 group-hover:opacity-100'}`} />
-                </button>
-              ) : (
-                session.flagged && <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
-              )}
             </div>
           ))}
           {sessions.length === 0 && (

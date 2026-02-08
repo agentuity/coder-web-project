@@ -3,9 +3,16 @@
  */
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
-import { chatSessions } from '../db/schema';
+import { chatSessions, skills, sources } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
-import { getOpencodeClient, removeOpencodeClient, destroySandbox } from '../opencode';
+import {
+	createSandbox,
+	generateOpenCodeConfig,
+	serializeOpenCodeConfig,
+	getOpencodeClient,
+	removeOpencodeClient,
+	destroySandbox,
+} from '../opencode';
 import type { SandboxContext } from '../opencode';
 
 const api = createRouter();
@@ -86,6 +93,103 @@ api.post('/:id/retry', async (c) => {
 		.returning();
 
 	return c.json(updated);
+});
+
+// POST /api/sessions/:id/fork — create a new session from existing session
+api.post('/:id/fork', async (c) => {
+	const user = c.get('user')!;
+	const [sourceSession] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')));
+	if (!sourceSession) return c.json({ error: 'Session not found' }, 404);
+
+	const workspaceId = sourceSession.workspaceId;
+	const [workspaceSkills, workspaceSources] = await Promise.all([
+		db.select().from(skills).where(eq(skills.workspaceId, workspaceId)),
+		db.select().from(sources).where(eq(sources.workspaceId, workspaceId)),
+	]);
+
+	const opencodeConfig = generateOpenCodeConfig(
+		{},
+		workspaceSkills.map((s) => ({ name: s.name, content: s.content, enabled: s.enabled ?? true })),
+		workspaceSources.map((s) => ({
+			name: s.name,
+			type: s.type,
+			config: (s.config || {}) as Record<string, unknown>,
+			enabled: s.enabled ?? true,
+		})),
+	);
+
+	const metadata = (sourceSession.metadata || {}) as Record<string, unknown>;
+	const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
+	const baseTitle = sourceSession.title || 'Untitled Session';
+	const title = `Fork of ${baseTitle}`;
+
+	const [session] = await db
+		.insert(chatSessions)
+		.values({
+			workspaceId,
+			createdBy: sourceSession.createdBy || user.id,
+			status: 'creating',
+			title,
+			agent: sourceSession.agent || 'build',
+			model: sourceSession.model || 'anthropic/claude-sonnet-4-5',
+			metadata: { ...metadata, repoUrl },
+		})
+		.returning();
+
+	const sandbox = c.var.sandbox;
+	const logger = c.var.logger;
+
+	(async () => {
+		try {
+			const sandboxCtx: SandboxContext = { sandbox, logger };
+			const { sandboxId, sandboxUrl } = await createSandbox(sandboxCtx, {
+				repoUrl,
+				opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
+			});
+
+			const client = getOpencodeClient(sandboxId, sandboxUrl);
+			let opencodeSessionId: string | null = null;
+			for (let attempt = 1; attempt <= 5; attempt++) {
+				try {
+					const opencodeSession = await client.session.create({ body: {} });
+					opencodeSessionId =
+						(opencodeSession as any)?.data?.id || (opencodeSession as any)?.id || null;
+					if (opencodeSessionId) break;
+					logger.warn(`fork session.create attempt ${attempt}: no session ID returned`);
+				} catch (err) {
+					logger.warn(`fork session.create attempt ${attempt} failed`, { error: err });
+				}
+				if (attempt < 5) await new Promise((r) => setTimeout(r, 2000));
+			}
+
+			const newStatus = opencodeSessionId ? 'active' : 'creating';
+
+			await db
+				.update(chatSessions)
+				.set({
+					sandboxId,
+					sandboxUrl,
+					opencodeSessionId,
+					status: newStatus,
+					updatedAt: new Date(),
+				})
+				.where(eq(chatSessions.id, session!.id));
+		} catch (error) {
+			await db
+				.update(chatSessions)
+				.set({
+					status: 'error',
+					metadata: { ...metadata, repoUrl, error: String(error) },
+					updatedAt: new Date(),
+				})
+				.where(eq(chatSessions.id, session!.id));
+		}
+	})();
+
+	return c.json(session, 201);
 });
 
 // DELETE /api/sessions/:id — delete session and destroy sandbox
