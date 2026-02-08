@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle, Clock, Wrench } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import type { ToolPart } from '../../types/opencode';
+import { FileDiff as PierreDiff } from '@pierre/diffs/react';
+import { parseDiffFromFile } from '@pierre/diffs';
 
 interface ToolCallCardProps {
   part: ToolPart;
@@ -71,65 +73,18 @@ function isReadTool(input: Record<string, unknown>): input is Record<string, unk
 }
 
 // ---------------------------------------------------------------------------
-// Simple line-by-line diff computation
+// Language detection helper for @pierre/diffs
 // ---------------------------------------------------------------------------
 
-interface DiffLine {
-  type: 'context' | 'removed' | 'added';
-  text: string;
-}
-
-function computeDiff(oldStr: string, newStr: string): DiffLine[] {
-  const oldLines = oldStr.split('\n');
-  const newLines = newStr.split('\n');
-
-  // Find first differing line
-  let prefixLen = 0;
-  while (
-    prefixLen < oldLines.length &&
-    prefixLen < newLines.length &&
-    oldLines[prefixLen] === newLines[prefixLen]
-  ) {
-    prefixLen++;
-  }
-
-  // Find last differing line (from the end)
-  let oldSuffix = oldLines.length;
-  let newSuffix = newLines.length;
-  while (
-    oldSuffix > prefixLen &&
-    newSuffix > prefixLen &&
-    oldLines[oldSuffix - 1] === newLines[newSuffix - 1]
-  ) {
-    oldSuffix--;
-    newSuffix--;
-  }
-
-  const result: DiffLine[] = [];
-
-  // Context before (up to 3 lines)
-  const ctxStart = Math.max(0, prefixLen - 3);
-  for (let i = ctxStart; i < prefixLen; i++) {
-    result.push({ type: 'context', text: oldLines[i] ?? '' });
-  }
-
-  // Removed lines
-  for (let i = prefixLen; i < oldSuffix; i++) {
-    result.push({ type: 'removed', text: oldLines[i] ?? '' });
-  }
-
-  // Added lines
-  for (let i = prefixLen; i < newSuffix; i++) {
-    result.push({ type: 'added', text: newLines[i] ?? '' });
-  }
-
-  // Context after (up to 3 lines)
-  const ctxEnd = Math.min(oldLines.length, oldSuffix + 3);
-  for (let i = oldSuffix; i < ctxEnd; i++) {
-    result.push({ type: 'context', text: oldLines[i] ?? '' });
-  }
-
-  return result;
+function getLangFromPath(filePath: string): string | undefined {
+  const ext = filePath.split('.').pop()?.toLowerCase();
+  const map: Record<string, string> = {
+    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+    json: 'json', md: 'markdown', css: 'css', html: 'html',
+    yml: 'yaml', yaml: 'yaml', sh: 'bash', py: 'python',
+    rs: 'rust', go: 'go', sql: 'sql', toml: 'toml',
+  };
+  return ext ? map[ext] : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,36 +99,40 @@ function shortenPath(filePath: string): string {
 }
 
 function DiffView({ filePath, oldString, newString }: { filePath: string; oldString: string; newString: string }) {
-  const lines = computeDiff(oldString, newString);
+  const lang = getLangFromPath(filePath) as any;
+  const fileName = filePath.split('/').pop() || filePath;
+
+  const diffData = useMemo(() => {
+    try {
+      return parseDiffFromFile(
+        { name: fileName, contents: oldString, lang },
+        { name: fileName, contents: newString, lang },
+      );
+    } catch {
+      return null;
+    }
+  }, [fileName, oldString, newString, lang]);
+
   return (
     <div className="px-3 py-2">
       <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
         <span>📝</span>
         <span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
       </div>
-      <div className="rounded-md border border-[var(--border)] overflow-hidden max-h-72 overflow-y-auto overflow-x-auto">
-        <div className="min-w-fit">
-          {lines.map((line, i) => {
-            let bg = 'bg-transparent';
-            let fg = 'text-[var(--muted-foreground)]';
-            let prefix = ' ';
-            if (line.type === 'removed') {
-              bg = 'bg-red-500/15';
-              fg = 'text-red-400';
-              prefix = '-';
-            } else if (line.type === 'added') {
-              bg = 'bg-green-500/15';
-              fg = 'text-green-400';
-              prefix = '+';
-            }
-            return (
-              <div key={`${line.type}-${i}`} className={`${bg} ${fg} px-2 font-mono text-[10px] leading-[1.7] whitespace-pre`}>
-                <span className="select-none opacity-60 mr-2 inline-block w-3 text-center">{prefix}</span>
-                {line.text}
-              </div>
-            );
-          })}
-        </div>
+      <div className="rounded-md border border-[var(--border)] overflow-hidden max-h-72 overflow-y-auto overflow-x-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
+        {diffData ? (
+          <PierreDiff
+            fileDiff={diffData}
+            options={{
+              theme: 'github-dark',
+              disableFileHeader: true,
+              diffStyle: 'unified',
+              diffIndicators: 'classic',
+            }}
+          />
+        ) : (
+          <div className="px-2 py-1 text-xs text-[var(--muted-foreground)]">Unable to render diff</div>
+        )}
       </div>
     </div>
   );

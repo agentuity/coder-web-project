@@ -276,4 +276,96 @@ api.post('/:id/questions/:reqId', async (c) => {
 	}
 });
 
+// ---------------------------------------------------------------------------
+// GET /api/sessions/:id/files — list files in sandbox directory
+// ---------------------------------------------------------------------------
+api.get('/:id/files', async (c) => {
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')!));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	const path = c.req.query('path') || '/home/agentuity/project';
+
+	try {
+		// Runtime returns a full Sandbox object from get(), but the type is SandboxInfo.
+		// The actual implementation supports execute() — cast to any for the call.
+		const sandbox = (await c.var.sandbox.get(session.sandboxId)) as any;
+		const result = await sandbox.execute({
+			command: [
+				'find',
+				path,
+				'-maxdepth',
+				'1',
+				'-not',
+				'-path',
+				path,
+				'-printf',
+				'%y %P\n',
+			],
+		});
+
+		const output: string =
+			result.stdout ?? result.output ?? (typeof result === 'string' ? result : '');
+		const entries = output
+			.trim()
+			.split('\n')
+			.filter(Boolean)
+			.map((line: string) => {
+				const [type, ...nameParts] = line.split(' ');
+				const name = nameParts.join(' ');
+				return {
+					name,
+					path: `${path}/${name}`.replace(/\/+/g, '/'),
+					type: type === 'd' ? 'directory' : 'file',
+				};
+			})
+			.sort((a: { type: string; name: string }, b: { type: string; name: string }) => {
+				if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+				return a.name.localeCompare(b.name);
+			});
+
+		return c.json({ path, entries });
+	} catch (error) {
+		return c.json({ error: 'Failed to list files', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/sessions/:id/files/content — read file content from sandbox
+// ---------------------------------------------------------------------------
+api.get('/:id/files/content', async (c) => {
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')!));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	const filePath = c.req.query('path');
+	if (!filePath) return c.json({ error: 'Missing path parameter' }, 400);
+
+	// Security: ensure path is under /home/agentuity
+	if (!filePath.startsWith('/home/agentuity')) {
+		return c.json({ error: 'Access denied: path must be under /home/agentuity' }, 403);
+	}
+
+	try {
+		const sandbox = (await c.var.sandbox.get(session.sandboxId)) as any;
+		const result = await sandbox.execute({
+			command: ['cat', filePath],
+		});
+
+		const content: string =
+			result.stdout ?? result.output ?? (typeof result === 'string' ? result : '');
+		const ext = filePath.split('.').pop() || '';
+
+		return c.json({ path: filePath, content, extension: ext });
+	} catch (error) {
+		return c.json({ error: 'Failed to read file', details: String(error) }, 500);
+	}
+});
+
 export default api;

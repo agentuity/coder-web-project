@@ -8,6 +8,7 @@ import workspaceRoutes from '../routes/workspaces';
 import sessionRoutes from '../routes/sessions';
 import sessionDetailRoutes from '../routes/session-detail';
 import chatRoutes from '../routes/chat';
+import terminalRoutes from '../routes/terminal';
 import skillRoutes from '../routes/skills';
 import sourceRoutes from '../routes/sources';
 
@@ -46,6 +47,9 @@ api.route('/sessions', sessionDetailRoutes);
 
 // Chat routes (nested under sessions)
 api.route('/sessions', chatRoutes);
+
+// Terminal WebSocket route (nested under sessions)
+api.route('/sessions', terminalRoutes);
 
 // Skills routes (nested under workspaces + standalone)
 api.route('/workspaces/:wid/skills', skillRoutes);

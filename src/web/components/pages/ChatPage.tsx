@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Send, Square, ListTodo, FileCode, Wifi, WifiOff } from 'lucide-react';
+import { Loader2, Send, Square, ListTodo, FileCode, Wifi, WifiOff, Terminal as TerminalIcon } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { Badge } from '../ui/badge';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
 import { MessageList } from '../chat/MessageList';
 import { TodoPanel } from '../chat/TodoPanel';
-import { FileChangesPanel } from '../chat/FileChangesPanel';
+import { FileExplorer } from '../chat/FileExplorer';
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
+import { TerminalPanel } from '../chat/TerminalPanel';
 
 interface ChatPageProps {
   sessionId: string;
@@ -85,6 +86,7 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
   const [showTodos, setShowTodos] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
+  const [showTerminal, setShowTerminal] = useState(false);
 
   // Derive display label from selected command
   const commandLabel = selectedCommand.replace(/^\//, '');
@@ -211,6 +213,16 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
           ) : (
             <WifiOff className="h-3.5 w-3.5 text-red-500" />
           )}
+          {/* Terminal toggle */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowTerminal(!showTerminal)}
+            className={`h-7 text-xs gap-1 ${showTerminal ? 'bg-[var(--accent)]' : ''}`}
+          >
+            <TerminalIcon className="h-3.5 w-3.5" />
+            Terminal
+          </Button>
           {/* Changes toggle */}
           <Button
             variant="ghost"
@@ -222,7 +234,7 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
             className="h-7 text-xs gap-1"
           >
             <FileCode className="h-3.5 w-3.5" />
-            Changes
+            Files
           </Button>
           {/* Todo toggle */}
           {todos.length > 0 && (
@@ -324,11 +336,18 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
 
         {/* File changes sidebar */}
         {showChanges && (
-          <div className="w-80 shrink-0 border-l border-[var(--border)]">
-            <FileChangesPanel sessionId={sessionId} />
+          <div className="w-[480px] shrink-0 border-l border-[var(--border)]">
+            <FileExplorer sessionId={sessionId} />
           </div>
         )}
       </div>
+
+      {/* Terminal panel (collapsible) */}
+      {showTerminal && (
+        <div className="h-64 shrink-0 border-t border-[var(--border)]">
+          <TerminalPanel sessionId={sessionId} />
+        </div>
+      )}
 
       {/* Input area */}
       <div className="border-t border-[var(--border)] p-3">
