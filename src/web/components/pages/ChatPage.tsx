@@ -9,7 +9,7 @@ import { TodoPanel } from '../chat/TodoPanel';
 import { FileExplorer } from '../chat/FileExplorer';
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
-import { TerminalPanel } from '../chat/TerminalPanel';
+import { TerminalOverlay } from '../chat/TerminalPanel';
 
 interface ChatPageProps {
   sessionId: string;
@@ -87,6 +87,7 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
   const [showTodos, setShowTodos] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
   const [showTerminal, setShowTerminal] = useState(false);
+  const [terminalConnected, setTerminalConnected] = useState(false);
 
   // Derive display label from selected command
   const commandLabel = selectedCommand.replace(/^\//, '');
@@ -220,7 +221,7 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
             onClick={() => setShowTerminal(!showTerminal)}
             className={`h-7 text-xs gap-1 ${showTerminal ? 'bg-[var(--accent)]' : ''}`}
           >
-            <TerminalIcon className="h-3.5 w-3.5" />
+            <TerminalIcon className={`h-3.5 w-3.5 ${terminalConnected ? 'text-green-500' : ''}`} />
             Terminal
           </Button>
           {/* Changes toggle */}
@@ -342,11 +343,13 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
         )}
       </div>
 
-      {/* Terminal panel (collapsible) */}
+      {/* Terminal full-screen overlay */}
       {showTerminal && (
-        <div className="h-64 shrink-0 border-t border-[var(--border)]">
-          <TerminalPanel sessionId={sessionId} />
-        </div>
+        <TerminalOverlay
+          sessionId={sessionId}
+          onClose={() => setShowTerminal(false)}
+          onConnectionChange={setTerminalConnected}
+        />
       )}
 
       {/* Input area */}

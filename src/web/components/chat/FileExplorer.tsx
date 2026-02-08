@@ -21,6 +21,7 @@ interface FileEntry {
 	name: string;
 	path: string;
 	type: 'file' | 'directory';
+	size?: number;
 }
 
 interface FileExplorerProps {
@@ -217,8 +218,8 @@ function FileContentView({ path, sessionId, onClose }: FileContentViewProps) {
 	const lang = getLangFromExt(ext);
 	const lines = content?.split('\n') || [];
 
-	// Shorten path for display
-	const shortPath = path.replace('/home/agentuity/project/', '');
+	// Shorten path for display — strip leading slash for relative display
+	const shortPath = path.replace(/^\//, '');
 
 	return (
 		<div className="flex flex-col h-full border-t border-[var(--border)]">

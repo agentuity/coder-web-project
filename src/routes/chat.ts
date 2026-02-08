@@ -9,6 +9,7 @@ import { db } from '../db';
 import { chatSessions } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import { getOpencodeClient } from '../opencode';
+import { sandboxListFiles, sandboxReadFile } from '@agentuity/server';
 
 const api = createRouter();
 
@@ -287,42 +288,24 @@ api.get('/:id/files', async (c) => {
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
 
-	const path = c.req.query('path') || '/home/agentuity/project';
+	const path = c.req.query('path') || '/';
 
 	try {
-		// Runtime returns a full Sandbox object from get(), but the type is SandboxInfo.
-		// The actual implementation supports execute() — cast to any for the call.
-		const sandbox = (await c.var.sandbox.get(session.sandboxId)) as any;
-		const result = await sandbox.execute({
-			command: [
-				'find',
-				path,
-				'-maxdepth',
-				'1',
-				'-not',
-				'-path',
-				path,
-				'-printf',
-				'%y %P\n',
-			],
+		const apiClient = (c.var.sandbox as any).client;
+		const result = await sandboxListFiles(apiClient, {
+			sandboxId: session.sandboxId,
+			path: path === '/' ? undefined : path,
 		});
 
-		const output: string =
-			result.stdout ?? result.output ?? (typeof result === 'string' ? result : '');
-		const entries = output
-			.trim()
-			.split('\n')
-			.filter(Boolean)
-			.map((line: string) => {
-				const [type, ...nameParts] = line.split(' ');
-				const name = nameParts.join(' ');
-				return {
-					name,
-					path: `${path}/${name}`.replace(/\/+/g, '/'),
-					type: type === 'd' ? 'directory' : 'file',
-				};
-			})
-			.sort((a: { type: string; name: string }, b: { type: string; name: string }) => {
+		// Transform FileInfo[] into the shape the frontend expects
+		const entries = result.files
+			.map((f) => ({
+				name: f.path.split('/').pop() || f.path,
+				path: path === '/' ? `/${f.path}` : `${path}/${f.path}`,
+				type: f.isDir ? ('directory' as const) : ('file' as const),
+				size: f.size,
+			}))
+			.sort((a, b) => {
 				if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
 				return a.name.localeCompare(b.name);
 			});
@@ -347,19 +330,29 @@ api.get('/:id/files/content', async (c) => {
 	const filePath = c.req.query('path');
 	if (!filePath) return c.json({ error: 'Missing path parameter' }, 400);
 
-	// Security: ensure path is under /home/agentuity
-	if (!filePath.startsWith('/home/agentuity')) {
-		return c.json({ error: 'Access denied: path must be under /home/agentuity' }, 403);
-	}
-
 	try {
-		const sandbox = (await c.var.sandbox.get(session.sandboxId)) as any;
-		const result = await sandbox.execute({
-			command: ['cat', filePath],
+		const apiClient = (c.var.sandbox as any).client;
+		const stream = await sandboxReadFile(apiClient, {
+			sandboxId: session.sandboxId,
+			path: filePath,
 		});
 
-		const content: string =
-			result.stdout ?? result.output ?? (typeof result === 'string' ? result : '');
+		// Read the stream to get content as string
+		const reader = stream.getReader();
+		const chunks: Uint8Array[] = [];
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(value);
+		}
+		const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+		const merged = new Uint8Array(totalLength);
+		let offset = 0;
+		for (const chunk of chunks) {
+			merged.set(chunk, offset);
+			offset += chunk.length;
+		}
+		const content = new TextDecoder().decode(merged);
 		const ext = filePath.split('.').pop() || '';
 
 		return c.json({ path: filePath, content, extension: ext });

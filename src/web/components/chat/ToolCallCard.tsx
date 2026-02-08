@@ -127,7 +127,7 @@ function DiffView({ filePath, oldString, newString }: { filePath: string; oldStr
               theme: 'github-dark',
               disableFileHeader: true,
               diffStyle: 'unified',
-              diffIndicators: 'classic',
+              diffIndicators: 'bars',
             }}
           />
         ) : (

@@ -1,14 +1,18 @@
 /**
- * Terminal panel — uses ghostty-web (WASM terminal emulator)
- * with direct WebSocket connection to Agentuity Ion SSH service,
- * falling back to the WebSocket subprocess proxy.
+ * Terminal overlay — full-screen terminal using ghostty-web (WASM terminal emulator)
+ * with WebSocket connection through the proxy endpoint.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Minimize2, X, Terminal as TerminalIcon } from 'lucide-react';
 import { Button } from '../ui/button';
 
-interface TerminalPanelProps {
+interface TerminalOverlayProps {
 	sessionId: string;
+	onClose: () => void;
+	onConnectionChange?: (connected: boolean) => void;
 }
+
+type TerminalStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 // Lazy-load ghostty WASM module (singleton)
 let ghosttyPromise: Promise<typeof import('ghostty-web')> | null = null;
@@ -22,18 +26,29 @@ function loadGhostty() {
 	return ghosttyPromise;
 }
 
-export function TerminalPanel({ sessionId }: TerminalPanelProps) {
+function getStatusColor(status: TerminalStatus): string {
+	switch (status) {
+		case 'connected':
+			return 'bg-green-500';
+		case 'connecting':
+			return 'bg-yellow-500 animate-pulse';
+		case 'error':
+			return 'bg-red-500';
+		case 'disconnected':
+			return 'bg-gray-500';
+	}
+}
+
+export function TerminalOverlay({ sessionId, onClose, onConnectionChange }: TerminalOverlayProps) {
 	const containerRef = useRef<HTMLDivElement>(null);
 	const terminalRef = useRef<import('ghostty-web').Terminal | null>(null);
 	const fitAddonRef = useRef<import('ghostty-web').FitAddon | null>(null);
 	const wsRef = useRef<WebSocket | null>(null);
 	const resizeCleanupRef = useRef<(() => void) | null>(null);
 	const initRef = useRef(false);
-	const [status, setStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'error'>('connecting');
-	const [error, setError] = useState<string | null>(null);
+	const [status, setStatus] = useState<TerminalStatus>('connecting');
 
 	// Performance: reuse TextEncoder, batch writes
-	const encoderRef = useRef(new TextEncoder());
 	const writeBufferRef = useRef<Uint8Array[]>([]);
 	const flushScheduledRef = useRef(false);
 
@@ -59,107 +74,60 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 		});
 	}, []);
 
-	// Track whether we're connected via Ion (direct) or proxy (subprocess)
-	const isIonModeRef = useRef(false);
+	// Notify parent of connection status changes
+	useEffect(() => {
+		onConnectionChange?.(status === 'connected');
+	}, [status, onConnectionChange]);
 
 	// Connect WebSocket ref (stable across renders)
-	const connectWebSocketRef = useRef<((cols: number, rows: number) => Promise<void>) | null>(null);
+	const connectWebSocketRef = useRef<(() => Promise<void>) | null>(null);
 
-	const connectWebSocket = useCallback(
-		async (cols: number, rows: number) => {
-			try {
-				setStatus('connecting');
-				setError(null);
-				isIonModeRef.current = false;
+	const connectWebSocket = useCallback(async () => {
+		try {
+			setStatus('connecting');
 
-				// First, try to get an SSH token from our backend
-				let tokenRes: Response | null = null;
-				try {
-					tokenRes = await fetch(`/api/sessions/${sessionId}/terminal/token`, {
-						method: 'POST',
-						headers: { 'Content-Type': 'application/json' },
-					});
-				} catch {
-					// Token endpoint unreachable — go straight to fallback
-				}
+			// Connect through the WebSocket proxy
+			const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+			const wsUrl = `${protocol}//${window.location.host}/api/sessions/${sessionId}/terminal`;
 
-				let wsUrl: string;
+			const ws = new WebSocket(wsUrl);
+			ws.binaryType = 'arraybuffer';
+			wsRef.current = ws;
 
-				if (tokenRes?.ok) {
-					// Direct Ion SSH connection
-					isIonModeRef.current = true;
-					const tokenData = (await tokenRes.json()) as { token: string; region: string | null };
-					const region = tokenData.region || '';
-					const isDev =
-						window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-					const ionHost = isDev
-						? 'ion.agentuity.io'
-						: region
-							? `ion-${region}.agentuity.cloud`
-							: 'ion.agentuity.cloud';
-					const url = new URL('/ssh', `wss://${ionHost}`);
-					url.searchParams.set('token', tokenData.token);
-					url.searchParams.set('cols', String(cols));
-					url.searchParams.set('rows', String(rows));
-					wsUrl = url.toString();
-				} else {
-					// Fallback: connect through our WebSocket proxy
-					const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-					wsUrl = `${protocol}//${window.location.host}/api/sessions/${sessionId}/terminal`;
-				}
-
-				const ws = new WebSocket(wsUrl);
-				ws.binaryType = 'arraybuffer';
-				wsRef.current = ws;
-
-				ws.onopen = () => {
-					setStatus('connected');
-					if (terminalRef.current) {
-						terminalRef.current.write('\x1b[32mConnected to SSH session\x1b[0m\r\n');
-					}
-					// Only send Ion binary resize protocol when connected to Ion
-					if (isIonModeRef.current) {
-						const resizeMsg = JSON.stringify({ cols, rows });
-						const encoder = encoderRef.current;
-						const jsonData = encoder.encode(resizeMsg);
-						const message = new Uint8Array(jsonData.length + 1);
-						message[0] = 0x01;
-						message.set(jsonData, 1);
-						ws.send(message);
-					}
-				};
-
-				ws.onmessage = (event) => {
-					if (event.data instanceof ArrayBuffer && terminalRef.current) {
-						writeBufferRef.current.push(new Uint8Array(event.data));
-						scheduleFlush();
-					}
-				};
-
-				ws.onerror = () => {
-					setStatus('error');
-					setError('Connection error');
-				};
-
-				ws.onclose = (event) => {
-					setStatus('disconnected');
-					if (terminalRef.current && event.code !== 1000) {
-						terminalRef.current.write(
-							`\r\n\x1b[33mConnection closed (code: ${event.code})\x1b[0m\r\n`,
-						);
-					}
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : 'Failed to connect';
-				setStatus('error');
-				setError(message);
+			ws.onopen = () => {
+				setStatus('connected');
 				if (terminalRef.current) {
-					terminalRef.current.write(`\r\n\x1b[31mError: ${message}\x1b[0m\r\n`);
+					terminalRef.current.write('\x1b[32mConnected to terminal\x1b[0m\r\n');
 				}
+			};
+
+			ws.onmessage = (event) => {
+				if (event.data instanceof ArrayBuffer && terminalRef.current) {
+					writeBufferRef.current.push(new Uint8Array(event.data));
+					scheduleFlush();
+				}
+			};
+
+			ws.onerror = () => {
+				setStatus('error');
+			};
+
+			ws.onclose = (event) => {
+				setStatus('disconnected');
+				if (terminalRef.current && event.code !== 1000) {
+					terminalRef.current.write(
+						`\r\n\x1b[33mConnection closed (code: ${event.code})\x1b[0m\r\n`,
+					);
+				}
+			};
+		} catch (err) {
+			const message = err instanceof Error ? err.message : 'Failed to connect';
+			setStatus('error');
+			if (terminalRef.current) {
+				terminalRef.current.write(`\r\n\x1b[31mError: ${message}\x1b[0m\r\n`);
 			}
-		},
-		[sessionId, scheduleFlush],
-	);
+		}
+	}, [sessionId, scheduleFlush]);
 
 	connectWebSocketRef.current = connectWebSocket;
 
@@ -170,11 +138,23 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 		}
 		if (terminalRef.current) {
 			terminalRef.current.write('\r\n\x1b[33mReconnecting...\x1b[0m\r\n');
-			const cols = terminalRef.current.cols || 80;
-			const rows = terminalRef.current.rows || 24;
-			connectWebSocketRef.current?.(cols, rows);
 		}
+		connectWebSocketRef.current?.();
 	}, []);
+
+	// Minimize: hide overlay but keep connection alive
+	const handleMinimize = useCallback(() => {
+		onClose();
+	}, [onClose]);
+
+	// Close: disconnect WebSocket AND hide overlay
+	const handleClose = useCallback(() => {
+		if (wsRef.current) {
+			wsRef.current.close();
+			wsRef.current = null;
+		}
+		onClose();
+	}, [onClose]);
 
 	useEffect(() => {
 		if (initRef.current || !containerRef.current) return;
@@ -186,7 +166,7 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 
 				const term = new ghosttyModule.Terminal({
 					cursorBlink: true,
-					fontSize: 13,
+					fontSize: 14,
 					fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Monaco, monospace",
 					theme: {
 						background: '#0a0a0a',
@@ -228,7 +208,8 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 					const entry = entries[0];
 					if (!entry) return;
 					const { width, height } = entry.contentRect;
-					if (Math.abs(width - lastWidth) < 5 && Math.abs(height - lastHeight) < 5) return;
+					if (Math.abs(width - lastWidth) < 5 && Math.abs(height - lastHeight) < 5)
+						return;
 					lastWidth = width;
 					lastHeight = height;
 
@@ -238,7 +219,7 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 							// Connect WebSocket on first valid size
 							if (!wsConnected) {
 								wsConnected = true;
-								connectWebSocketRef.current?.(term.cols, term.rows);
+								connectWebSocketRef.current?.();
 							}
 						});
 					}
@@ -246,38 +227,14 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 				resizeObserver.observe(containerRef.current!);
 				resizeCleanupRef.current = () => resizeObserver.disconnect();
 
-				// Terminal input → WebSocket
+				// Terminal input → WebSocket (proxy mode: send as string)
 				term.onData((data: string) => {
 					if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-						if (isIonModeRef.current) {
-							// Ion expects raw encoded bytes
-							const encoded = encoderRef.current.encode(data);
-							wsRef.current.send(encoded);
-						} else {
-							// Proxy mode: send as string (piped directly to stdin)
-							wsRef.current.send(data);
-						}
-					}
-				});
-
-				// Terminal resize → WebSocket
-				term.onResize(({ cols, rows }: { cols: number; rows: number }) => {
-					if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-						if (isIonModeRef.current) {
-							// Ion protocol: 0x01 prefix + JSON resize message
-							const resizeMsg = JSON.stringify({ cols, rows });
-							const jsonData = encoderRef.current.encode(resizeMsg);
-							const message = new Uint8Array(jsonData.length + 1);
-							message[0] = 0x01;
-							message.set(jsonData, 1);
-							wsRef.current.send(message);
-						}
-						// Proxy mode: no resize support (subprocess handles it)
+						wsRef.current.send(data);
 					}
 				});
 			} catch (err) {
 				console.error('Failed to initialize terminal:', err);
-				setError('Failed to initialize terminal');
 				setStatus('error');
 			}
 		};
@@ -293,42 +250,56 @@ export function TerminalPanel({ sessionId }: TerminalPanelProps) {
 	}, []);
 
 	return (
-		<div className="flex flex-col h-full bg-[#0a0a0a]">
-			{/* Status bar */}
-			<div className="flex items-center gap-2 px-3 py-1 border-b border-zinc-800 bg-zinc-900">
-				<div
-					className={`h-2 w-2 rounded-full ${
-						status === 'connected'
-							? 'bg-green-500'
-							: status === 'connecting'
-								? 'bg-yellow-500 animate-pulse'
-								: status === 'error'
-									? 'bg-red-500'
-									: 'bg-gray-500'
-					}`}
-				/>
-				<span className="text-[10px] text-zinc-400">
+		<div className="fixed inset-0 z-50 flex flex-col bg-[#0a0a0a]">
+			{/* Header */}
+			<div className="flex items-center gap-2 h-10 border-b border-zinc-800 bg-zinc-900 px-3">
+				<TerminalIcon className="h-4 w-4 text-zinc-400" />
+				<div className={`h-2 w-2 rounded-full ${getStatusColor(status)}`} />
+				<span className="text-xs text-zinc-300">
 					{status === 'connected'
-						? 'Connected'
+						? 'Terminal — Connected'
 						: status === 'connecting'
-							? 'Connecting...'
+							? 'Terminal — Connecting...'
 							: status === 'error'
-								? `Error: ${error}`
-								: 'Disconnected'}
+								? 'Terminal — Error'
+								: 'Terminal — Disconnected'}
 				</span>
-				{(status === 'disconnected' || status === 'error') && (
-					<Button
-						variant="ghost"
-						size="sm"
-						className="h-5 text-[10px] ml-auto text-zinc-400"
-						onClick={handleReconnect}
-					>
-						Reconnect
-					</Button>
-				)}
+				<div className="flex-1" />
+				<Button
+					variant="ghost"
+					size="sm"
+					className="h-7 w-7 p-0 text-zinc-400 hover:text-white"
+					onClick={handleMinimize}
+					title="Minimize"
+				>
+					<Minimize2 className="h-4 w-4" />
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					className="h-7 w-7 p-0 text-zinc-400 hover:text-white"
+					onClick={handleClose}
+					title="Disconnect and close"
+				>
+					<X className="h-4 w-4" />
+				</Button>
 			</div>
-			{/* Terminal container */}
-			<div ref={containerRef} className="flex-1 p-1" />
+			{/* Terminal */}
+			<div ref={containerRef} className="flex-1" />
+			{/* Disconnected overlay */}
+			{status === 'disconnected' && (
+				<div className="absolute inset-0 top-10 flex items-center justify-center bg-black/80">
+					<div className="flex flex-col items-center gap-4">
+						<p className="text-yellow-400 text-sm">Session disconnected</p>
+						<Button variant="outline" size="sm" onClick={handleReconnect}>
+							Reconnect
+						</Button>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }
+
+// Keep backward-compatible export name
+export { TerminalOverlay as TerminalPanel };

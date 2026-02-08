@@ -1,10 +1,7 @@
 /**
  * Terminal routes:
  *
- * POST /api/sessions/:id/terminal/token — returns an SSH token for direct
- *   Ion WebSocket connection from the frontend.
- *
- * GET  /api/sessions/:id/terminal — WebSocket proxy fallback. Spawns
+ * GET  /api/sessions/:id/terminal — WebSocket proxy. Spawns
  *   `agentuity cloud ssh <sandboxId>` and pipes stdin/stdout bidirectionally.
  */
 import { createRouter, websocket } from '@agentuity/runtime';
@@ -16,62 +13,7 @@ import type { Subprocess } from 'bun';
 const api = createRouter();
 
 // ---------------------------------------------------------------------------
-// POST /:id/terminal/token — SSH token endpoint (preferred path)
-// ---------------------------------------------------------------------------
-api.post('/:id/terminal/token', async (c) => {
-	const [session] = await db
-		.select()
-		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
-
-	if (!session) return c.json({ error: 'Session not found' }, 404);
-	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
-
-	try {
-		// Try to retrieve SSH token via the sandbox object first
-		const sandbox = (await (c.var as any).sandbox?.get(session.sandboxId)) as any;
-
-		if (sandbox?.sshToken || sandbox?.ssh?.token) {
-			return c.json({
-				token: sandbox.sshToken || sandbox.ssh.token,
-				region: sandbox.region ?? null,
-			});
-		}
-
-		// Fall back to the Agentuity platform API
-		const apiUrl = process.env.AGENTUITY_API_URL || 'https://api.agentuity.cloud';
-		const apiToken = process.env.AGENTUITY_API_KEY || process.env.AGENTUITY_TOKEN || '';
-
-		const tokenRes = await fetch(`${apiUrl}/ssh/token`, {
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-				Authorization: `Bearer ${apiToken}`,
-			},
-			body: JSON.stringify({ sandboxId: session.sandboxId }),
-		});
-
-		if (!tokenRes.ok) {
-			const text = await tokenRes.text();
-			return c.json({ error: 'Failed to get SSH token', details: text }, 500);
-		}
-
-		const tokenData = (await tokenRes.json()) as {
-			success: boolean;
-			data?: { token: string; region: string | null };
-		};
-		if (!tokenData.success || !tokenData.data) {
-			return c.json({ error: 'SSH token request failed' }, 500);
-		}
-
-		return c.json(tokenData.data);
-	} catch (error) {
-		return c.json({ error: 'Failed to get SSH token', details: String(error) }, 500);
-	}
-});
-
-// ---------------------------------------------------------------------------
-// GET /:id/terminal — WebSocket proxy fallback
+// GET /:id/terminal — WebSocket proxy
 // ---------------------------------------------------------------------------
 api.get(
 	'/:id/terminal',
