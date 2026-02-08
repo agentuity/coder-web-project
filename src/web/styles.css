@@ -85,4 +85,15 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
 }
 
+/* Shiki dual theme support for file viewer */
+html.dark .shiki,
+html.dark .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}
 
+html:not(.dark) .shiki,
+html:not(.dark) .shiki span {
+  color: var(--shiki-light) !important;
+  background-color: var(--shiki-light-bg) !important;
+}
