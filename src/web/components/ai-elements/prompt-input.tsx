@@ -1,0 +1,146 @@
+import {
+	CornerDownLeftIcon,
+	Loader2Icon,
+	SquareIcon,
+	XIcon,
+} from 'lucide-react';
+import type { ComponentProps, FormEvent, HTMLAttributes, ReactNode } from 'react';
+import { createContext, useContext } from 'react';
+import { Button } from '../ui/button';
+import { Textarea } from '../ui/textarea';
+import { cn } from '../../lib/utils';
+
+export type PromptInputMessage = {
+	text: string;
+};
+
+export type PromptInputProps = Omit<
+	HTMLAttributes<HTMLFormElement>,
+	'onSubmit'
+> & {
+	onSubmit: (message: PromptInputMessage, event: FormEvent<HTMLFormElement>) =>
+		| void
+		| Promise<void>;
+};
+
+const PromptInputContext = createContext<boolean>(false);
+
+export const PromptInputProvider = ({ children }: { children: ReactNode }) => (
+	<PromptInputContext.Provider value>{children}</PromptInputContext.Provider>
+);
+
+export const usePromptInputProvider = () => useContext(PromptInputContext);
+
+export const PromptInput = ({
+	className,
+	onSubmit,
+	children,
+	...props
+}: PromptInputProps) => {
+	const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault();
+		const formData = new FormData(event.currentTarget);
+		const text = (formData.get('message') as string) || '';
+		void onSubmit({ text }, event);
+	};
+
+	return (
+		<form
+			className={cn('w-full', className)}
+			onSubmit={handleSubmit}
+			{...props}
+		>
+			<div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
+				{children}
+			</div>
+		</form>
+	);
+};
+
+export type PromptInputTextareaProps = ComponentProps<typeof Textarea>;
+
+export const PromptInputTextarea = ({
+	className,
+	placeholder = 'Send a message...',
+	onKeyDown,
+	...props
+}: PromptInputTextareaProps) => {
+	const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
+		event
+	) => {
+		if (event.key === 'Enter' && !event.shiftKey) {
+			event.preventDefault();
+			event.currentTarget.form?.requestSubmit();
+			return;
+		}
+		onKeyDown?.(event);
+	};
+
+	return (
+		<Textarea
+			className={cn(
+				'min-h-[3rem] resize-none border-0 text-sm shadow-none focus-visible:ring-0',
+				className
+			)}
+			name="message"
+			onKeyDown={handleKeyDown}
+			placeholder={placeholder}
+			rows={1}
+			{...props}
+		/>
+	);
+};
+
+export type PromptInputFooterProps = HTMLAttributes<HTMLDivElement>;
+
+export const PromptInputFooter = ({
+	className,
+	...props
+}: PromptInputFooterProps) => (
+	<div
+		className={cn('flex items-center justify-between gap-2 px-3 pb-2', className)}
+		{...props}
+	/>
+);
+
+export type PromptInputSubmitStatus = 'ready' | 'submitted' | 'streaming' | 'error';
+
+export type PromptInputSubmitProps = ComponentProps<typeof Button> & {
+	status?: PromptInputSubmitStatus;
+	onStop?: () => void;
+};
+
+export const PromptInputSubmit = ({
+	className,
+	variant = 'default',
+	status = 'ready',
+	onStop,
+	children,
+	...props
+}: PromptInputSubmitProps) => {
+	let Icon = <CornerDownLeftIcon className="h-4 w-4" />;
+
+	if (status === 'submitted') {
+		Icon = <Loader2Icon className="h-4 w-4 animate-spin" />;
+	} else if (status === 'streaming') {
+		Icon = <SquareIcon className="h-4 w-4" />;
+	} else if (status === 'error') {
+		Icon = <XIcon className="h-4 w-4" />;
+	}
+
+	const isStreaming = status === 'streaming' && onStop;
+
+	return (
+		<Button
+			aria-label="Submit"
+			className={cn('h-9 w-9', className)}
+			onClick={isStreaming ? onStop : props.onClick}
+			size="icon"
+			type={isStreaming ? 'button' : 'submit'}
+			variant={isStreaming ? 'destructive' : variant}
+			{...props}
+		>
+			{children ?? Icon}
+		</Button>
+	);
+};

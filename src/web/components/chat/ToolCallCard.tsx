@@ -1,9 +1,15 @@
-import { useState, useMemo } from 'react';
-import { ChevronDown, ChevronRight, Loader2, CheckCircle2, XCircle, Clock, Wrench } from 'lucide-react';
-import { Badge } from '../ui/badge';
+import { useMemo } from 'react';
 import type { ToolPart } from '../../types/opencode';
 import { FileDiff as PierreDiff } from '@pierre/diffs/react';
 import { parseDiffFromFile } from '@pierre/diffs';
+import {
+	Tool,
+	ToolContent,
+	ToolHeader,
+	ToolInput,
+	ToolOutput,
+} from '../ai-elements/tool';
+import type { ToolState, ToolStatus } from '../ai-elements/tool';
 
 interface ToolCallCardProps {
   part: ToolPart;
@@ -11,21 +17,6 @@ interface ToolCallCardProps {
 
 function getToolDisplayName(tool: string): string {
   return tool.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
-}
-
-function getStatusInfo(status: string) {
-  switch (status) {
-    case 'pending':
-      return { icon: Clock, color: 'text-yellow-500', label: 'Pending', animate: false };
-    case 'running':
-      return { icon: Loader2, color: 'text-blue-500', label: 'Running', animate: true };
-    case 'completed':
-      return { icon: CheckCircle2, color: 'text-green-500', label: 'Completed', animate: false };
-    case 'error':
-      return { icon: XCircle, color: 'text-red-500', label: 'Error', animate: false };
-    default:
-      return { icon: Wrench, color: 'text-[var(--muted-foreground)]', label: status, animate: false };
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +133,7 @@ function BashView({ command, output }: { command: string; output?: string }) {
   return (
     <div className="px-3 py-2 space-y-2">
       {/* Command */}
-      <div className="rounded-md bg-[#1a1a2e] border border-[var(--border)] px-3 py-2 font-mono text-xs text-green-400 whitespace-pre-wrap break-all">
+      <div className="rounded-md bg-[var(--muted)] border border-[var(--border)] px-3 py-2 font-mono text-xs text-green-400 dark:text-green-400 whitespace-pre-wrap break-all">
         <span className="select-none text-[var(--muted-foreground)] mr-1">$</span>
         {command}
       </div>
@@ -171,14 +162,13 @@ function WriteView({ filePath, content, output }: { filePath: string; content: s
         <span className="ml-auto text-[10px]">{lines.length} lines</span>
       </div>
       <div className="rounded-md border border-[var(--border)] overflow-hidden max-h-64 overflow-auto">
-        <pre className="text-[11px] leading-[1.6] font-mono m-0 px-2 py-1 text-green-400 bg-green-500/5">
-          {/* biome-ignore lint/suspicious/noArrayIndexKey: stable line-number list */}
-          {preview.map((line, i) => (
-            <div key={i} className="whitespace-pre-wrap break-all">
-              <span className="select-none opacity-40 mr-2 inline-block w-5 text-right">{i + 1}</span>
-              {line}
-            </div>
-          ))}
+		<pre className="text-[11px] leading-[1.6] font-mono m-0 px-2 py-1 text-green-400 bg-green-500/5">
+			{preview.map((line, i) => (
+				<div key={`${i}-${line}`} className="whitespace-pre-wrap break-all">
+					<span className="select-none opacity-40 mr-2 inline-block w-5 text-right">{i + 1}</span>
+					{line}
+				</div>
+			))}
           {truncated && (
             <div className="text-[var(--muted-foreground)] italic mt-1">… {lines.length - 20} more lines</div>
           )}
@@ -242,23 +232,26 @@ function DefaultView({ input, output }: { input: Record<string, unknown>; output
 // ---------------------------------------------------------------------------
 
 export function ToolCallCard({ part }: ToolCallCardProps) {
-  const [expanded, setExpanded] = useState(false);
-  const statusInfo = getStatusInfo(part.state.status);
-  const StatusIcon = statusInfo.icon;
-
-  const title = ('title' in part.state && part.state.title) ? part.state.title : getToolDisplayName(part.tool);
-  const duration = ('time' in part.state && part.state.time && 'end' in part.state.time)
-    ? (((part.state.time as { start: number; end: number }).end - part.state.time.start) / 1000).toFixed(1)
-    : null;
+	const title = ('title' in part.state && part.state.title) ? part.state.title : getToolDisplayName(part.tool);
+	const duration = ('time' in part.state && part.state.time && 'end' in part.state.time)
+		? (((part.state.time as { start: number; end: number }).end - part.state.time.start) / 1000).toFixed(1)
+		: null;
 
   const input = part.state.input;
   const output = 'output' in part.state ? part.state.output : undefined;
 
-  // Determine which specialised view to use
-  function renderBody() {
-    if (isEditTool(input)) {
-      return (
-        <>
+	const toolState: ToolState = part.state.status === 'running'
+		? 'partial-call'
+		: part.state.status === 'pending'
+			? 'call'
+			: 'result';
+	const toolStatus = part.state.status as ToolStatus;
+
+	// Determine which specialised view to use
+	function renderBody() {
+		if (isEditTool(input)) {
+			return (
+				<>
           <DiffView filePath={input.filePath} oldString={input.oldString} newString={input.newString} />
           {output && (
             <div className="border-t border-[var(--border)] px-3 py-1">
@@ -277,47 +270,41 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
       return <WriteView filePath={input.filePath} content={input.content} output={output} />;
     }
 
-    if (isReadTool(input)) {
-      return <ReadView filePath={input.filePath} output={output} />;
-    }
+		if (isReadTool(input)) {
+			return <ReadView filePath={input.filePath} output={output} />;
+		}
 
-    // Fallback: raw JSON (original behaviour)
-    return <DefaultView input={input} output={part.state.status === 'completed' ? output : undefined} />;
-  }
+		// Fallback: raw JSON (original behaviour)
+		return (
+			<>
+				<ToolInput input={input} />
+				{part.state.status === 'completed' && (
+					<ToolOutput output={output} />
+				)}
+			</>
+		);
+	}
 
-  return (
-    <div className="border border-[var(--border)] rounded-lg overflow-hidden">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-[var(--accent)] transition-colors"
-      >
-        <StatusIcon className={`h-4 w-4 ${statusInfo.color} ${statusInfo.animate ? 'animate-spin' : ''}`} />
-        <span className="font-medium text-[var(--foreground)] truncate">{title}</span>
-        <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-          {part.tool}
-        </Badge>
-        {duration && (
-          <span className="text-xs text-[var(--muted-foreground)]">{duration}s</span>
-        )}
-        <span className="ml-auto">
-          {expanded ? <ChevronDown className="h-3.5 w-3.5 text-[var(--muted-foreground)]" /> : <ChevronRight className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />}
-        </span>
-      </button>
-      {expanded && (
-        <div className="border-t border-[var(--border)] bg-[var(--muted)]">
-          {renderBody()}
-          {/* Error */}
-          {part.state.status === 'error' && (
-            <div className="border-t border-[var(--border)] px-3 py-2">
-              <div className="text-[10px] font-medium uppercase text-red-500 mb-1">Error</div>
-              <pre className="whitespace-pre-wrap font-mono text-xs text-red-400">
-                {part.state.error}
-              </pre>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+	return (
+		<Tool defaultOpen={part.state.status === 'running' || part.state.status === 'pending'}>
+			<ToolHeader
+				meta={duration ? `${duration}s` : undefined}
+				state={toolState}
+				status={toolStatus}
+				title={title}
+				type={`tool-${part.tool}`}
+			/>
+			<ToolContent className="border-t border-[var(--border)] bg-[var(--muted)]">
+				{renderBody()}
+				{part.state.status === 'error' && (
+					<div className="border-t border-[var(--border)] px-3 py-2">
+						<div className="mb-1 text-[10px] font-medium uppercase text-red-500">Error</div>
+						<pre className="whitespace-pre-wrap font-mono text-xs text-red-400">
+							{part.state.error}
+						</pre>
+					</div>
+				)}
+			</ToolContent>
+		</Tool>
+	);
 }

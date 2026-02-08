@@ -43,7 +43,7 @@ const components = {
     );
   },
   pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
-    <pre className="my-2 overflow-x-auto rounded-lg bg-[#1e1e2e] p-3 text-xs leading-relaxed font-mono" {...props}>
+    <pre className="my-2 overflow-x-auto rounded-lg bg-[var(--muted)] p-3 text-xs leading-relaxed font-mono" {...props}>
       {children}
     </pre>
   ),

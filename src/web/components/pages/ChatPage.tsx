@@ -1,15 +1,43 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2, Send, Square, ListTodo, FileCode, Wifi, WifiOff, Terminal as TerminalIcon } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Copy, FileCode, ListTodo, Loader2, Terminal as TerminalIcon, Wifi, WifiOff } from 'lucide-react';
 import { Button } from '../ui/button';
-import { Textarea } from '../ui/textarea';
 import { Badge } from '../ui/badge';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
-import { MessageList } from '../chat/MessageList';
 import { TodoPanel } from '../chat/TodoPanel';
 import { FileExplorer } from '../chat/FileExplorer';
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
 import { TerminalOverlay } from '../chat/TerminalPanel';
+import type { Message as ChatMessage, Part, ReasoningPart } from '../../types/opencode';
+import { TextPartView } from '../chat/TextPartView';
+import { ToolCallCard } from '../chat/ToolCallCard';
+import { FilePartView } from '../chat/FilePartView';
+import { SubtaskView } from '../chat/SubtaskView';
+import { PermissionCard } from '../chat/PermissionCard';
+import { QuestionCard } from '../chat/QuestionCard';
+import {
+	Conversation,
+	ConversationContent,
+	ConversationEmptyState,
+	ConversationScrollButton,
+} from '../ai-elements/conversation';
+import {
+	Message,
+	MessageActions,
+	MessageAction,
+	MessageContent,
+	MessageResponse,
+	MessageToolbar,
+} from '../ai-elements/message';
+import {
+	PromptInput,
+	PromptInputFooter,
+	PromptInputProvider,
+	PromptInputSubmit,
+	PromptInputTextarea,
+} from '../ai-elements/prompt-input';
+import { Reasoning, ReasoningContent, ReasoningTrigger } from '../ai-elements/reasoning';
+import { Loader } from '../ai-elements/loader';
 
 interface ChatPageProps {
   sessionId: string;
@@ -86,56 +114,23 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
   const [showTodos, setShowTodos] = useState(false);
   const [showChanges, setShowChanges] = useState(false);
-  const [showTerminal, setShowTerminal] = useState(false);
-  const [terminalConnected, setTerminalConnected] = useState(false);
+	const [showTerminal, setShowTerminal] = useState(false);
+	const [terminalConnected, setTerminalConnected] = useState(false);
+	const isBusy = sessionStatus.type === 'busy';
 
   // Derive display label from selected command
   const commandLabel = selectedCommand.replace(/^\//, '');
 
-  // Stick-to-bottom scrolling
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const isAtBottomRef = useRef(true);
-
-  const scrollToBottom = useCallback(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, []);
-
-  // Track if user is at bottom
-  const handleScroll = useCallback(() => {
-    if (scrollRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-      isAtBottomRef.current = scrollHeight - scrollTop - clientHeight < 50;
-    }
-  }, []);
-
-  // Auto-scroll on new messages/parts if at bottom.
-  // We read messages.length inside to trigger on changes while keeping the
-  // linter happy with only scrollToBottom in the dep array. The conditional
-  // on isAtBottomRef gates the actual scroll.
-  const prevCountRef = useRef(0);
-  useEffect(() => {
-    if (messages.length !== prevCountRef.current) {
-      prevCountRef.current = messages.length;
-      if (isAtBottomRef.current) {
-        scrollToBottom();
-      }
-    }
-  });
-
-  // Send message
-  const handleSend = async () => {
-    if (!inputText.trim() || isSending) return;
-    const text = inputText;
-    setInputText('');
-    setIsSending(true);
+	const handleSend = async (text: string) => {
+		if (!text.trim() || isSending || isBusy) return;
+		setInputText('');
+		setIsSending(true);
 
     try {
       // Prepend selected command mode to the message
-      const messageText = selectedCommand === '/agentuity-coder'
-        ? text  // Default mode: send as plain text (OpenCode plugin handles it)
-        : `${selectedCommand} ${text}`;
+		const messageText = selectedCommand === '/agentuity-coder'
+			? text
+			: `${selectedCommand} ${text}`;
 
       await fetch(`/api/sessions/${sessionId}/messages`, {
         method: 'POST',
@@ -161,15 +156,121 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
     }
   };
 
-  // Keyboard handler
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
+	const lastAssistantMessage = useMemo(
+		() => [...messages].reverse().find((message) => message.role === 'assistant'),
+		[messages]
+	);
+	const lastAssistantParts = lastAssistantMessage
+		? getPartsForMessage(lastAssistantMessage.id)
+		: [];
+	const hasStreamingContent = lastAssistantParts.length > 0;
+	const isStreaming = isBusy;
+	const submitDisabled =
+		session.status !== 'active' || (!isBusy && (!inputText.trim() || isSending));
 
-  const isBusy = sessionStatus.type === 'busy';
+	const copyMessage = useCallback(
+		(message: ChatMessage) => {
+			const parts = getPartsForMessage(message.id);
+			const text = parts
+				.filter((part) => part.type === 'text')
+				.map((part) => (part as { text: string }).text)
+				.join('');
+			if (text.trim().length === 0) return;
+			if (navigator?.clipboard?.writeText) {
+				void navigator.clipboard.writeText(text);
+			}
+		},
+		[getPartsForMessage]
+	);
+
+	const renderReasoning = (part: ReasoningPart, message: ChatMessage) => {
+		const duration = part.time.end
+			? Math.max(1, Math.ceil((part.time.end - part.time.start) / 1000))
+			: undefined;
+		const shouldStream = isStreaming && message.id === lastAssistantMessage?.id;
+		return (
+			<Reasoning
+				defaultOpen={shouldStream}
+				duration={duration}
+				isStreaming={shouldStream}
+				key={part.id}
+			>
+				<ReasoningTrigger />
+				<ReasoningContent>{part.text}</ReasoningContent>
+			</Reasoning>
+		);
+	};
+
+	const renderPart = (part: Part, message: ChatMessage) => {
+		switch (part.type) {
+			case 'text':
+				return (
+					<MessageResponse key={part.id}>
+						<TextPartView part={part} />
+					</MessageResponse>
+				);
+			case 'reasoning':
+				return renderReasoning(part, message);
+			case 'tool':
+				return <ToolCallCard key={part.id} part={part} />;
+			case 'file':
+				return <FilePartView key={part.id} part={part} />;
+			case 'subtask':
+				return <SubtaskView key={part.id} part={part} />;
+			case 'agent':
+				return (
+					<div key={part.id} className="text-xs font-medium text-[var(--primary)]">
+						Agent: {part.name}
+					</div>
+				);
+			case 'step-finish':
+				return (
+					<div
+						key={part.id}
+						className="mt-1 border-t border-[var(--border)] pt-1 text-[10px] text-[var(--muted-foreground)]"
+					>
+						Tokens: {part.tokens.input}in / {part.tokens.output}out · Cost: ${part.cost.toFixed(4)}
+					</div>
+				);
+			case 'patch':
+				return (
+					<div key={part.id} className="rounded-lg border border-[var(--border)] px-3 py-2">
+						<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+							<span>Files changed ({part.files.length})</span>
+						</div>
+						<div className="mt-1 space-y-0.5">
+							{part.files.map((file) => (
+								<div key={file} className="text-xs font-mono text-[var(--foreground)]">
+									{file}
+								</div>
+							))}
+						</div>
+					</div>
+				);
+			case 'snapshot':
+				return (
+					<div key={part.id} className="text-[10px] italic text-[var(--muted-foreground)]">
+						{'📸'} Context snapshot saved
+					</div>
+				);
+			case 'compaction':
+				return (
+					<div key={part.id} className="text-[10px] italic text-[var(--muted-foreground)]">
+						{'🗜️'} Context compacted{part.auto ? ' (auto)' : ''}
+					</div>
+				);
+			case 'retry':
+				return (
+					<div key={part.id} className="flex items-center gap-2 text-xs text-yellow-500">
+						<span>Retry attempt {part.attempt}: {part.error.message || part.error.type}</span>
+					</div>
+				);
+			case 'step-start':
+				return null;
+			default:
+				return null;
+		}
+	};
 
   // Show loading state when session isn't ready
   if (session.status !== 'active') {
@@ -185,7 +286,7 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
   }
 
   return (
-    <div className="flex h-full flex-col">
+		<div className="flex h-full flex-col">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-2">
         <div className="flex items-center gap-2">
@@ -267,66 +368,101 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
       </div>
 
       {/* Body: messages + optional todo sidebar */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Messages area */}
-        <div
-          ref={scrollRef}
-          onScroll={handleScroll}
-          className="flex-1 overflow-auto"
-        >
-				{messages.length === 0 && !isBusy && (
-					<div className="flex h-full items-center justify-center">
-						<div className="text-center">
-							{!isConnected && error ? (
-								<>
-									<WifiOff className="h-8 w-8 text-red-500 mx-auto mb-3" />
-									<p className="text-sm font-medium text-[var(--foreground)]">Connection failed</p>
-									<p className="text-xs text-[var(--muted-foreground)] mt-1 mb-3">
-										Unable to connect to the AI agent
-									</p>
-									<Button
-										size="sm"
-										onClick={handleRetry}
-										disabled={isRetrying}
+			<div className="flex flex-1 overflow-hidden">
+				<Conversation className="flex-1">
+					<ConversationContent>
+						{messages.length === 0 && !isBusy ? (
+							<ConversationEmptyState>
+								{!isConnected && error ? (
+									<div className="text-center">
+										<WifiOff className="mx-auto mb-3 h-8 w-8 text-red-500" />
+										<p className="text-sm font-medium text-[var(--foreground)]">
+											Connection failed
+										</p>
+										<p className="mb-3 mt-1 text-xs text-[var(--muted-foreground)]">
+											Unable to connect to the AI agent
+										</p>
+										<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
+											{isRetrying ? (
+												<>
+													<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+													Retrying...
+												</>
+											) : (
+												'Retry Connection'
+											)}
+										</Button>
+									</div>
+								) : (
+									<div className="text-center">
+										<p className="text-sm text-[var(--muted-foreground)]">
+											Start a conversation...
+										</p>
+										<p className="mt-1 text-xs text-[var(--muted-foreground)]">
+											Press Enter to send, Shift+Enter for newline
+										</p>
+									</div>
+								)}
+							</ConversationEmptyState>
+						) : (
+							messages.map((message) => {
+								const parts = getPartsForMessage(message.id);
+								const agent = 'agent' in message ? message.agent : undefined;
+								const errorInfo = 'error' in message ? message.error : undefined;
+
+								return (
+									<Message
+										from={message.role === 'user' ? 'user' : 'assistant'}
+										key={message.id}
 									>
-										{isRetrying ? (
-											<>
-												<Loader2 className="h-3 w-3 mr-1 animate-spin" />
-												Retrying...
-											</>
-										) : (
-											'Retry Connection'
+										<MessageContent>
+											{agent && (
+												<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+													{agent}
+												</div>
+											)}
+											{parts.map((part) => renderPart(part, message))}
+											{errorInfo && (
+												<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+													Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
+												</div>
+											)}
+										</MessageContent>
+										{message.role === 'assistant' && (
+											<MessageToolbar>
+												<MessageActions>
+													<MessageAction
+														label="Copy"
+														onClick={() => copyMessage(message)}
+														title="Copy"
+													>
+														<Copy className="h-3.5 w-3.5" />
+													</MessageAction>
+												</MessageActions>
+											</MessageToolbar>
 										)}
-									</Button>
-								</>
-							) : (
-								<>
-									<p className="text-sm text-[var(--muted-foreground)]">
-										Start a conversation...
-									</p>
-									<p className="text-xs text-[var(--muted-foreground)] mt-1">
-										Press Enter to send, Shift+Enter for newline
-									</p>
-								</>
-							)}
-						</div>
-					</div>
-				)}
-          <MessageList
-            messages={messages}
-            getPartsForMessage={getPartsForMessage}
-            pendingPermissions={pendingPermissions}
-            pendingQuestions={pendingQuestions}
-            sessionId={sessionId}
-          />
-          {/* Busy indicator at bottom */}
-          {isBusy && messages.length > 0 && (
-            <div className="flex items-center gap-2 px-4 py-3 text-sm text-[var(--muted-foreground)]">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Agent is working...
-            </div>
-          )}
-        </div>
+									</Message>
+								);
+							})
+						)}
+
+						{pendingPermissions.map((perm) => (
+							<PermissionCard key={perm.id} request={perm} sessionId={sessionId} />
+						))}
+						{pendingQuestions.map((question) => (
+							<QuestionCard key={question.id} request={question} sessionId={sessionId} />
+						))}
+
+						{isStreaming && !hasStreamingContent && (
+							<Message from="assistant">
+								<MessageContent>
+									<Loader size={16} />
+								</MessageContent>
+							</Message>
+						)}
+					</ConversationContent>
+					<ConversationScrollButton />
+				</Conversation>
 
         {/* Todo sidebar */}
         {showTodos && todos.length > 0 && (
@@ -352,48 +488,36 @@ export function ChatPage({ sessionId, session: initialSession }: ChatPageProps) 
         />
       )}
 
-      {/* Input area */}
-      <div className="border-t border-[var(--border)] p-3">
-        {/* Selectors row */}
-        <div className="flex items-center gap-3 mb-2 px-1">
-          <CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
-          <div className="h-3 w-px bg-[var(--border)]" />
-          <ModelSelector value={selectedModel} onChange={setSelectedModel} />
-        </div>
-        {/* Input row */}
-        <div className="flex gap-2">
-          <Textarea
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Message the agent..."
-            className="flex-1 resize-none text-sm min-h-[2.5rem] max-h-32"
-            rows={1}
-            disabled={session.status !== 'active'}
-          />
-          {isBusy ? (
-            <Button
-              onClick={handleAbort}
-              variant="destructive"
-              size="icon"
-              className="h-auto shrink-0"
-              title="Stop"
-            >
-              <Square className="h-4 w-4" />
-            </Button>
-          ) : (
-            <Button
-              onClick={handleSend}
-              disabled={!inputText.trim() || isSending || session.status !== 'active'}
-              size="icon"
-              className="h-auto shrink-0"
-              title="Send (Enter)"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          )}
-        </div>
-      </div>
+		{/* Input area */}
+		<div className="border-t border-[var(--border)] p-3">
+			<PromptInputProvider>
+				<PromptInput
+					onSubmit={({ text }) => handleSend(text)}
+				>
+					<div className="flex items-center gap-2 px-3 pt-2">
+						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
+						<div className="h-3 w-px bg-[var(--border)]" />
+						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
+					</div>
+					<PromptInputTextarea
+						value={inputText}
+						onChange={(event) => setInputText(event.target.value)}
+						placeholder="Message the agent..."
+						disabled={session.status !== 'active'}
+					/>
+					<PromptInputFooter>
+						<div className="text-[10px] text-[var(--muted-foreground)]">
+							Enter to send · Shift+Enter for new line
+						</div>
+					<PromptInputSubmit
+						disabled={submitDisabled}
+						status={isBusy ? 'streaming' : 'ready'}
+						onStop={handleAbort}
+					/>
+					</PromptInputFooter>
+				</PromptInput>
+			</PromptInputProvider>
+		</div>
     </div>
   );
 }
