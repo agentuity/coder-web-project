@@ -1,386 +1,224 @@
-import { useAnalytics, useAPI } from '@agentuity/react';
-import { type ChangeEvent, Fragment, useCallback, useState } from 'react';
-import './App.css';
+import type React from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { authClient } from './lib/auth-client';
+import { SignIn } from './components/auth/SignIn';
+import { AppShell } from './components/shell/AppShell';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { NewSessionDialog } from './components/sessions/NewSessionDialog';
+import { WorkspacePage } from './components/pages/WorkspacePage';
+import { ChatPage } from './components/pages/ChatPage';
+import { SkillsPage } from './components/pages/SkillsPage';
+import { SourcesPage } from './components/pages/SourcesPage';
+import { SettingsPage } from './components/pages/SettingsPage';
+import { useAPI } from '@agentuity/react';
 
-const WORKBENCH_PATH = process.env.AGENTUITY_PUBLIC_WORKBENCH_PATH;
-const LANGUAGES = ['Spanish', 'French', 'German', 'Chinese'] as const;
-const MODELS = ['gpt-5-nano', 'gpt-5-mini', 'gpt-5'] as const;
-const DEFAULT_TEXT =
-	'Welcome to Agentuity! This translation agent shows what you can build with the platform. It connects to AI models through our gateway, tracks usage with thread state, and runs quality checks automatically. Try translating this text into different languages to see the agent in action, and check the terminal for more details.';
+interface Session {
+  id: string;
+  title: string | null;
+  status: string;
+  agent: string | null;
+  model: string | null;
+  sandboxUrl: string | null;
+  createdAt: string;
+  flagged: boolean | null;
+}
 
 export function App() {
-	const [text, setText] = useState(DEFAULT_TEXT);
-	const [toLanguage, setToLanguage] = useState<(typeof LANGUAGES)[number]>('Spanish');
-	const [model, setModel] = useState<(typeof MODELS)[number]>('gpt-5-nano');
+  const { data: authSession, isPending: authLoading } = authClient.useSession();
+  const user = authSession?.user;
+  // Coerce proxy values to plain strings to prevent React 19 dev mode
+  // from triggering .toString()/.valueOf() on BetterAuth Proxy objects,
+  // which would cause 404 requests to /api/auth/display-name/value-of.
+  const userName = user?.name ? String(user.name) : undefined;
+  const userEmail = user?.email ? String(user.email) : undefined;
+  const hasUser = Boolean(userName || userEmail);
 
-	// RESTful API hooks for translation operations
-	const { data: historyData, refetch: refetchHistory } = useAPI('GET /api/translate/history');
+  const [currentPage, setCurrentPage] = useState<string>('home');
+  const [activeSessionId, setActiveSessionId] = useState<string | undefined>();
+  const [showNewDialog, setShowNewDialog] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('agentuity-theme');
+      if (stored === 'dark' || stored === 'light') return stored;
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return 'light';
+  });
 
-	const { data: translateResult, invoke: translate, isLoading } = useAPI('POST /api/translate');
+  // Apply theme class to <html> and persist
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    localStorage.setItem('agentuity-theme', theme);
+  }, [theme]);
 
-	const { invoke: clearHistory } = useAPI('DELETE /api/translate/history');
+  const handleToggleTheme = useCallback(() => {
+    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
+  }, []);
 
-	const { track } = useAnalytics();
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      // Cmd+N or Ctrl+N — new session
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+        e.preventDefault();
+        setShowNewDialog(true);
+      }
+      // Escape — close dialog
+      if (e.key === 'Escape') {
+        if (showNewDialog) {
+          setShowNewDialog(false);
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [showNewDialog]);
 
-	// Prefer fresh data from translation, fall back to initial fetch
-	const history = translateResult?.history ?? historyData?.history ?? [];
-	const threadId = translateResult?.threadId ?? historyData?.threadId;
+  // Auto-create workspace on first load
+  useEffect(() => {
+    if (!user) return;
+    
+    fetch('/api/workspaces')
+      .then(r => r.json())
+      .then((workspaces: any[]) => {
+        if (workspaces.length > 0) {
+          setWorkspaceId(workspaces[0].id);
+        } else {
+          // Create default workspace
+          fetch('/api/workspaces', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: 'Default Workspace' }),
+          })
+            .then(r => r.json())
+            .then(w => setWorkspaceId(w.id));
+        }
+      });
+  }, [user]);
 
-	const handleTranslate = useCallback(async () => {
-		track('translate', {
-			text,
-			toLanguage,
-			model,
-		});
-		await translate({ text, toLanguage, model });
-	}, [text, toLanguage, model, translate, track]);
+  // Fetch sessions
+  useEffect(() => {
+    if (!workspaceId) return;
+    
+    const fetchSessions = () => {
+      fetch(`/api/workspaces/${workspaceId}/sessions`)
+        .then(r => r.json())
+        .then(s => setSessions(s))
+        .catch(() => {});
+    };
 
-	const handleClearHistory = useCallback(async () => {
-		track('clear_history');
-		await clearHistory();
-		await refetchHistory();
-	}, [clearHistory, refetchHistory, track]);
+    fetchSessions();
+    const interval = setInterval(fetchSessions, 5000);
+    return () => clearInterval(interval);
+  }, [workspaceId]);
 
-	return (
-		<div className="text-white flex font-sans justify-center min-h-screen">
-			<div className="flex flex-col gap-4 max-w-3xl p-16 w-full">
-				{/* Header */}
-				<div className="items-center flex flex-col gap-2 justify-center mb-8 relative text-center">
-					<svg
-						aria-hidden="true"
-						className="h-auto mb-4 w-12"
-						fill="none"
-						height="191"
-						viewBox="0 0 220 191"
-						width="220"
-						xmlns="http://www.w3.org/2000/svg"
-					>
-						<path
-							clipRule="evenodd"
-							d="M220 191H0L31.427 136.5H0L8 122.5H180.5L220 191ZM47.5879 136.5L24.2339 177H195.766L172.412 136.5H47.5879Z"
-							fill="var(--color-cyan-500)"
-							fillRule="evenodd"
-						/>
-						<path
-							clipRule="evenodd"
-							d="M110 0L157.448 82.5H189L197 96.5H54.5L110 0ZM78.7021 82.5L110 28.0811L141.298 82.5H78.7021Z"
-							fill="var(--color-cyan-500)"
-							fillRule="evenodd"
-						/>
-					</svg>
+  const handleNewSession = useCallback(async (data: { repoUrl?: string; prompt?: string }) => {
+    if (!workspaceId) return;
+    setIsCreating(true);
+    try {
+      const res = await fetch(`/api/workspaces/${workspaceId}/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const session = await res.json();
+      setSessions(prev => [session, ...prev]);
+      setActiveSessionId(session.id);
+      setCurrentPage('chat');
+      setShowNewDialog(false);
+    } finally {
+      setIsCreating(false);
+    }
+  }, [workspaceId]);
 
-					<h1 className="text-5xl font-thin">Welcome to Agentuity</h1>
+  const handleSelectSession = useCallback((id: string) => {
+    setActiveSessionId(id);
+    setCurrentPage('chat');
+  }, []);
 
-					<p className="text-gray-400 text-lg">
-						The <span className="italic font-serif">Full-Stack</span> Platform for AI Agents
-					</p>
-				</div>
+  const handleNavigate = useCallback((page: 'skills' | 'sources' | 'settings') => {
+    setActiveSessionId(undefined);
+    setCurrentPage(page);
+  }, []);
 
-				{/* Translate Form */}
-				<div className="bg-black border border-gray-900 text-gray-400 rounded-lg p-8 shadow-2xl flex flex-col gap-6 ">
-					<div className="items-center flex flex-wrap gap-1.5">
-						Translate to
-						<select
-							className="appearance-none bg-transparent border-0 border-b border-dashed border-gray-700 text-white cursor-pointer font-normal outline-none hover:border-b-cyan-400 focus:border-b-cyan-400 -mb-0.5"
-							disabled={isLoading}
-							onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-								setToLanguage(e.currentTarget.value as (typeof LANGUAGES)[number])
-							}
-							value={toLanguage}
-						>
-							{LANGUAGES.map((lang) => (
-								<option key={lang} value={lang}>
-									{lang}
-								</option>
-							))}
-						</select>
-						using
-						<select
-							className="appearance-none bg-transparent border-0 border-b border-dashed border-gray-700 text-white cursor-pointer font-normal outline-none hover:border-b-cyan-400 focus:border-b-cyan-400 -mb-0.5"
-							disabled={isLoading}
-							onChange={(e: ChangeEvent<HTMLSelectElement>) =>
-								setModel(e.currentTarget.value as (typeof MODELS)[number])
-							}
-							value={model}
-						>
-							<option value="gpt-5-nano">GPT-5 Nano</option>
-							<option value="gpt-5-mini">GPT-5 Mini</option>
-							<option value="gpt-5">GPT-5</option>
-						</select>
-						<div className="relative group ml-auto z-0">
-							<div className="absolute inset-0 bg-linear-to-r from-cyan-700 via-blue-500 to-purple-600 rounded-lg blur-xl opacity-75 group-hover:blur-2xl group-hover:opacity-100 transition-all duration-700" />
+  const handleFlagSession = useCallback(async (id: string, flagged: boolean) => {
+    try {
+      await fetch(`/api/sessions/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flagged }),
+      });
+      setSessions(prev => prev.map(s => (s.id === id ? { ...s, flagged } : s)));
+    } catch (err) {
+      console.error('Failed to flag session:', err);
+    }
+  }, []);
 
-							<div className="absolute inset-0 bg-cyan-500/50 rounded-lg blur-3xl opacity-50" />
+  // Auth loading state
+  if (authLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[var(--background)]">
+        <div className="text-[var(--muted-foreground)]">Loading...</div>
+      </div>
+    );
+  }
 
-							<button
-								className="relative font-semibold text-white px-4 py-2 bg-gray-950 rounded-lg shadow-2xl cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-								disabled={isLoading}
-								onClick={handleTranslate}
-								type="button"
-								data-loading={isLoading}
-							>
-								{isLoading ? 'Translating' : 'Translate'}
-							</button>
-						</div>
-					</div>
+  // Not authenticated
+  if (!hasUser) {
+    return <SignIn />;
+  }
 
-					<textarea
-						className="text-sm bg-gray-950 border border-gray-800 rounded-md text-white resize-y py-3 px-4 min-h-28 focus:outline-cyan-500 focus:outline-2 focus:outline-offset-2 z-10"
-						disabled={isLoading}
-						onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setText(e.currentTarget.value)}
-						placeholder="Enter text to translate..."
-						rows={4}
-						value={text}
-					/>
+  const activeSession = sessions.find(s => s.id === activeSessionId);
 
-					{/* Translation Result */}
-					{isLoading ? (
-						<div
-							className="text-sm bg-gray-950 border border-gray-800 rounded-md text-gray-600 py-3 px-4"
-							data-loading
-						/>
-					) : !translateResult?.translation ? (
-						<div className="text-sm bg-gray-950 border border-gray-800 rounded-md text-gray-600 py-3 px-4">
-							Translation will appear here
-						</div>
-					) : (
-						<div className="flex flex-col gap-3">
-							<div className="text-sm bg-gray-950 border border-gray-800 rounded-md text-cyan-500 py-3 px-4">
-								{translateResult.translation}
-							</div>
+  // Render current page content
+  let content: React.ReactNode;
+  if (currentPage === 'chat' && activeSession) {
+    content = <ChatPage sessionId={activeSession.id} session={activeSession} />;
+  } else if (currentPage === 'skills' && workspaceId) {
+    content = <SkillsPage workspaceId={workspaceId} />;
+  } else if (currentPage === 'sources' && workspaceId) {
+    content = <SourcesPage workspaceId={workspaceId} />;
+  } else if (currentPage === 'settings' && workspaceId) {
+    content = <SettingsPage workspaceId={workspaceId} />;
+  } else {
+    content = (
+      <WorkspacePage
+        workspaceId={workspaceId ?? undefined}
+        sessions={sessions}
+        onNewSession={() => setShowNewDialog(true)}
+        onSelectSession={handleSelectSession}
+        onNavigate={handleNavigate}
+      />
+    );
+  }
 
-							<div className="text-gray-500 flex text-xs gap-4">
-								{translateResult.tokens > 0 && (
-									<span>
-										Tokens{' '}
-										<strong className="text-gray-400">{translateResult.tokens}</strong>
-									</span>
-								)}
+  return (
+    <>
+      <AppShell
+        userEmail={userEmail}
+        userName={userName}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        currentPage={currentPage}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
+        onNewSession={() => setShowNewDialog(true)}
+        onSelectSession={handleSelectSession}
+        onNavigate={handleNavigate}
+        onFlagSession={handleFlagSession}
+      >
+        <ErrorBoundary>{content}</ErrorBoundary>
+      </AppShell>
 
-								{translateResult.threadId && (
-									<span className="group border-b border-dashed border-gray-700 cursor-help relative transition-colors duration-200 hover:border-b-cyan-400">
-										<span>
-											Thread{' '}
-											<strong className="text-gray-400">
-												{translateResult.threadId.slice(0, 12)}...
-											</strong>
-										</span>
-
-										{/* Pop-up */}
-										<div className="group-hover:flex hidden absolute left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-800 rounded-lg p-4 leading-normal z-10 mb-2 shadow-2xl text-left w-72 bottom-full flex-col gap-2">
-											<div className="text-base text-white font-semibold">Thread ID</div>
-
-											<p className="text-gray-400">
-												Your{' '}
-												<strong className="text-gray-200">conversation context</strong>{' '}
-												that persists across requests. All translations share this
-												thread, letting the agent remember history.
-											</p>
-
-											<p className="text-gray-400">
-												Each request gets a unique session ID, but the{' '}
-												<strong className="text-gray-200">thread stays the same</strong>
-												.
-											</p>
-										</div>
-									</span>
-								)}
-
-								{translateResult.sessionId && (
-									<span className="group border-b border-dashed border-gray-700 cursor-help relative transition-colors duration-200 hover:border-b-cyan-400">
-										<span>
-											Session{' '}
-											<strong className="text-gray-400">
-												{translateResult.sessionId.slice(0, 12)}...
-											</strong>
-										</span>
-
-										{/* Pop-up */}
-										<div className="group-hover:flex hidden absolute left-1/2 -translate-x-1/2 -translate-y-2 bg-gray-900 border border-gray-800 rounded-lg p-4 leading-normal z-10 shadow-2xl text-left w-72 bottom-full flex-col gap-2">
-											<div className="text-base text-white font-semibold">
-												Session ID
-											</div>
-
-											<p className="text-gray-400">
-												A <strong className="text-gray-200">unique identifier</strong>{' '}
-												for this specific request. Useful for debugging and tracing
-												individual operations in your agent logs.
-											</p>
-
-											<p className="text-gray-400">
-												Unlike threads, sessions are{' '}
-												<strong className="text-gray-200">unique per request</strong>.
-											</p>
-										</div>
-									</span>
-								)}
-							</div>
-						</div>
-					)}
-				</div>
-
-				<div className="bg-black border border-gray-900 rounded-lg p-8 flex flex-col gap-6">
-					<div className="items-center flex justify-between">
-						<h3 className="text-white text-xl font-normal">Recent Translations</h3>
-
-						{history.length > 0 && (
-							<button
-								className="bg-transparent border border-gray-900 rounded text-gray-500 cursor-pointer text-xs transition-all duration-200 py-1.5 px-3 hover:bg-gray-900 hover:border-gray-700 hover:text-white"
-								onClick={handleClearHistory}
-								type="button"
-							>
-								Clear
-							</button>
-						)}
-					</div>
-
-					<div className="bg-gray-950 rounded-md">
-						{history.length > 0 ? (
-							[...history].reverse().map((entry, index) => (
-								<button
-									key={`${entry.timestamp}-${index}`}
-									type="button"
-									tabIndex={0}
-									className="group items-center grid w-full text-xs gap-3 py-2 px-3 rounded cursor-help relative transition-colors duration-150 hover:bg-gray-900 focus:outline-none grid-cols-[minmax(0,min-content)_auto_1fr_auto] text-left"
-									aria-label={`Translation from ${entry.text} to ${entry.toLanguage}: ${entry.translation}`}
-								>
-									<span className="text-gray-400 truncate">{entry.text}</span>
-
-									<span className="text-gray-700 flex items-center gap-1">
-										→
-										<span className="bg-gray-900 border border-gray-800 rounded text-gray-400 text-center py-0.5 px-1">
-											{entry.toLanguage}
-										</span>
-									</span>
-
-									<span className="text-gray-400 truncate">{entry.translation}</span>
-
-									<span className="text-gray-600">{entry.sessionId.slice(0, 12)}...</span>
-
-									{/* Pop-up */}
-									<div className="group-hover:grid hidden absolute left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-800 rounded-lg p-4 leading-normal z-10 mb-2 shadow-2xl text-left bottom-full gap-2 grid-cols-[auto_1fr_auto]">
-										{[
-											{
-												label: 'Model',
-												value: entry.model,
-												description: null,
-											},
-											{
-												label: 'Tokens',
-												value: entry.tokens,
-												description: null,
-											},
-											{
-												label: 'Thread',
-												value: `${threadId?.slice(0, 12)}...`,
-												description: '(Same for all)',
-											},
-											{
-												label: 'Session',
-												value: `${entry.sessionId.slice(0, 12)}...`,
-												description: '(Unique)',
-											},
-										].map((item) => (
-											<Fragment key={item.label}>
-												<span className="text-gray-500">{item.label}</span>
-												<span className="text-gray-200 font-medium">{item.value}</span>
-												<span className="text-gray-500 text-xs">
-													{item.description}
-												</span>
-											</Fragment>
-										))}
-									</div>
-								</button>
-							))
-						) : (
-							<div className="text-gray-600 text-sm py-2 px-3">History will appear here</div>
-						)}
-					</div>
-				</div>
-
-				<div className="bg-black border border-gray-900 rounded-lg p-8">
-					<h3 className="text-white text-xl font-normal leading-none m-0 mb-6">Next Steps</h3>
-
-					<div className="flex flex-col gap-6">
-						{[
-							{
-								key: 'customize-agent',
-								title: 'Customize your agent',
-								text: (
-									<>
-										Edit <code className="text-white">src/agent/translate/agent.ts</code>{' '}
-										to change how your agent responds.
-									</>
-								),
-							},
-							{
-								key: 'add-routes',
-								title: 'Add new API routes',
-								text: (
-									<>
-										Create new files in <code className="text-white">src/api/</code> to
-										expose more endpoints.
-									</>
-								),
-							},
-							{
-								key: 'update-frontend',
-								title: 'Update the frontend',
-								text: (
-									<>
-										Modify <code className="text-white">src/web/App.tsx</code> to build
-										your custom UI with Tailwind CSS.
-									</>
-								),
-							},
-							WORKBENCH_PATH
-								? {
-										key: 'workbench',
-										title: (
-											<>
-												Try{' '}
-												<a href={WORKBENCH_PATH} className="underline relative">
-													Workbench
-												</a>
-											</>
-										),
-										text: <>Test the translate agent directly in the dev UI.</>,
-									}
-								: null,
-						]
-							.filter((step): step is NonNullable<typeof step> => Boolean(step))
-							.map((step) => (
-								<div key={step.key} className="items-start flex gap-3">
-									<div className="items-center bg-green-950 border border-green-500 rounded flex size-4 shrink-0 justify-center">
-										<svg
-											aria-hidden="true"
-											className="size-2.5"
-											fill="none"
-											height="24"
-											stroke="var(--color-green-500)"
-											strokeLinecap="round"
-											strokeLinejoin="round"
-											strokeWidth="2"
-											viewBox="0 0 24 24"
-											width="24"
-											xmlns="http://www.w3.org/2000/svg"
-										>
-											<path d="M20 6 9 17l-5-5"></path>
-										</svg>
-									</div>
-
-									<div>
-										<h4 className="text-white text-sm font-normal -mt-0.5 mb-0.5">
-											{step.title}
-										</h4>
-
-										<p className="text-gray-400 text-xs">{step.text}</p>
-									</div>
-								</div>
-							))}
-					</div>
-				</div>
-			</div>
-		</div>
-	);
+      <NewSessionDialog
+        isOpen={showNewDialog}
+        onClose={() => setShowNewDialog(false)}
+        onCreate={handleNewSession}
+        isCreating={isCreating}
+      />
+    </>
+  );
 }

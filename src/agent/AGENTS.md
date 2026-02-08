@@ -1,1 +1,4 @@
-See [.agents/agentuity/sdk/agent/AGENTS.md](../../.agents/agentuity/sdk/agent/AGENTS.md) for Agentuity agent development guidelines.
+# Agentuity Coder
+
+This project uses OpenCode servers in Agentuity sandboxes for AI agent execution.
+Agent logic is handled by the @agentuity/opencode plugin running inside OpenCode.

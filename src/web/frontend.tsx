@@ -1,43 +1,40 @@
 /**
- * This file is the entry point for the React app, it sets up the root
- * element and renders the App component to the DOM.
- *
- * It is included in `src/index.html`.
+ * Agentuity Coder — Frontend entry point.
+ * Sets up React providers and renders the app.
  */
-
-import React, { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { AuthProvider, createAuthClient } from '@agentuity/auth/react';
 import { AgentuityProvider } from '@agentuity/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import './styles.css';
 
-function init() {
-	const elem = document.getElementById('root');
-	if (!elem) {
-		throw new Error('Root element not found');
-	}
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 60000,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
 
-	const app = (
-		<StrictMode>
-			<AgentuityProvider>
-				<App />
-			</AgentuityProvider>
-		</StrictMode>
-	);
+const authClient = createAuthClient({
+  baseURL: window.location.origin,
+  basePath: '/api/auth',
+});
 
-	if (import.meta.hot) {
-		// With hot module reloading, `import.meta.hot.data` is persisted.
-		const root = (import.meta.hot.data.root ??= createRoot(elem));
-		root.render(app);
-	} else {
-		// The hot module reloading API is not available in production.
-		createRoot(elem).render(app);
-	}
-}
+const elem = document.getElementById('root');
+if (!elem) throw new Error('Root element not found');
 
-// Wait for DOM to be ready before initializing
-if (document.readyState === 'loading') {
-	document.addEventListener('DOMContentLoaded', init);
-} else {
-	// DOM is already ready
-	init();
-}
+createRoot(elem).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <AgentuityProvider>
+        <AuthProvider authClient={authClient}>
+          <App />
+        </AuthProvider>
+      </AgentuityProvider>
+    </QueryClientProvider>
+  </StrictMode>
+);

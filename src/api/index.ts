@@ -1,44 +1,58 @@
 /**
- * API routes for the translation agent.
- * Routes handle state operations (get/clear history); the agent handles translation.
+ * API routes for Agentuity Coder.
+ * Mounts auth, workspace, session, chat, skills, and sources routes.
  */
-
-import { createRouter, validator } from '@agentuity/runtime';
-import translate, { AgentOutput, type HistoryEntry } from '../agent/translate';
+import { createRouter } from '@agentuity/runtime';
+import { auth, authMiddleware, authRoutes } from '../auth';
+import workspaceRoutes from '../routes/workspaces';
+import sessionRoutes from '../routes/sessions';
+import sessionDetailRoutes from '../routes/session-detail';
+import chatRoutes from '../routes/chat';
+import skillRoutes from '../routes/skills';
+import sourceRoutes from '../routes/sources';
 
 const api = createRouter();
 
-// State subset for history endpoints (derived from AgentOutput)
-export const StateSchema = AgentOutput.pick(['history', 'threadId', 'translationCount']);
+// Auth routes (public — no middleware). Uses mountAuthRoutes for proper cookie handling.
+api.on(['GET', 'POST'], '/auth/*', authRoutes);
 
-// Call the agent to translate text
-api.post('/translate', translate.validator(), async (c) => {
-	const data = c.req.valid('json');
-
-	return c.json(await translate.run(data));
+// Public endpoint: which auth methods are available
+api.get('/auth-methods', (c) => {
+  const hasGoogle = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+  return c.json({
+    google: hasGoogle,
+    email: !hasGoogle,
+  });
 });
 
-// Retrieve translation history
-api.get('/translate/history', validator({ output: StateSchema }), async (c) => {
-	// Routes use c.var.* for Agentuity services (thread, kv, logger); agents use ctx.* directly
-	const history = (await c.var.thread.state.get<HistoryEntry[]>('history')) ?? [];
+// All other routes require authentication
+api.use('/*', authMiddleware);
 
-	return c.json({
-		history,
-		threadId: c.var.thread.id,
-		translationCount: history.length,
-	});
+// GET /api/me — current authenticated user
+api.get('/me', async (c) => {
+  const session = c.get('session');
+  const user = c.get('user');
+  return c.json({ user, session });
 });
 
-// Clear translation history
-api.delete('/translate/history', validator({ output: StateSchema }), async (c) => {
-	await c.var.thread.state.delete('history');
+// Workspace routes
+api.route('/workspaces', workspaceRoutes);
 
-	return c.json({
-		history: [],
-		threadId: c.var.thread.id,
-		translationCount: 0,
-	});
-});
+// Session routes (nested under workspaces)
+api.route('/workspaces/:wid/sessions', sessionRoutes);
+
+// Individual session operations
+api.route('/sessions', sessionDetailRoutes);
+
+// Chat routes (nested under sessions)
+api.route('/sessions', chatRoutes);
+
+// Skills routes (nested under workspaces + standalone)
+api.route('/workspaces/:wid/skills', skillRoutes);
+api.route('/skills', skillRoutes);
+
+// Sources routes (nested under workspaces + standalone)
+api.route('/workspaces/:wid/sources', sourceRoutes);
+api.route('/sources', sourceRoutes);
 
 export default api;

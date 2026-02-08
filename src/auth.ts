@@ -1,76 +1,45 @@
 /**
  * Agentuity Auth configuration.
  *
- * This is the single source of truth for authentication in this project.
- * All auth tables are stored in your Postgres database.
+ * - With GOOGLE_CLIENT_ID/SECRET → Google OAuth (production)
+ * - Without them → email/password fallback (local dev)
  */
+import { createAuth, createSessionMiddleware, createApiKeyMiddleware, mountAuthRoutes } from '@agentuity/auth';
 
-import {
-	createAuth,
-	createSessionMiddleware,
-	createApiKeyMiddleware,
-} from '@agentuity/auth';
-
-/**
- * Database URL for authentication.
- *
- * Set via DATABASE_URL environment variable.
- * Get yours from: `agentuity cloud database list --region use --json`
- */
 const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) throw new Error('DATABASE_URL environment variable is required');
 
-if (!DATABASE_URL) {
-	throw new Error('DATABASE_URL environment variable is required for authentication');
-}
+const BASE_URL = process.env.AGENTUITY_CLOUD_BASE_URL || process.env.AGENTUITY_BASE_URL || process.env.BETTER_AUTH_URL;
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
+const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
+const hasGoogle = Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
 
-/**
- * Agentuity Auth instance with sensible defaults.
- *
- * Defaults:
- * - basePath: '/api/auth'
- * - emailAndPassword: { enabled: true }
- * - Uses AGENTUITY_AUTH_SECRET env var for signing
- *
- * Default plugins included:
- * - organization (multi-tenancy)
- * - jwt (token signing)
- * - bearer (API auth)
- * - apiKey (programmatic access)
- */
 export const auth = createAuth({
-	// Simplest setup: just provide the connection string
-	// We create pg pool + Drizzle internally with joins enabled
-	connectionString: DATABASE_URL,
-	// All options below have sensible defaults and can be omitted:
-	// secret: process.env.AGENTUITY_AUTH_SECRET, // auto-resolved from env
-	// basePath: '/api/auth', // default
-	// emailAndPassword: { enabled: true }, // default
+  ...(BASE_URL ? { baseURL: BASE_URL } : {}),
+  connectionString: DATABASE_URL,
+  emailAndPassword: { enabled: !hasGoogle },
+  // In dev mode (no Google creds), allow any origin so Tailscale/tunnels work
+  ...(!hasGoogle ? {
+    trustedOrigins: (request?: Request) => {
+      if (request) {
+        const origin = request.headers.get('origin');
+        if (origin) return [origin];
+      }
+      return ['http://localhost:3500'];
+    },
+  } : {}),
+  ...(hasGoogle ? {
+    socialProviders: {
+      google: {
+        clientId: GOOGLE_CLIENT_ID!,
+        clientSecret: GOOGLE_CLIENT_SECRET!,
+      },
+    },
+  } : {}),
 });
 
-/**
- * Session middleware - validates cookies/bearer tokens.
- * Use for routes that require authentication.
- */
 export const authMiddleware = createSessionMiddleware(auth);
-
-/**
- * Optional auth middleware - allows anonymous access.
- * Sets ctx.auth = null for unauthenticated requests.
- */
 export const optionalAuthMiddleware = createSessionMiddleware(auth, { optional: true });
-
-/**
- * API key middleware for programmatic access.
- * Use for webhook endpoints or external integrations.
- */
 export const apiKeyMiddleware = createApiKeyMiddleware(auth);
-
-/**
- * Optional API key middleware - continues without auth if no API key present.
- */
-export const optionalApiKeyMiddleware = createApiKeyMiddleware(auth, { optional: true });
-
-/**
- * Type export for end-to-end type safety.
- */
+export const authRoutes = mountAuthRoutes(auth);
 export type Auth = typeof auth;

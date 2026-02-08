@@ -1,0 +1,154 @@
+/**
+ * Sandbox lifecycle management for OpenCode servers.
+ * Each chat session gets its own sandbox with an OpenCode server.
+ */
+
+const OPENCODE_PORT = 4096;
+const OPENCODE_RUNTIME = 'opencode:latest';
+
+export interface SandboxConfig {
+  repoUrl?: string;
+  opencodeConfigJson: string;
+  env?: Record<string, string>;
+}
+
+export interface SandboxContext {
+  sandbox: {
+    create: (opts: any) => Promise<any>;
+    get: (id: string) => Promise<any>;
+    destroy: (id: string) => Promise<void>;
+  };
+  logger: {
+    info: (...args: any[]) => void;
+    warn: (...args: any[]) => void;
+    error: (...args: any[]) => void;
+  };
+}
+
+/**
+ * Create a new sandbox with OpenCode server.
+ * Returns sandbox ID and URL once the server is healthy.
+ */
+export async function createSandbox(
+  ctx: SandboxContext,
+  config: SandboxConfig,
+): Promise<{ sandboxId: string; sandboxUrl: string }> {
+  ctx.logger.info('Creating sandbox with OpenCode server...');
+
+  // 1. Create the sandbox with org-level secrets for provider API keys.
+  //    Uses Agentuity ${secret:KEY} interpolation to inject org secrets.
+  const sandbox = await ctx.sandbox.create({
+    runtime: OPENCODE_RUNTIME,
+    network: { enabled: true, port: OPENCODE_PORT },
+    resources: { memory: '2Gi', cpu: '2000m' },
+    timeout: { idle: '2h' },
+    env: {
+      ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
+      OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      ...(config.env || {}),
+    },
+    dependencies: ['git', 'gh'],
+  });
+
+  const sandboxId = sandbox.id as string;
+  ctx.logger.info(`Sandbox created: ${sandboxId}`);
+
+  try {
+    // 2. Write opencode.json config
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        `cat > /home/agentuity/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
+      ],
+    });
+
+    // 3. Clone repo if specified
+    if (config.repoUrl) {
+      const repoName = config.repoUrl.split('/').pop()?.replace('.git', '') || 'project';
+      await sandbox.execute({
+        command: [
+          'bash', '-c',
+          `cd /home/agentuity && git clone ${config.repoUrl} ${repoName}`,
+        ],
+      });
+    } else {
+      // Create a default project directory
+      await sandbox.execute({
+        command: ['bash', '-c', 'mkdir -p /home/agentuity/project'],
+      });
+    }
+
+    // 4. Start OpenCode server
+    const workDir = config.repoUrl
+      ? `/home/agentuity/${config.repoUrl.split('/').pop()?.replace('.git', '') || 'project'}`
+      : '/home/agentuity/project';
+
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        `cd ${workDir} && cp /home/agentuity/opencode.json . && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
+      ],
+    });
+
+    // 5. Wait for health check
+    ctx.logger.info('Waiting for OpenCode server to be ready...');
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        `for i in $(seq 1 30); do curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1 && exit 0; sleep 1; done; exit 1`,
+      ],
+    });
+
+    // 6. Get sandbox info for URL
+    const sandboxInfo = await ctx.sandbox.get(sandboxId);
+    const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+
+    ctx.logger.info(`OpenCode server ready at ${sandboxUrl}`);
+    return { sandboxId, sandboxUrl };
+  } catch (error) {
+    ctx.logger.error('Failed to setup sandbox, destroying...', { error });
+    try {
+      await ctx.sandbox.destroy(sandboxId);
+    } catch {
+      // Ignore destroy errors
+    }
+    throw error;
+  }
+}
+
+/**
+ * Destroy a sandbox and clean up.
+ */
+export async function destroySandbox(
+  ctx: SandboxContext,
+  sandboxId: string,
+): Promise<void> {
+  ctx.logger.info(`Destroying sandbox: ${sandboxId}`);
+  try {
+    await ctx.sandbox.destroy(sandboxId);
+  } catch (error) {
+    ctx.logger.warn('Failed to destroy sandbox', { sandboxId, error });
+  }
+}
+
+/**
+ * Check if a sandbox's OpenCode server is healthy.
+ */
+export async function checkSandboxHealth(
+  ctx: SandboxContext,
+  sandboxId: string,
+): Promise<boolean> {
+  try {
+    const sandbox = await ctx.sandbox.get(sandboxId);
+    if (!sandbox) return false;
+    // Try a health check via the sandbox
+    await sandbox.execute({
+      command: ['bash', '-c', `curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1`],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export { OPENCODE_PORT };

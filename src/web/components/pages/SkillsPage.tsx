@@ -1,0 +1,244 @@
+import { useCallback, useEffect, useState } from 'react';
+import { Plus, Sparkles, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Button } from '../ui/button';
+import { Card } from '../ui/card';
+import { Badge } from '../ui/badge';
+
+interface Skill {
+	id: string;
+	name: string;
+	description: string | null;
+	content: string;
+	enabled: boolean;
+	createdAt: string;
+}
+
+interface SkillsPageProps {
+	workspaceId: string;
+}
+
+export function SkillsPage({ workspaceId }: SkillsPageProps) {
+	const [skills, setSkills] = useState<Skill[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [showForm, setShowForm] = useState(false);
+	const [editingSkill, setEditingSkill] = useState<Skill | null>(null);
+	const [formData, setFormData] = useState({ name: '', description: '', content: '' });
+	const [saving, setSaving] = useState(false);
+
+	// Fetch skills
+	const fetchSkills = useCallback(async () => {
+		try {
+			const res = await fetch(`/api/workspaces/${workspaceId}/skills`);
+			const data = await res.json();
+			setSkills(Array.isArray(data) ? data : []);
+		} catch {
+			/* ignore */
+		}
+		setLoading(false);
+	}, [workspaceId]);
+
+	useEffect(() => {
+		fetchSkills();
+	}, [fetchSkills]);
+
+	// Create/Update
+	const handleSave = async () => {
+		if (!formData.name.trim() || !formData.content.trim()) return;
+		setSaving(true);
+		try {
+			if (editingSkill) {
+				await fetch(`/api/skills/${editingSkill.id}`, {
+					method: 'PATCH',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(formData),
+				});
+			} else {
+				await fetch(`/api/workspaces/${workspaceId}/skills`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(formData),
+				});
+			}
+			setShowForm(false);
+			setEditingSkill(null);
+			setFormData({ name: '', description: '', content: '' });
+			fetchSkills();
+		} catch {
+			/* ignore */
+		}
+		setSaving(false);
+	};
+
+	// Toggle enabled
+	const handleToggle = async (skill: Skill) => {
+		await fetch(`/api/skills/${skill.id}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ enabled: !skill.enabled }),
+		});
+		fetchSkills();
+	};
+
+	// Delete
+	const handleDelete = async (id: string) => {
+		if (!confirm('Delete this skill?')) return;
+		await fetch(`/api/skills/${id}`, { method: 'DELETE' });
+		fetchSkills();
+	};
+
+	// Start editing
+	const startEdit = (skill: Skill) => {
+		setEditingSkill(skill);
+		setFormData({ name: skill.name, description: skill.description || '', content: skill.content });
+		setShowForm(true);
+	};
+
+	// Cancel form
+	const cancelForm = () => {
+		setShowForm(false);
+		setEditingSkill(null);
+		setFormData({ name: '', description: '', content: '' });
+	};
+
+	return (
+		<div className="p-6 max-w-4xl">
+			{/* Header */}
+			<div className="flex items-center justify-between mb-6">
+				<div className="flex items-center gap-2">
+					<Sparkles className="h-5 w-5 text-[var(--primary)]" />
+					<h2 className="text-xl font-semibold text-[var(--foreground)]">Skills</h2>
+					<span className="text-xs text-[var(--muted-foreground)]">Custom instructions for the AI agent</span>
+				</div>
+				{!showForm && (
+					<Button size="sm" onClick={() => setShowForm(true)}>
+						<Plus className="h-4 w-4 mr-1" />
+						New Skill
+					</Button>
+				)}
+			</div>
+
+			{/* Create/Edit Form */}
+			{showForm && (
+				<Card className="p-4 mb-6 border-[var(--primary)]/30">
+					<h3 className="text-sm font-medium text-[var(--foreground)] mb-3">
+						{editingSkill ? 'Edit Skill' : 'New Skill'}
+					</h3>
+					<div className="space-y-3">
+						<div>
+							<label className="text-xs text-[var(--muted-foreground)] mb-1 block">Name</label>
+							<input
+								type="text"
+								value={formData.name}
+								onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+								className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--foreground)]"
+								placeholder="e.g., Code Style Rules"
+							/>
+						</div>
+						<div>
+							<label className="text-xs text-[var(--muted-foreground)] mb-1 block">Description (optional)</label>
+							<input
+								type="text"
+								value={formData.description}
+								onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+								className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--foreground)]"
+								placeholder="Brief description of what this skill does"
+							/>
+						</div>
+						<div>
+							<label className="text-xs text-[var(--muted-foreground)] mb-1 block">
+								Content (instructions in markdown)
+							</label>
+							<textarea
+								value={formData.content}
+								onChange={(e) => setFormData((prev) => ({ ...prev, content: e.target.value }))}
+								className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] font-mono min-h-[200px] resize-y"
+								placeholder="Write your skill instructions here..."
+							/>
+						</div>
+						<div className="flex gap-2 justify-end">
+							<Button variant="ghost" size="sm" onClick={cancelForm}>
+								Cancel
+							</Button>
+							<Button
+								size="sm"
+								onClick={handleSave}
+								disabled={saving || !formData.name.trim() || !formData.content.trim()}
+							>
+								{saving ? 'Saving...' : editingSkill ? 'Update' : 'Create'}
+							</Button>
+						</div>
+					</div>
+				</Card>
+			)}
+
+			{/* Skills List */}
+			{loading ? (
+				<div className="text-sm text-[var(--muted-foreground)]">Loading skills...</div>
+			) : skills.length === 0 ? (
+				<div className="text-center py-12">
+					<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
+					<p className="text-sm text-[var(--muted-foreground)]">No skills yet</p>
+					<p className="text-xs text-[var(--muted-foreground)] mt-1">
+						Skills are custom instructions injected into the AI agent context
+					</p>
+				</div>
+			) : (
+				<div className="space-y-3">
+					{skills.map((skill) => (
+						<Card key={skill.id} className={`p-4 ${!skill.enabled ? 'opacity-50' : ''}`}>
+							<div className="flex items-start justify-between">
+								<div className="flex-1 min-w-0">
+									<div className="flex items-center gap-2">
+										<h3 className="text-sm font-medium text-[var(--foreground)]">{skill.name}</h3>
+										<Badge variant={skill.enabled ? 'default' : 'secondary'} className="text-[10px]">
+											{skill.enabled ? 'Active' : 'Disabled'}
+										</Badge>
+									</div>
+									{skill.description && (
+										<p className="text-xs text-[var(--muted-foreground)] mt-1">{skill.description}</p>
+									)}
+									<pre className="mt-2 text-xs text-[var(--muted-foreground)] font-mono whitespace-pre-wrap line-clamp-3">
+										{skill.content}
+									</pre>
+								</div>
+								<div className="flex items-center gap-1 ml-4 shrink-0">
+									<Button
+										variant="ghost"
+										size="icon"
+										className="h-7 w-7"
+										onClick={() => handleToggle(skill)}
+										title={skill.enabled ? 'Disable' : 'Enable'}
+									>
+										{skill.enabled ? (
+											<ToggleRight className="h-4 w-4 text-green-500" />
+										) : (
+											<ToggleLeft className="h-4 w-4" />
+										)}
+									</Button>
+									<Button
+										variant="ghost"
+										size="icon"
+										className="h-7 w-7"
+										onClick={() => startEdit(skill)}
+										title="Edit"
+									>
+										<Pencil className="h-3.5 w-3.5" />
+									</Button>
+									<Button
+										variant="ghost"
+										size="icon"
+										className="h-7 w-7 text-red-500"
+										onClick={() => handleDelete(skill.id)}
+										title="Delete"
+									>
+										<Trash2 className="h-3.5 w-3.5" />
+									</Button>
+								</div>
+							</div>
+						</Card>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
