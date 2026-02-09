@@ -134,7 +134,7 @@ export function CodePanel({
 	}, [activeTab, getFileComments]);
 
 	const diffData = useMemo(() => {
-		if (!activeTab || activeTab.kind !== 'diff' || !activeTab.oldContent || !activeTab.newContent) return null;
+		if (!activeTab || activeTab.kind !== 'diff' || activeTab.oldContent === undefined || activeTab.newContent === undefined) return null;
 		const lang = getLangFromPath(activeTab.filePath) as any;
 		return parseDiffFromFile(
 			{ name: activeTab.filePath, contents: activeTab.oldContent, lang },

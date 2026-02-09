@@ -205,7 +205,7 @@ export function Sidebar({
         <div className="space-y-3">
           {isCollapsed ? (
             <div className="space-y-1">
-              {sessions.map(renderSessionRow)}
+              {activeSessions.map(renderSessionRow)}
             </div>
           ) : (
             <>

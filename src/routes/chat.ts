@@ -338,6 +338,9 @@ api.get('/:id/env', async (c) => {
 		}
 
 		const stdoutResp = await fetch(execution.stdoutStreamUrl);
+		if (!stdoutResp.ok) {
+			return c.json({ error: 'Failed to read environment variables' }, 500);
+		}
 		const stdout = await stdoutResp.text();
 
 		const env: Record<string, string> = {};
