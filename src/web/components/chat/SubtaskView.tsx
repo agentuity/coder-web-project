@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Bot, GitBranch, Terminal } from 'lucide-react';
+import { Bot, Terminal } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import {
@@ -19,25 +19,40 @@ interface SubtaskViewProps {
 
 export function SubtaskView({ part }: SubtaskViewProps) {
   const [open, setOpen] = useState(false);
+  const status = (part as { status?: string }).status;
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <button
-          type="button"
-          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--accent)] hover:border-[var(--primary)] cursor-pointer"
-        >
-          <GitBranch className="h-3.5 w-3.5 text-[var(--primary)] shrink-0" />
-          <span className="text-xs font-medium text-[var(--foreground)] truncate max-w-[200px]">
-            {part.description || 'Sub-agent task'}
-          </span>
-          {part.agent && (
-            <Badge variant="secondary" className="text-[10px] ml-1">
-              {part.agent}
-            </Badge>
-          )}
-        </button>
-      </DialogTrigger>
+      <div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-3 space-y-2">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <Bot className="h-3.5 w-3.5 text-[var(--primary)]" />
+            <span className="text-xs font-medium text-[var(--foreground)] truncate">
+              {part.agent || 'Sub-agent'}
+            </span>
+            <span className="text-xs text-[var(--muted-foreground)]">·</span>
+            <span className="text-xs text-[var(--muted-foreground)] truncate">
+              {part.description || 'Sub-agent task'}
+            </span>
+            {status && (
+              <Badge variant="secondary" className="text-[10px] ml-1">
+                {status}
+              </Badge>
+            )}
+          </div>
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-6 text-[10px]">
+              Details
+            </Button>
+          </DialogTrigger>
+        </div>
+        {part.command && (
+          <div className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+            <Terminal className="h-3 w-3" />
+            <span className="truncate">{part.command}</span>
+          </div>
+        )}
+      </div>
       <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col">
         <DialogHeader>
           <div className="flex items-center gap-2">

@@ -9,8 +9,18 @@ import { db } from '../db';
 import { chatSessions } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import { getOpencodeClient } from '../opencode';
-import { sandboxListFiles, sandboxReadFile, sandboxExecute } from '@agentuity/server';
+import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxSetEnv, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
+
+const SANDBOX_HOME = '/home/agentuity';
+
+/** Ensure a sandbox file path is absolute (rooted at /home/agentuity). */
+function toAbsoluteSandboxPath(p: string): string {
+	if (p.startsWith(SANDBOX_HOME)) return p;
+	// Strip leading slash for joining
+	const rel = p.startsWith('/') ? p.slice(1) : p;
+	return `${SANDBOX_HOME}/${rel}`;
+}
 
 const api = createRouter();
 
@@ -54,20 +64,32 @@ api.post('/:id/messages', async (c) => {
 	const body = await c.req.json<{
 		text: string;
 		model?: string;
+		command?: string;
 	}>();
 
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
 
 	try {
-		const [providerID, modelID] = body.model ? body.model.split('/') : [];
-
-		await client.session.promptAsync({
-			path: { id: session.opencodeSessionId },
-			body: {
-				parts: [{ type: 'text' as const, text: body.text }],
-				...(providerID && modelID ? { model: { providerID, modelID } } : {}),
-			},
-		});
+		if (body.command) {
+			// Slash command → use the command endpoint (POST /session/:id/command)
+			await client.session.command({
+				path: { id: session.opencodeSessionId },
+				body: {
+					command: body.command.replace(/^\//, ''),
+					arguments: body.text,
+				},
+			});
+		} else {
+			// Regular chat → use promptAsync
+			const [providerID, modelID] = body.model ? body.model.split('/') : [];
+			await client.session.promptAsync({
+				path: { id: session.opencodeSessionId },
+				body: {
+					parts: [{ type: 'text' as const, text: body.text }],
+					...(providerID && modelID ? { model: { providerID, modelID } } : {}),
+				},
+			});
+		}
 
 		// Auto-title from first message if untitled
 		if (!session.title && body.text) {
@@ -279,6 +301,88 @@ api.post('/:id/questions/:reqId', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/sessions/:id/env — read sandbox environment variables
+// ---------------------------------------------------------------------------
+api.get('/:id/env', async (c) => {
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')!));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const execution = await sandboxExecute(apiClient, {
+			sandboxId: session.sandboxId,
+			options: {
+				command: ['bash', '-c', 'printenv'],
+				timeout: '10s',
+			},
+		});
+
+		if (execution.status !== 'completed' || !execution.stdoutStreamUrl) {
+			return c.json({ error: 'Failed to read environment variables' }, 500);
+		}
+
+		const stdoutResp = await fetch(execution.stdoutStreamUrl);
+		const stdout = await stdoutResp.text();
+
+		const env: Record<string, string> = {};
+		for (const line of stdout.split('\n')) {
+			const trimmed = line.trim();
+			if (!trimmed) continue;
+			const eqIdx = trimmed.indexOf('=');
+			if (eqIdx <= 0) continue;
+			const key = trimmed.slice(0, eqIdx);
+			const value = trimmed.slice(eqIdx + 1);
+			env[key] = value;
+		}
+
+		return c.json({ env });
+	} catch (error) {
+		return c.json({ error: 'Failed to read environment variables', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/sessions/:id/env — update sandbox environment variables
+// ---------------------------------------------------------------------------
+api.put('/:id/env', async (c) => {
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')!));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	const body = await c.req
+		.json<{ env?: Record<string, string | null> }>()
+		.catch(() => ({ env: undefined }));
+	const envPayload = body.env && typeof body.env === 'object' ? body.env : null;
+	if (!envPayload || Object.keys(envPayload).length === 0) {
+		return c.json({ error: 'Missing env payload' }, 400);
+	}
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const result = await sandboxSetEnv(apiClient, {
+			sandboxId: session.sandboxId,
+			env: envPayload,
+		});
+
+		const env: Record<string, string | null> = {};
+		for (const key of Object.keys(envPayload)) {
+			env[key] = result.env[key] ?? null;
+		}
+
+		return c.json({ success: true, env });
+	} catch (error) {
+		return c.json({ error: 'Failed to update environment variables', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
 // GET /api/sessions/:id/files — list files in sandbox directory
 // Uses sandboxExecute with `find` for reliable, deduplicated file listing.
 // ---------------------------------------------------------------------------
@@ -291,7 +395,7 @@ api.get('/:id/files', async (c) => {
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
 
 	const rawPath = c.req.query('path') || '/';
-	const dirPath = rawPath === '/' ? '/home/agentuity' : rawPath;
+	const dirPath = rawPath === '/' ? SANDBOX_HOME : toAbsoluteSandboxPath(rawPath);
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
@@ -303,10 +407,52 @@ api.get('/:id/files', async (c) => {
 					'find',
 					dirPath,
 					'-maxdepth',
-					'1',
+					'3',
 					'-not',
-					'-name',
-					'.',
+					'-path',
+					'*/node_modules/*',
+					'-not',
+					'-path',
+					'*/.git/*',
+					'-not',
+					'-path',
+					'*/.cache/*',
+					'-not',
+					'-path',
+					'*/.bun/*',
+					'-not',
+					'-path',
+					'*/.config/*',
+					'-not',
+					'-path',
+					'*/.local/*',
+					'-not',
+					'-path',
+					'*/.tmp/*',
+					'-not',
+					'-path',
+					'*/.npm/*',
+					'-not',
+					'-path',
+					'*/.yarn/*',
+				'-not',
+				'-path',
+				'*/.oh-my-*',
+				'-not',
+				'-path',
+				'*/dist/*',
+				'-not',
+				'-path',
+				'*/.agentuity/*',
+				'-not',
+				'-path',
+				'*/.next/*',
+				'-not',
+				'-path',
+				'*/__pycache__/*',
+				'-not',
+				'-name',
+				'.',
 					'-printf',
 					'%y %s %p\\n',
 				],
@@ -348,10 +494,6 @@ api.get('/:id/files', async (c) => {
 		const stdoutResp = await fetch(execution.stdoutStreamUrl);
 		const stdout = await stdoutResp.text();
 
-		// Directories to filter at root level for cleanliness
-		const rootFilterSet = new Set(['.git', 'node_modules', '.cache']);
-		const isRoot = dirPath === '/home/agentuity';
-
 		const entries = stdout
 			.split('\n')
 			.filter((line) => line.trim() !== '')
@@ -372,12 +514,7 @@ api.get('/:id/files', async (c) => {
 
 				return { name, path: fullPath, type, size };
 			})
-			.filter((e): e is NonNullable<typeof e> => {
-				if (!e) return false;
-				// Filter noisy directories at root level
-				if (isRoot && rootFilterSet.has(e.name)) return false;
-				return true;
-			})
+			.filter((e): e is NonNullable<typeof e> => Boolean(e))
 			.sort((a, b) => {
 				if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
 				return a.name.localeCompare(b.name);
@@ -400,8 +537,10 @@ api.get('/:id/files/content', async (c) => {
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
 
-	const filePath = c.req.query('path');
-	if (!filePath) return c.json({ error: 'Missing path parameter' }, 400);
+	const rawFilePath = c.req.query('path');
+	if (!rawFilePath) return c.json({ error: 'Missing path parameter' }, 400);
+
+	const filePath = toAbsoluteSandboxPath(rawFilePath);
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
@@ -431,6 +570,40 @@ api.get('/:id/files/content', async (c) => {
 		return c.json({ path: filePath, content, extension: ext });
 	} catch (error) {
 		return c.json({ error: 'Failed to read file', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/sessions/:id/files/content — write file content to sandbox
+// Body: { path: string, content: string }
+// ---------------------------------------------------------------------------
+api.put('/:id/files/content', async (c) => {
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')!));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	const body = await c.req
+		.json<{ path?: string; content?: string }>()
+		.catch(() => ({ path: undefined, content: undefined }));
+	if (!body.path) return c.json({ error: 'Missing path parameter' }, 400);
+	if (typeof body.content !== 'string') return c.json({ error: 'Missing content' }, 400);
+
+	const filePath = toAbsoluteSandboxPath(body.path);
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		await sandboxWriteFiles(apiClient, {
+			sandboxId: session.sandboxId,
+			files: [{ path: filePath, content: Buffer.from(body.content) }],
+		});
+
+		return c.json({ success: true, path: filePath });
+	} catch (error) {
+		console.error('File write error:', error);
+		return c.json({ error: 'Failed to write file', details: String(error) }, 500);
 	}
 });
 

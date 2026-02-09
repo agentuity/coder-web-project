@@ -13,7 +13,7 @@ interface WorkspacePageProps {
 	sessions?: Session[];
 	onNewSession?: () => void;
 	onSelectSession?: (id: string) => void;
-	onNavigate?: (page: 'skills' | 'sources' | 'settings') => void;
+	onNavigate?: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
 }
 
 function getStatusColor(status: string) {

@@ -12,11 +12,18 @@ import {
 	getOpencodeClient,
 } from '../opencode';
 import type { SandboxContext } from '../opencode';
+import {
+	isSandboxHealthy,
+	getCachedHealthTimestamp,
+	setCachedHealthTimestamp,
+	SANDBOX_STATUS_TTL_MS,
+} from '../lib/sandbox-health';
 
 const api = createRouter();
 
 interface CreateSessionBody {
 	repoUrl?: string;
+	branch?: string;
 	prompt?: string;
 	agent?: string;
 	model?: string;
@@ -36,7 +43,7 @@ api.post('/', async (c) => {
 
 	// Generate OpenCode config
 	const opencodeConfig = generateOpenCodeConfig(
-		{},
+		{ model: body.model },
 		workspaceSkills.map((s) => ({ name: s.name, content: s.content, enabled: s.enabled ?? true })),
 		workspaceSources.map((s) => ({
 			name: s.name,
@@ -61,9 +68,9 @@ api.post('/', async (c) => {
 			createdBy: user.id,
 			status: 'creating',
 			title,
-			agent: body.agent || 'build',
-			model: body.model || 'anthropic/claude-sonnet-4-5',
-			metadata: { repoUrl: body.repoUrl },
+			agent: body.agent ?? null,
+			model: body.model ?? null,
+			metadata: { repoUrl: body.repoUrl, branch: body.branch },
 		})
 		.returning();
 
@@ -78,6 +85,7 @@ api.post('/', async (c) => {
 			const sandboxCtx: SandboxContext = { sandbox, logger };
 			const { sandboxId, sandboxUrl } = await createSandbox(sandboxCtx, {
 				repoUrl: body.repoUrl,
+				branch: body.branch,
 				opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
 			});
 
@@ -125,7 +133,7 @@ api.post('/', async (c) => {
 				.update(chatSessions)
 				.set({
 					status: 'error',
-					metadata: { error: String(error) },
+					metadata: { repoUrl: body.repoUrl, branch: body.branch, error: String(error) },
 					updatedAt: new Date(),
 				})
 				.where(eq(chatSessions.id, session!.id));
@@ -143,7 +151,30 @@ api.get('/', async (c) => {
 		.from(chatSessions)
 		.where(eq(chatSessions.workspaceId, workspaceId))
 		.orderBy(desc(chatSessions.createdAt));
-	return c.json(result);
+
+	const now = Date.now();
+	const updatedSessions = await Promise.all(
+		result.map(async (session) => {
+			if (!session.sandboxId || !session.sandboxUrl) return session;
+			if (!['active', 'creating'].includes(session.status)) return session;
+			const lastChecked = getCachedHealthTimestamp(session.id) ?? 0;
+			if (now - lastChecked < SANDBOX_STATUS_TTL_MS) return session;
+
+			setCachedHealthTimestamp(session.id, now);
+			const healthy = await isSandboxHealthy(session.sandboxUrl);
+			if (healthy) return session;
+
+			const [updated] = await db
+				.update(chatSessions)
+				.set({ status: 'terminated', updatedAt: new Date() })
+				.where(eq(chatSessions.id, session.id))
+				.returning();
+
+			return updated ?? { ...session, status: 'terminated' };
+		}),
+	);
+
+	return c.json(updatedSessions);
 });
 
 export default api;

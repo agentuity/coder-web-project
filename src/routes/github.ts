@@ -23,11 +23,12 @@ async function execInSandbox(
 	apiClient: any,
 	sandboxId: string,
 	command: string,
+	workDir: string = PROJECT_DIR,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
 	const execution = await sandboxExecute(apiClient, {
 		sandboxId,
 		options: {
-			command: ['bash', '-c', `cd ${PROJECT_DIR} && ${command}`],
+			command: ['bash', '-c', `cd ${workDir} && ${command}`],
 			timeout: '30s',
 		},
 	});
@@ -45,6 +46,23 @@ async function execInSandbox(
 	}
 
 	return { stdout, stderr, exitCode: execution.exitCode ?? -1 };
+}
+
+function getProjectDir(session: typeof chatSessions.$inferSelect) {
+	const metadata = (session.metadata || {}) as Record<string, unknown>;
+	const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
+	if (!repoUrl) return PROJECT_DIR;
+	const repoName = repoUrl.split('/').pop()?.replace('.git', '');
+	if (!repoName) return PROJECT_DIR;
+	return `/home/agentuity/${repoName}`;
+}
+
+function normalizeGitFile(input: string) {
+	const trimmed = input.trim();
+	if (!trimmed) return '';
+	const renameMatch = trimmed.match(/->\s*(.+)$/);
+	if (renameMatch?.[1]) return renameMatch[1].trim();
+	return trimmed.replace(/^[ MADRCU?!]{1,2}\s+/, '');
 }
 
 /** Look up a session and validate it has a sandbox. */
@@ -70,16 +88,37 @@ api.get('/:id/github/status', async (c) => {
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
+
+		const checkResult = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			'test -d .git && echo "YES" || echo "NO"',
+			projectDir,
+		);
+		const hasRepo = checkResult.stdout.trim() === 'YES';
+		if (!hasRepo) {
+			return c.json({
+				hasRepo: false,
+				branch: null,
+				isDirty: false,
+				changedFiles: [],
+				remotes: [],
+				message: 'No git repository found. Initialize one or clone a repo.',
+			});
+		}
 
 		// Run git commands separated by markers
 		const { stdout, stderr, exitCode } = await execInSandbox(
 			apiClient,
 			session.sandboxId!,
 			'git status --porcelain 2>/dev/null; echo "---SEPARATOR---"; git branch --show-current 2>/dev/null; echo "---SEPARATOR---"; git remote -v 2>/dev/null',
+			projectDir,
 		);
 
 		if (exitCode !== 0 && !stdout.trim()) {
 			return c.json({
+				hasRepo: true,
 				branch: null,
 				isDirty: false,
 				changedFiles: [],
@@ -104,6 +143,7 @@ api.get('/:id/github/status', async (c) => {
 			.map((line) => line.trim());
 
 		return c.json({
+			hasRepo: true,
 			branch,
 			isDirty: changedFiles.length > 0,
 			changedFiles,
@@ -111,6 +151,55 @@ api.get('/:id/github/status', async (c) => {
 		});
 	} catch (error) {
 		return c.json({ error: 'Failed to get git status', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/github/init — initialize a new git repository
+// ---------------------------------------------------------------------------
+api.post('/:id/github/init', async (c) => {
+	const result = await getSession(c.req.param('id')!);
+	if ('error' in result) return c.json({ error: result.error }, result.status);
+	const { session } = result;
+
+	const body = await c.req
+		.json<{ remoteUrl?: string }>()
+		.catch(() => ({} as { remoteUrl?: string }));
+	const remoteUrl = typeof body.remoteUrl === 'string' ? body.remoteUrl.trim() : '';
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
+
+		const { stderr, exitCode } = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			'git init',
+			projectDir,
+		);
+
+		if (exitCode !== 0) {
+			return c.json({ success: false, error: stderr.trim() || 'Failed to initialize repository' }, 400);
+		}
+
+		if (remoteUrl) {
+			const safeRemote = remoteUrl.replace(/'/g, "'\\''");
+			await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				`git remote add origin '${safeRemote}'`,
+				projectDir,
+			);
+			const metadata = (session.metadata || {}) as Record<string, unknown>;
+			await db
+				.update(chatSessions)
+				.set({ metadata: { ...metadata, repoUrl: remoteUrl } })
+				.where(eq(chatSessions.id, session.id));
+		}
+
+		return c.json({ success: true });
+	} catch (error) {
+		return c.json({ error: 'Failed to initialize repository', details: String(error) }, 500);
 	}
 });
 
@@ -132,10 +221,12 @@ api.post('/:id/github/branch', async (c) => {
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
 		const { stdout, stderr, exitCode } = await execInSandbox(
 			apiClient,
 			session.sandboxId!,
 			`git checkout -b '${branchName}'`,
+			projectDir,
 		);
 
 		if (exitCode !== 0) {
@@ -144,6 +235,12 @@ api.post('/:id/github/branch', async (c) => {
 				error: stderr.trim() || 'Failed to create branch',
 			}, 400);
 		}
+
+		const metadata = (session.metadata || {}) as Record<string, unknown>;
+		await db
+			.update(chatSessions)
+			.set({ metadata: { ...metadata, branch: branchName } })
+			.where(eq(chatSessions.id, session.id));
 
 		return c.json({ branch: branchName, success: true });
 	} catch (error) {
@@ -166,12 +263,18 @@ api.post('/:id/github/commit', async (c) => {
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
 
 		// Stage files
 		let addCmd: string;
 		if (body.files && body.files.length > 0) {
-			const safeFiles = body.files.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ');
-			addCmd = `git add ${safeFiles}`;
+			const normalized = body.files.map(normalizeGitFile).filter(Boolean);
+			if (normalized.length === 0) {
+				addCmd = 'git add -A';
+			} else {
+				const safeFiles = normalized.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ');
+				addCmd = `git add ${safeFiles}`;
+			}
 		} else {
 			addCmd = 'git add -A';
 		}
@@ -180,6 +283,7 @@ api.post('/:id/github/commit', async (c) => {
 			apiClient,
 			session.sandboxId!,
 			addCmd,
+			projectDir,
 		);
 
 		if (addExit !== 0) {
@@ -191,13 +295,14 @@ api.post('/:id/github/commit', async (c) => {
 
 		// Write commit message to temp file via single-quoted heredoc (prevents all shell interpretation)
 		const writeMsgCmd = `cat > /tmp/.commit-msg <<'COMMIT_MSG_EOF'\n${body.message.trim()}\nCOMMIT_MSG_EOF`;
-		await execInSandbox(apiClient, session.sandboxId!, writeMsgCmd);
+		await execInSandbox(apiClient, session.sandboxId!, writeMsgCmd, projectDir);
 
 		// Commit using -F to read message from file (no shell interpretation)
 		const { stdout, stderr, exitCode } = await execInSandbox(
 			apiClient,
 			session.sandboxId!,
 			'git commit -F /tmp/.commit-msg',
+			projectDir,
 		);
 
 		if (exitCode !== 0) {
@@ -210,6 +315,21 @@ api.post('/:id/github/commit', async (c) => {
 		// Extract commit hash
 		const hashMatch = stdout.match(/\[[\w/.-]+ ([a-f0-9]+)\]/);
 		const hash = hashMatch ? hashMatch[1] : null;
+
+		const metadata = (session.metadata || {}) as Record<string, unknown>;
+		await db
+			.update(chatSessions)
+			.set({
+				metadata: {
+					...metadata,
+					lastCommit: {
+						hash,
+						message: body.message.trim(),
+						timestamp: new Date().toISOString(),
+					},
+				},
+			})
+			.where(eq(chatSessions.id, session.id));
 
 		return c.json({
 			hash,
@@ -241,12 +361,14 @@ api.post('/:id/github/pr', async (c) => {
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
 
 		// Push the branch
 		const { stderr: pushErr, exitCode: pushExit } = await execInSandbox(
 			apiClient,
 			session.sandboxId!,
 			'git push -u origin HEAD',
+			projectDir,
 		);
 
 		if (pushExit !== 0) {
@@ -258,7 +380,7 @@ api.post('/:id/github/pr', async (c) => {
 
 		// Write PR body to temp file via single-quoted heredoc (prevents all shell interpretation)
 		const writeBodyCmd = `cat > /tmp/.pr-body <<'PR_BODY_EOF'\n${(body.body || '').trim()}\nPR_BODY_EOF`;
-		await execInSandbox(apiClient, session.sandboxId!, writeBodyCmd);
+		await execInSandbox(apiClient, session.sandboxId!, writeBodyCmd, projectDir);
 
 		// Create PR using --body-file for safe body handling, sanitized title and base
 		const prCmd = `gh pr create --title "${sanitizedTitle}" --body-file /tmp/.pr-body --base "${sanitizedBase}"`;
@@ -266,6 +388,7 @@ api.post('/:id/github/pr', async (c) => {
 			apiClient,
 			session.sandboxId!,
 			prCmd,
+			projectDir,
 		);
 
 		if (exitCode !== 0) {
@@ -279,6 +402,20 @@ api.post('/:id/github/pr', async (c) => {
 		const prUrl = stdout.trim();
 		const numberMatch = prUrl.match(/\/pull\/(\d+)/);
 		const prNumber = numberMatch ? parseInt(numberMatch[1]!, 10) : null;
+
+		const metadata = (session.metadata || {}) as Record<string, unknown>;
+		await db
+			.update(chatSessions)
+			.set({
+				metadata: {
+					...metadata,
+					pullRequest: {
+						url: prUrl,
+						number: prNumber,
+					},
+				},
+			})
+			.where(eq(chatSessions.id, session.id));
 
 		return c.json({
 			url: prUrl,
@@ -300,12 +437,14 @@ api.get('/:id/github/diff', async (c) => {
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
 
 		// Show both staged and unstaged diffs
 		const { stdout } = await execInSandbox(
 			apiClient,
 			session.sandboxId!,
 			'git diff HEAD 2>/dev/null || git diff 2>/dev/null',
+			projectDir,
 		);
 
 		return c.json({ diff: stdout });

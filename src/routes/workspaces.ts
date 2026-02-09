@@ -1,5 +1,10 @@
 /**
  * Workspace CRUD routes.
+ *
+ * Workspaces group sessions, skills, and sources per user today.
+ * organizationId currently maps to user.id as a temporary workaround until
+ * full organization support (shared workspaces, teams, org-level settings)
+ * ships.
  */
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
@@ -16,7 +21,8 @@ api.post('/', async (c) => {
 	const [workspace] = await db
 		.insert(workspaces)
 		.values({
-			organizationId: user.id, // Use user ID as org for now
+			// Use user ID as org for now (see notes above).
+			organizationId: user.id,
 			name: body.name,
 			description: body.description,
 		})

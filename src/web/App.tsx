@@ -2,6 +2,7 @@ import type React from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import { authClient } from './lib/auth-client';
 import { SignIn } from './components/auth/SignIn';
+import { ProfilePage } from './components/auth/ProfilePage';
 import { AppShell } from './components/shell/AppShell';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { NewSessionDialog } from './components/sessions/NewSessionDialog';
@@ -31,10 +32,12 @@ interface Session {
   title: string | null;
   status: string;
   agent: string | null;
-  model: string | null;
-  sandboxUrl: string | null;
+	model: string | null;
+	sandboxId: string | null;
+	sandboxUrl: string | null;
   createdAt: string;
   flagged: boolean | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 function AppContent() {
@@ -48,7 +51,7 @@ function AppContent() {
   const userEmail = user?.email ? String(user.email) : undefined;
   const hasUser = Boolean(userName || userEmail);
 
-  const [currentPage, setCurrentPage] = useState<string>('home');
+	const [currentPage, setCurrentPage] = useState<'home' | 'chat' | 'skills' | 'sources' | 'settings' | 'profile'>('home');
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>();
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -130,7 +133,7 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [workspaceId]);
 
-  const handleNewSession = useCallback(async (data: { repoUrl?: string; prompt?: string }) => {
+  const handleNewSession = useCallback(async (data: { repoUrl?: string; branch?: string; prompt?: string }) => {
     if (!workspaceId) return;
     setIsCreating(true);
     try {
@@ -160,10 +163,10 @@ function AppContent() {
     setCurrentPage('chat');
   }, []);
 
-  const handleNavigate = useCallback((page: 'skills' | 'sources' | 'settings') => {
-    setActiveSessionId(undefined);
-    setCurrentPage(page);
-  }, []);
+	const handleNavigate = useCallback((page: 'skills' | 'sources' | 'settings' | 'profile') => {
+		setActiveSessionId(undefined);
+		setCurrentPage(page);
+	}, []);
 
   const handleFlagSession = useCallback(async (id: string, flagged: boolean) => {
     try {
@@ -191,6 +194,27 @@ function AppContent() {
       toast({ type: 'error', message: 'Failed to retry session' });
     }
   }, [toast]);
+
+  const handleDeleteSession = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error('Failed to delete session');
+      }
+      setSessions((prev) => {
+        const updated = prev.filter((session) => session.id !== id);
+        if (activeSessionId === id) {
+          const nextSession = updated[0];
+          setActiveSessionId(nextSession?.id);
+          setCurrentPage(nextSession ? 'chat' : 'home');
+        }
+        return updated;
+      });
+    } catch (error) {
+      console.error('Failed to delete session:', error);
+      toast({ type: 'error', message: 'Failed to delete session' });
+    }
+  }, [activeSessionId, toast]);
 
   const handleForkedSession = useCallback((session: Session) => {
     setSessions(prev => [session, ...prev]);
@@ -228,9 +252,11 @@ function AppContent() {
     content = <SkillsPage workspaceId={workspaceId} />;
   } else if (currentPage === 'sources' && workspaceId) {
     content = <SourcesPage workspaceId={workspaceId} />;
-  } else if (currentPage === 'settings' && workspaceId) {
-    content = <SettingsPage workspaceId={workspaceId} />;
-  } else {
+	} else if (currentPage === 'settings' && workspaceId) {
+		content = <SettingsPage workspaceId={workspaceId} />;
+	} else if (currentPage === 'profile') {
+		content = <ProfilePage />;
+	} else {
     content = (
       <WorkspacePage
         workspaceId={workspaceId ?? undefined}
@@ -257,6 +283,7 @@ function AppContent() {
         onNavigate={handleNavigate}
         onFlagSession={handleFlagSession}
         onRetrySession={handleRetrySession}
+        onDeleteSession={handleDeleteSession}
       >
         <ErrorBoundary>{content}</ErrorBoundary>
       </AppShell>

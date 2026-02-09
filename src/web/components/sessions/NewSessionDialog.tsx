@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
@@ -7,13 +7,17 @@ import { Loader2, X } from 'lucide-react';
 interface NewSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (data: { repoUrl?: string; prompt?: string }) => Promise<void>;
+  onCreate: (data: { repoUrl?: string; branch?: string; prompt?: string }) => Promise<void>;
   isCreating: boolean;
 }
 
 export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating }: NewSessionDialogProps) {
   const [repoUrl, setRepoUrl] = useState('');
+  const [branch, setBranch] = useState('');
   const [prompt, setPrompt] = useState('');
+  const repoId = useId();
+  const branchId = useId();
+  const promptId = useId();
 
   if (!isOpen) return null;
 
@@ -21,9 +25,11 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating }: NewS
     e.preventDefault();
     await onCreate({
       repoUrl: repoUrl || undefined,
+      branch: branch || undefined,
       prompt: prompt || undefined,
     });
     setRepoUrl('');
+    setBranch('');
     setPrompt('');
   };
 
@@ -39,9 +45,9 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating }: NewS
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label htmlFor="repo-url" className="text-sm font-medium text-[var(--foreground)]">Repository URL (optional)</label>
+            <label htmlFor={repoId} className="text-sm font-medium text-[var(--foreground)]">Repository URL (optional)</label>
             <Input
-              id="repo-url"
+              id={repoId}
               value={repoUrl}
               onChange={(e) => setRepoUrl(e.target.value)}
               placeholder="https://github.com/owner/repo"
@@ -53,9 +59,23 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating }: NewS
           </div>
 
           <div>
-            <label htmlFor="initial-prompt" className="text-sm font-medium text-[var(--foreground)]">Initial Prompt (optional)</label>
+            <label htmlFor={branchId} className="text-sm font-medium text-[var(--foreground)]">Branch (optional)</label>
+            <Input
+              id={branchId}
+              value={branch}
+              onChange={(e) => setBranch(e.target.value)}
+              placeholder="main"
+              className="mt-1"
+            />
+            <p className="mt-1 text-xs text-[var(--muted-foreground)]">
+              Checkout a specific branch after cloning.
+            </p>
+          </div>
+
+          <div>
+            <label htmlFor={promptId} className="text-sm font-medium text-[var(--foreground)]">Initial Prompt (optional)</label>
             <Textarea
-              id="initial-prompt"
+              id={promptId}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               placeholder="What would you like to work on?"

@@ -8,6 +8,7 @@ const OPENCODE_RUNTIME = 'opencode:latest';
 
 export interface SandboxConfig {
   repoUrl?: string;
+  branch?: string;
   opencodeConfigJson: string;
   env?: Record<string, string>;
 }
@@ -45,6 +46,8 @@ export async function createSandbox(
     env: {
       ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
       OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      GH_TOKEN: '${secret:GH_TOKEN}',
+      GITHUB_TOKEN: '${secret:GH_TOKEN}',
       ...(config.env || {}),
     },
     dependencies: ['git', 'gh'],
@@ -62,6 +65,14 @@ export async function createSandbox(
       ],
     });
 
+    try {
+      await sandbox.execute({
+        command: ['bash', '-c', 'gh auth setup-git'],
+      });
+    } catch (error) {
+      ctx.logger.warn('gh auth setup-git failed', { error });
+    }
+
     // 3. Clone repo if specified
     if (config.repoUrl) {
       const repoName = config.repoUrl.split('/').pop()?.replace('.git', '') || 'project';
@@ -71,6 +82,18 @@ export async function createSandbox(
           `cd /home/agentuity && git clone ${config.repoUrl} ${repoName}`,
         ],
       });
+
+      if (config.branch) {
+        const sanitizedBranch = config.branch.trim().replace(/[^a-zA-Z0-9._\-/]/g, '-');
+        if (sanitizedBranch) {
+          await sandbox.execute({
+            command: [
+              'bash', '-c',
+              `cd /home/agentuity/${repoName} && git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}'`,
+            ],
+          });
+        }
+      }
     } else {
       // Create a default project directory
       await sandbox.execute({

@@ -1,5 +1,12 @@
 import { pgTable, uuid, text, timestamp, jsonb, boolean } from '@agentuity/drizzle';
 
+/**
+ * Workspaces group sessions, skills, and sources for a single user today.
+ *
+ * Note: organizationId currently maps to user.id as a stopgap until proper
+ * organization support (shared workspaces, teams, and org-level settings)
+ * is implemented.
+ */
 export const workspaces = pgTable('workspaces', {
   id: uuid('id').primaryKey().defaultRandom(),
   organizationId: text('organization_id').notNull(),
@@ -19,8 +26,8 @@ export const chatSessions = pgTable('chat_sessions', {
   sandboxId: text('sandbox_id'),
   sandboxUrl: text('sandbox_url'),
   opencodeSessionId: text('opencode_session_id'),
-  agent: text('agent').default('build'),
-  model: text('model').default('anthropic/claude-sonnet-4-5'),
+	agent: text('agent'),
+	model: text('model'),
   flagged: boolean('flagged').default(false),
   metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

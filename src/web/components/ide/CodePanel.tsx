@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { File as PierreFile, FileDiff as PierreDiff } from '@pierre/diffs/react';
 import {
 	parseDiffFromFile,
@@ -6,7 +6,7 @@ import {
 	type LineAnnotation,
 	type SelectedLineRange,
 } from '@pierre/diffs';
-import { AlertCircle, Check, X } from 'lucide-react';
+import { AlertCircle, Loader2, PencilLine, Save } from 'lucide-react';
 import { FileTabs } from './FileTabs';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -24,7 +24,6 @@ interface CodePanelProps {
 	onAddComment: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
 	getDiffAnnotations: (file: string) => DiffLineAnnotation<{ id: string; comment: string }> [];
 	getFileComments: (file: string) => CodeComment[];
-	onSendMessage?: (text: string) => void;
 }
 
 function getNormalizedRange(range: SelectedLineRange) {
@@ -42,15 +41,23 @@ export function CodePanel({
 	onAddComment,
 	getDiffAnnotations,
 	getFileComments,
-	onSendMessage,
 }: CodePanelProps) {
 	const activeTab = tabs.find((tab) => tab.id === activeId) ?? null;
+	const canEdit = Boolean(
+		activeTab
+		&& activeTab.kind !== 'diff'
+		&& !activeTab.readonly
+		&& activeTab.content !== undefined,
+	);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [isEditing, setIsEditing] = useState(false);
+	const [editContent, setEditContent] = useState('');
+	const [isModified, setIsModified] = useState(false);
+	const [isSaving, setIsSaving] = useState(false);
+	const [saveError, setSaveError] = useState<string | null>(null);
 	const [selectedRange, setSelectedRange] = useState<SelectedLineRange | null>(null);
 	const [commentText, setCommentText] = useState('');
-	const [showReject, setShowReject] = useState(false);
-	const [rejectReason, setRejectReason] = useState('');
 
 	const resetKey = activeTab?.id ?? 'none';
 
@@ -58,14 +65,16 @@ export function CodePanel({
 		if (!resetKey) return;
 		setSelectedRange(null);
 		setCommentText('');
-		setShowReject(false);
-		setRejectReason('');
 		setError(null);
-	}, [resetKey]);
+		setSaveError(null);
+		setIsEditing(false);
+		setEditContent(activeTab?.content ?? '');
+		setIsModified(false);
+	}, [activeTab?.content, resetKey]);
 
 	useEffect(() => {
 		if (!activeTab || activeTab.kind === 'diff') return;
-		if (activeTab.content) return;
+		if (activeTab.content !== undefined) return;
 		let cancelled = false;
 		setLoading(true);
 		setError(null);
@@ -88,6 +97,25 @@ export function CodePanel({
 			cancelled = true;
 		};
 	}, [activeTab, onUpdateTab, sessionId]);
+
+	useEffect(() => {
+		if (!activeTab || activeTab.kind === 'diff') return;
+		if (isEditing) return;
+		setEditContent(activeTab.content ?? '');
+		setIsModified(false);
+		if (activeTab.isModified) {
+			onUpdateTab(activeTab.id, { isModified: false });
+		}
+	}, [activeTab, isEditing, onUpdateTab]);
+
+	useEffect(() => {
+		if (!activeTab || activeTab.kind === 'diff') return;
+		const nextModified = editContent !== (activeTab.content ?? '');
+		setIsModified(nextModified);
+		if (activeTab.isModified !== nextModified) {
+			onUpdateTab(activeTab.id, { isModified: nextModified });
+		}
+	}, [activeTab, editContent, onUpdateTab]);
 
 	const fileAnnotations = useMemo(() => {
 		if (!activeTab || activeTab.kind === 'diff') return [] as LineAnnotation<{ id: string; comment: string }>[];
@@ -123,21 +151,38 @@ export function CodePanel({
 		setSelectedRange(null);
 	};
 
-	const handleAccept = () => {
-		if (!activeTab || activeTab.kind !== 'diff' || !onSendMessage) return;
-		onSendMessage(`I accept the changes to ${activeTab.filePath}.`);
-	};
+	const handleSave = useCallback(async () => {
+		if (!activeTab || activeTab.kind === 'diff' || activeTab.readonly) return;
+		if (!isModified) return;
+		setIsSaving(true);
+		setSaveError(null);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/files/content`, {
+				method: 'PUT',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ path: activeTab.filePath, content: editContent }),
+			});
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			onUpdateTab(activeTab.id, { content: editContent, isModified: false });
+			setIsModified(false);
+		} catch {
+			setSaveError('Failed to save file');
+		} finally {
+			setIsSaving(false);
+		}
+	}, [activeTab, editContent, isModified, onUpdateTab, sessionId]);
 
-	const handleReject = () => {
-		if (!activeTab || activeTab.kind !== 'diff' || !onSendMessage) return;
-		const reason = rejectReason.trim();
-		const message = reason
-			? `I reject the changes to ${activeTab.filePath}, please try again because ${reason}.`
-			: `I reject the changes to ${activeTab.filePath}, please try again.`;
-		onSendMessage(message);
-		setShowReject(false);
-		setRejectReason('');
-	};
+	useEffect(() => {
+		if (!isEditing || !activeTab || activeTab.kind === 'diff') return;
+		const handler = (event: KeyboardEvent) => {
+			const isSave = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's';
+			if (!isSave) return;
+			event.preventDefault();
+			void handleSave();
+		};
+		window.addEventListener('keydown', handler);
+		return () => window.removeEventListener('keydown', handler);
+	}, [activeTab, handleSave, isEditing]);
 
 	return (
 		<div className="flex h-full min-h-0 flex-col">
@@ -159,39 +204,8 @@ export function CodePanel({
 							<span className="font-mono truncate" title={activeTab.filePath}>{activeTab.filePath}</span>
 							<Badge variant="secondary" className="text-[10px]">Diff</Badge>
 						</div>
-						{onSendMessage && (
-							<div className="flex items-center gap-2">
-								<Button size="sm" variant="secondary" onClick={handleAccept} className="h-7 text-xs">
-									<Check className="h-3 w-3 mr-1" />
-									Accept
-								</Button>
-								<Button size="sm" variant="ghost" onClick={() => setShowReject((prev) => !prev)} className="h-7 text-xs">
-									<X className="h-3 w-3 mr-1" />
-									Reject
-								</Button>
-							</div>
-						)}
-					</div>
-					{showReject && (
-						<div className="border-b border-[var(--border)] px-3 py-2 bg-[var(--muted)]">
-							<div className="text-[10px] uppercase text-[var(--muted-foreground)]">Rejection reason</div>
-							<input
-								value={rejectReason}
-								onChange={(event) => setRejectReason(event.target.value)}
-								className="mt-1 w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
-								placeholder="Optional reason"
-							/>
-							<div className="mt-2 flex gap-2">
-								<Button size="sm" variant="default" className="h-7 text-xs" onClick={handleReject}>
-									Send rejection
-								</Button>
-								<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowReject(false)}>
-									Cancel
-								</Button>
-							</div>
-						</div>
-					)}
-					<div className="flex-1 overflow-auto">
+				</div>
+				<div className="flex-1 overflow-auto">
 						{diffData ? (
 							<div className="px-3 py-2">
 								<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
@@ -226,7 +240,8 @@ export function CodePanel({
 			)}
 			{activeTab && activeTab.kind !== 'diff' && (
 				<div className="flex min-h-0 flex-1 flex-col">
-					<div className="flex items-center gap-2 border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+				<div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+					<div className="flex items-center gap-2 min-w-0">
 						<span className="font-mono truncate" title={activeTab.filePath}>{activeTab.filePath}</span>
 						{activeTab.kind === 'write' && (
 							<Badge variant="secondary" className="text-[10px]">Generated</Badge>
@@ -234,7 +249,39 @@ export function CodePanel({
 						{activeTab.kind === 'read' && (
 							<Badge variant="secondary" className="text-[10px]">Read</Badge>
 						)}
+						{isModified && (
+							<Badge variant="outline" className="text-[10px]">Modified</Badge>
+						)}
 					</div>
+					<div className="flex items-center gap-2">
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={() => setIsEditing((prev) => !prev)}
+							disabled={!canEdit}
+							className="h-7 text-xs"
+							title={isEditing ? 'View mode' : 'Edit file'}
+						>
+							<PencilLine className="h-3 w-3 mr-1" />
+							{isEditing ? 'View' : 'Edit'}
+						</Button>
+						<Button
+							variant="secondary"
+							size="sm"
+							onClick={handleSave}
+							disabled={!canEdit || !isModified || isSaving}
+							className="h-7 text-xs"
+							title="Save (Ctrl+S)"
+						>
+							{isSaving ? (
+								<Loader2 className="h-3 w-3 mr-1 animate-spin" />
+							) : (
+								<Save className="h-3 w-3 mr-1" />
+							)}
+							Save
+						</Button>
+					</div>
+				</div>
 					<div className="flex-1 overflow-auto">
 						{loading && (
 							<div className="flex items-center justify-center py-8">
@@ -247,13 +294,29 @@ export function CodePanel({
 								{error}
 							</div>
 						)}
-						{!loading && !error && activeTab.content && (
+						{saveError && !error && (
+							<div className="flex items-center gap-2 px-3 py-2 text-xs text-red-500">
+								<AlertCircle className="h-3.5 w-3.5 shrink-0" />
+								{saveError}
+							</div>
+						)}
+						{!loading && !error && isEditing && (
+							<div className="px-3 py-2">
+								<textarea
+									value={editContent}
+									onChange={(event) => setEditContent(event.target.value)}
+									className="w-full min-h-[400px] resize-none rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-mono text-[11px] leading-[1.6] text-[var(--foreground)]"
+									spellCheck={false}
+								/>
+							</div>
+						)}
+						{!loading && !error && !isEditing && activeTab.content !== undefined && (
 							<div className="px-3 py-2">
 								<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
 									<PierreFile
 										file={{
 											name: activeTab.filePath,
-											contents: activeTab.content,
+											contents: activeTab.content ?? '',
 											lang: getLangFromPath(activeTab.filePath) as any,
 										}}
 										selectedLines={selectedRange}

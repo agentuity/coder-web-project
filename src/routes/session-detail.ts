@@ -14,6 +14,12 @@ import {
 	destroySandbox,
 } from '../opencode';
 import type { SandboxContext } from '../opencode';
+import {
+	isSandboxHealthy,
+	getCachedHealthTimestamp,
+	setCachedHealthTimestamp,
+	SANDBOX_STATUS_TTL_MS,
+} from '../lib/sandbox-health';
 
 const api = createRouter();
 
@@ -22,19 +28,42 @@ api.get('/:id', async (c) => {
 	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 
+	let effectiveSession = session;
+	if (session.sandboxId && session.sandboxUrl && ['active', 'creating'].includes(session.status)) {
+		const now = Date.now();
+		const lastChecked = getCachedHealthTimestamp(session.id) ?? 0;
+		if (now - lastChecked >= SANDBOX_STATUS_TTL_MS) {
+			setCachedHealthTimestamp(session.id, now);
+			const healthy = await isSandboxHealthy(session.sandboxUrl);
+			if (!healthy) {
+				const [updated] = await db
+					.update(chatSessions)
+					.set({ status: 'terminated', updatedAt: new Date() })
+					.where(eq(chatSessions.id, session.id))
+					.returning();
+				effectiveSession = updated ?? { ...session, status: 'terminated' };
+			}
+		}
+	}
+
 	// Fetch messages from OpenCode if sandbox is active
 	let messages: unknown[] = [];
-	if (session.sandboxId && session.sandboxUrl && session.opencodeSessionId) {
+	if (
+		effectiveSession.status !== 'terminated' &&
+		effectiveSession.sandboxId &&
+		effectiveSession.sandboxUrl &&
+		effectiveSession.opencodeSessionId
+	) {
 		try {
-			const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
-			const result = await client.session.messages({ path: { id: session.opencodeSessionId } });
+			const client = getOpencodeClient(effectiveSession.sandboxId, effectiveSession.sandboxUrl);
+			const result = await client.session.messages({ path: { id: effectiveSession.opencodeSessionId } });
 			messages = (result as any)?.data || [];
 		} catch {
 			// Sandbox may be down — return session without messages
 		}
 	}
 
-	return c.json({ ...session, messages });
+	return c.json({ ...effectiveSession, messages });
 });
 
 // PATCH /api/sessions/:id — update session
@@ -111,7 +140,7 @@ api.post('/:id/fork', async (c) => {
 	]);
 
 	const opencodeConfig = generateOpenCodeConfig(
-		{},
+		{ model: sourceSession.model },
 		workspaceSkills.map((s) => ({ name: s.name, content: s.content, enabled: s.enabled ?? true })),
 		workspaceSources.map((s) => ({
 			name: s.name,
@@ -123,6 +152,7 @@ api.post('/:id/fork', async (c) => {
 
 	const metadata = (sourceSession.metadata || {}) as Record<string, unknown>;
 	const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
+	const branch = typeof metadata.branch === 'string' ? metadata.branch : undefined;
 	const baseTitle = sourceSession.title || 'Untitled Session';
 	const title = `Fork of ${baseTitle}`;
 
@@ -133,9 +163,9 @@ api.post('/:id/fork', async (c) => {
 			createdBy: sourceSession.createdBy || user.id,
 			status: 'creating',
 			title,
-			agent: sourceSession.agent || 'build',
-			model: sourceSession.model || 'anthropic/claude-sonnet-4-5',
-			metadata: { ...metadata, repoUrl },
+			agent: sourceSession.agent ?? null,
+			model: sourceSession.model ?? null,
+			metadata: { ...metadata, repoUrl, branch },
 		})
 		.returning();
 
@@ -147,6 +177,7 @@ api.post('/:id/fork', async (c) => {
 			const sandboxCtx: SandboxContext = { sandbox, logger };
 			const { sandboxId, sandboxUrl } = await createSandbox(sandboxCtx, {
 				repoUrl,
+				branch,
 				opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
 			});
 
@@ -182,7 +213,7 @@ api.post('/:id/fork', async (c) => {
 				.update(chatSessions)
 				.set({
 					status: 'error',
-					metadata: { ...metadata, repoUrl, error: String(error) },
+					metadata: { ...metadata, repoUrl, branch, error: String(error) },
 					updatedAt: new Date(),
 				})
 				.where(eq(chatSessions.id, session!.id));

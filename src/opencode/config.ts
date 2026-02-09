@@ -26,9 +26,8 @@ export interface OpenCodeConfig {
   }>;
 }
 
-export interface WorkspaceSettings {
-  defaultModel?: string;
-  defaultAgent?: string;
+export interface OpenCodeConfigOptions {
+	model?: string | null;
 }
 
 export interface SkillConfig {
@@ -48,27 +47,27 @@ export interface SourceConfig {
  * Generate an opencode.json configuration for a sandbox.
  */
 export function generateOpenCodeConfig(
-  settings: WorkspaceSettings = {},
-  skills: SkillConfig[] = [],
-  sources: SourceConfig[] = [],
+	options: OpenCodeConfigOptions = {},
+	skills: SkillConfig[] = [],
+	sources: SourceConfig[] = [],
 ): OpenCodeConfig {
-  const defaultModel = settings.defaultModel || 'anthropic/claude-sonnet-4-5';
+	const sessionModel = options.model ?? undefined;
 
-  const config: OpenCodeConfig = {
-    $schema: 'https://opencode.ai/config.json',
-    plugin: ['@agentuity/opencode'],
-    agent: {
-      build: {
-        mode: 'primary',
-        model: defaultModel,
-      },
-      plan: {
-        mode: 'primary',
-        model: 'anthropic/claude-sonnet-4-5',
-        permission: { edit: 'deny', bash: 'ask' },
-      },
-    },
-  };
+	const config: OpenCodeConfig = {
+		$schema: 'https://opencode.ai/config.json',
+		plugin: ['@agentuity/opencode'],
+		agent: {
+			build: {
+				mode: 'primary',
+				...(sessionModel ? { model: sessionModel } : {}),
+			},
+			plan: {
+				mode: 'primary',
+				...(sessionModel ? { model: sessionModel } : {}),
+				permission: { edit: 'deny', bash: 'ask' },
+			},
+		},
+	};
 
   // Add user-defined skills as OpenCode rules
   const enabledSkills = skills.filter(s => s.enabled);

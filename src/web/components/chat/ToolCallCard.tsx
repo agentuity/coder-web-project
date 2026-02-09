@@ -4,11 +4,12 @@ import { FileDiff as PierreDiff } from '@pierre/diffs/react';
 import { parseDiffFromFile, type DiffLineAnnotation, type SelectedLineRange } from '@pierre/diffs';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { CheckCircle2, Circle, Loader2 } from 'lucide-react';
+import { Check, CheckCircle2, Circle, Copy, Loader2 } from 'lucide-react';
 import { getLangFromPath } from '../../lib/shiki';
 import { parseFileOutput } from '../../lib/file-output';
 import { CodeWithComments } from './CodeWithComments';
 import type { CodeComment } from '../../hooks/useCodeComments';
+import { Commit } from '../ai-elements/commit';
 import {
 	Tool,
 	ToolContent,
@@ -27,7 +28,6 @@ interface ToolCallCardProps {
 	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
 	getDiffAnnotations?: (file: string) => DiffLineAnnotation<{ id: string; comment: string }>[];
 	getFileComments?: (file: string) => CodeComment[];
-	onSendMessage?: (text: string) => void;
 }
 
 function getToolDisplayName(tool: string): string {
@@ -92,6 +92,50 @@ function isAgentInvocation(input: Record<string, unknown>): input is Record<stri
 	return typeof input.subagent_type === 'string';
 }
 
+function isGitCommand(command: string) {
+	return command.trim().startsWith('git ') || command.includes(' git ');
+}
+
+function parseGitFiles(output?: string): Array<{ path: string; status: 'added' | 'modified' | 'deleted' }> {
+	if (!output) return [];
+	const files: Array<{ path: string; status: 'added' | 'modified' | 'deleted' }> = [];
+	const lines = output.split('\n').map((line) => line.trim()).filter(Boolean);
+	for (const line of lines) {
+		const match = line.match(/^([MADRCU?!]{1,2})\s+(.+)$/);
+		if (!match) continue;
+		const statusToken = match[1] ?? '';
+		const path = match[2] ?? '';
+		if (!path) continue;
+		const status: 'added' | 'modified' | 'deleted' = statusToken.includes('A')
+			? 'added'
+			: statusToken.includes('D')
+				? 'deleted'
+				: 'modified';
+		files.push({ path, status });
+	}
+	return files;
+}
+
+function parseGitCommitInfo(command: string, output?: string): {
+	message: string;
+	hash?: string;
+	files?: Array<{ path: string; status: 'added' | 'modified' | 'deleted' }>;
+} {
+	const outputText = output ?? '';
+	const commitLineMatch = outputText.match(/^\[(.+?)\s+([0-9a-f]{7,40})\]\s+(.+)$/m);
+	const messageFromOutput = commitLineMatch?.[3];
+	const hashFromOutput = commitLineMatch?.[2]
+		?? outputText.match(/\bcommit\s+([0-9a-f]{7,40})\b/i)?.[1];
+	const messageFromCommand = command.match(/-m\s+["']([^"']+)["']/)?.[1];
+	const message = messageFromOutput || messageFromCommand || `Git: ${command}`;
+	const files = parseGitFiles(outputText);
+	return {
+		message,
+		hash: hashFromOutput,
+		files: files.length > 0 ? files : undefined,
+	};
+}
+
 // ---------------------------------------------------------------------------
 // Language detection helper for @pierre/diffs
 // ---------------------------------------------------------------------------
@@ -129,6 +173,33 @@ function getAgentBadge(agent: string) {
 	return labels[normalized] ?? normalized;
 }
 
+function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+	const [copied, setCopied] = useState(false);
+
+	const handleCopy = async () => {
+		if (!text || typeof window === 'undefined' || !navigator?.clipboard?.writeText) return;
+		try {
+			await navigator.clipboard.writeText(text);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		} catch {
+			// Ignore copy errors
+		}
+	};
+
+	return (
+		<button
+			type="button"
+			onClick={handleCopy}
+			className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--foreground)]"
+			title={copied ? 'Copied' : label}
+		>
+			{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+			<span className="sr-only">{copied ? 'Copied' : label}</span>
+		</button>
+	);
+}
+
 function AgentInvocationView({ input }: { input: { subagent_type: string; description?: string; prompt?: string } }) {
 	const agentLabel = getAgentBadge(input.subagent_type);
 	return (
@@ -164,6 +235,10 @@ function DiffView({
 	const fileName = filePath.split('/').pop() || filePath;
 	const [selectedRange, setSelectedRange] = useState<SelectedLineRange | null>(null);
 	const [commentText, setCommentText] = useState('');
+	const diffText = useMemo(
+		() => `--- ${filePath}\n+++ ${filePath}\n\n--- Original\n${oldString}\n\n+++ Updated\n${newString}`,
+		[filePath, oldString, newString]
+	);
 
 	const diffData = useMemo(() => {
 		try {
@@ -187,9 +262,11 @@ function DiffView({
 
 	return (
 		<div className="px-3 py-2">
-			<div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
-				<span>📝</span>
+			<div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)] group">
+				<span className="font-mono text-[10px] text-[var(--muted-foreground)]">edit</span>
 				<span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
+				<span className="ml-auto" />
+				<CopyButton text={diffText} label="Copy diff" />
 			</div>
 			<div className="rounded-md border border-[var(--border)] overflow-hidden max-h-72 overflow-y-auto overflow-x-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
 				{diffData ? (
@@ -243,8 +320,11 @@ function BashView({ command, output }: { command: string; output?: string }) {
       </div>
       {/* Output */}
       {output && (
-        <div>
-          <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">Output</div>
+        <div className="group">
+          <div className="flex items-center justify-between text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">
+            <span>Output</span>
+            <CopyButton text={output} label="Copy output" />
+          </div>
           <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-64 overflow-auto">
             {output}
           </pre>
@@ -294,16 +374,12 @@ function WriteView({
 	filePath,
 	content,
 	output,
-	onAccept,
-	onReject,
 	onAddComment,
 	comments,
 }: {
 	filePath: string;
 	content: string;
 	output?: string;
-	onAccept?: () => void;
-	onReject?: () => void;
 	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
 	comments?: CodeComment[];
 }) {
@@ -311,10 +387,13 @@ function WriteView({
 
 	return (
 		<div className="px-3 py-2">
-			<div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
+			<div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)] group">
 				<span>📄</span>
 				<span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
-				<span className="ml-auto text-[10px]">{lines.length} lines</span>
+				<div className="ml-auto flex items-center gap-2 text-[10px]">
+					<span>{lines.length} lines</span>
+					<CopyButton text={content} label="Copy file" />
+				</div>
 			</div>
 			<CodeWithComments
 				code={content}
@@ -322,20 +401,6 @@ function WriteView({
 				onAddComment={onAddComment}
 				comments={comments}
 			/>
-			{(onAccept || onReject) && (
-				<div className="mt-2 flex gap-2">
-					{onAccept && (
-						<Button size="sm" variant="secondary" className="h-7 text-xs" onClick={onAccept}>
-							Accept
-						</Button>
-					)}
-					{onReject && (
-						<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onReject}>
-							Reject
-						</Button>
-					)}
-				</div>
-			)}
 			{output && (
 				<div className="mt-2">
 					<div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">Output</div>
@@ -365,10 +430,13 @@ function ReadView({
 
 	return (
     <div className="px-3 py-2">
-      <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
+      <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)] group">
         <span>📖</span>
         <span className="font-mono truncate" title={filePath}>Read: {shortenPath(filePath)}</span>
-        <span className="ml-auto text-[10px]">{lines.length} lines</span>
+        <div className="ml-auto flex items-center gap-2 text-[10px]">
+          <span>{lines.length} lines</span>
+          <CopyButton text={parsed} label="Copy read" />
+        </div>
       </div>
 				{parsed && (
 					<CodeWithComments
@@ -475,7 +543,6 @@ export function ToolCallCard({
 	onAddComment,
 	getDiffAnnotations,
 	getFileComments,
-	onSendMessage,
 }: ToolCallCardProps) {
 	const title = ('title' in part.state && part.state.title) ? part.state.title : getToolDisplayName(part.tool);
 	const duration = ('time' in part.state && part.state.time && 'end' in part.state.time)
@@ -492,8 +559,6 @@ export function ToolCallCard({
 			: 'result';
 	const toolStatus = part.state.status as ToolStatus;
 	const openedRef = useRef(new Set<string>());
-	const [showReject, setShowReject] = useState(false);
-	const [rejectReason, setRejectReason] = useState('');
 
 	useEffect(() => {
 		if (!input || openedRef.current.has(part.id)) return;
@@ -519,20 +584,6 @@ export function ToolCallCard({
 		}
 	}, [input, output, onOpenDiff, onOpenWrite, onOpenRead, onOpenFile, part.id]);
 
-	const handleAccept = (filePath: string) => {
-		onSendMessage?.(`I accept the changes to ${filePath}.`);
-	};
-
-	const handleReject = (filePath: string, reason?: string) => {
-		const trimmed = reason?.trim();
-		const message = trimmed
-			? `I reject the changes to ${filePath}, please try again because ${trimmed}.`
-			: `I reject the changes to ${filePath}, please try again.`;
-		onSendMessage?.(message);
-		setShowReject(false);
-		setRejectReason('');
-	};
-
 	// Determine which specialised view to use
 	function renderBody() {
 		if (isEditTool(input)) {
@@ -545,32 +596,6 @@ export function ToolCallCard({
 						onAddComment={onAddComment}
 						annotations={getDiffAnnotations?.(input.filePath)}
 					/>
-					<div className="flex items-center gap-2 px-3 pb-2">
-						<Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => handleAccept(input.filePath)}>
-							Accept
-						</Button>
-						<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowReject((prev) => !prev)}>
-							Reject
-						</Button>
-					</div>
-					{showReject && (
-						<div className="px-3 pb-2">
-							<input
-								value={rejectReason}
-								onChange={(event) => setRejectReason(event.target.value)}
-								placeholder="Optional reason"
-								className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
-							/>
-							<div className="mt-2 flex gap-2">
-								<Button size="sm" variant="default" className="h-7 text-xs" onClick={() => handleReject(input.filePath, rejectReason)}>
-									Send rejection
-								</Button>
-								<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowReject(false)}>
-									Cancel
-								</Button>
-							</div>
-						</div>
-					)}
 					{output && (
 						<div className="border-t border-[var(--border)] px-3 py-1">
 							<span className="font-mono text-[10px] text-green-500">{output}</span>
@@ -581,6 +606,19 @@ export function ToolCallCard({
 		}
 
 		if (isBashTool(input)) {
+			if (isGitCommand(input.command)) {
+				const gitInfo = parseGitCommitInfo(input.command, output);
+				return (
+					<div className="px-3 py-2 space-y-2">
+						<Commit message={gitInfo.message} hash={gitInfo.hash} files={gitInfo.files} />
+						{output && (
+							<pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-48 overflow-auto">
+								{output}
+							</pre>
+						)}
+					</div>
+				);
+			}
 			return <BashView command={input.command} output={output} />;
 		}
 
@@ -590,8 +628,6 @@ export function ToolCallCard({
 					filePath={input.filePath}
 					content={input.content}
 					output={output}
-					onAccept={onSendMessage ? () => handleAccept(input.filePath) : undefined}
-					onReject={onSendMessage ? () => handleReject(input.filePath) : undefined}
 					onAddComment={onAddComment}
 					comments={getFileComments?.(input.filePath)}
 				/>
@@ -637,7 +673,10 @@ export function ToolCallCard({
 		);
 	}
 
-	const shouldOpen = isEditTool(input);
+	const isEdit = isEditTool(input);
+	const isWrite = isWriteTool(input);
+	const isMutationByName = ['edit', 'write', 'create', 'patch', 'multi_edit'].includes(part.tool?.toLowerCase() ?? '');
+	const shouldOpen = part.state.status === 'error' || isEdit || isWrite || isMutationByName;
 	const agentTitle = part.tool === 'task' && isAgentInvocation(input)
 		? `Agent · ${getAgentBadge(input.subagent_type)}`
 		: title;

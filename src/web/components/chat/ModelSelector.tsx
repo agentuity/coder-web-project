@@ -85,9 +85,6 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
           <span className={`h-2 w-2 rounded-full ${selected.group.color}`} />
           <span>{selected.label}</span>
         </span>
-        <span className="hidden text-[10px] text-[var(--muted-foreground)] md:inline">
-          {selected.capabilities.join(' · ')}
-        </span>
         <ChevronDown className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
       </button>
 
@@ -113,9 +110,6 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
                     }`}
                   >
                     <span className="text-xs text-[var(--foreground)]">{model.label}</span>
-                    <span className="text-[10px] text-[var(--muted-foreground)]">
-                      {model.capabilities.join(' · ')}
-                    </span>
                   </button>
                 ))}
               </div>

@@ -18,15 +18,32 @@ import { Textarea } from '../ui/textarea';
 // ---------------------------------------------------------------------------
 
 interface GitStatus {
+	hasRepo: boolean;
 	branch: string | null;
 	isDirty: boolean;
 	changedFiles: string[];
 	remotes: string[];
 	error?: string;
+	message?: string;
+}
+
+interface GitMetadata {
+	repoUrl?: string;
+	branch?: string;
+	pullRequest?: {
+		url?: string;
+		number?: number | null;
+	};
+	lastCommit?: {
+		hash?: string | null;
+		message?: string;
+		timestamp?: string;
+	};
 }
 
 interface GitPanelProps {
 	sessionId: string;
+	metadata?: GitMetadata;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,11 +54,19 @@ function StatusSection({
 	status,
 	loading,
 	onRefresh,
+	onInitRepo,
+	initLoading,
+	initError,
 }: {
 	status: GitStatus | null;
 	loading: boolean;
 	onRefresh: () => void;
+	onInitRepo: (remoteUrl?: string) => void;
+	initLoading: boolean;
+	initError: string | null;
 }) {
+	const [remoteUrl, setRemoteUrl] = useState('');
+
 	return (
 		<div className="border-b border-[var(--border)] px-3 py-2">
 			<div className="flex items-center gap-2">
@@ -65,10 +90,35 @@ function StatusSection({
 					<Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
 				</div>
 			)}
-			{status?.error && !status.branch && (
+			{status?.error && status?.hasRepo && !status?.branch && (
 				<div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
 					<AlertCircle className="h-3 w-3" />
 					{status.error}
+				</div>
+			)}
+			{status?.hasRepo === false && (
+				<div className="mt-2 space-y-2">
+					<p className="text-xs text-[var(--muted-foreground)]">
+						{status.message || 'No git repository found.'}
+					</p>
+					<Input
+						value={remoteUrl}
+						onChange={(e) => setRemoteUrl(e.target.value)}
+						placeholder="Remote URL (optional)"
+						className="h-7 text-xs"
+					/>
+					<Button
+						size="sm"
+						onClick={() => onInitRepo(remoteUrl || undefined)}
+						disabled={initLoading}
+					>
+						{initLoading ? (
+							<Loader2 className="h-3 w-3 animate-spin" />
+						) : (
+							'Initialize Git Repository'
+						)}
+					</Button>
+					{initError && <p className="text-[10px] text-red-500">{initError}</p>}
 				</div>
 			)}
 			{status && status.branch && (
@@ -101,6 +151,64 @@ function StatusSection({
 					)}
 				</div>
 			)}
+		</div>
+	);
+}
+
+function MetadataSection({ metadata }: { metadata?: GitMetadata }) {
+	if (!metadata) return null;
+
+	const repoUrl = metadata.repoUrl;
+	const branch = metadata.branch;
+	const prUrl = metadata.pullRequest?.url;
+	const prNumber = metadata.pullRequest?.number;
+	const lastCommit = metadata.lastCommit?.hash;
+
+	if (!repoUrl && !branch && !prUrl && !lastCommit) return null;
+
+	return (
+		<div className="border-b border-[var(--border)] px-3 py-2 space-y-2">
+			<div className="text-xs font-medium text-[var(--foreground)]">Repository</div>
+			<div className="space-y-1">
+				{repoUrl && (
+					<div className="flex items-center gap-1.5 text-[10px]">
+						<span className="text-[var(--muted-foreground)]">Repo:</span>
+						<a
+							href={repoUrl}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="text-[var(--primary)] hover:underline truncate"
+						>
+							{repoUrl}
+						</a>
+					</div>
+				)}
+				{branch && (
+					<div className="flex items-center gap-1.5 text-[10px]">
+						<span className="text-[var(--muted-foreground)]">Branch:</span>
+						<span className="font-mono text-[var(--foreground)]">{branch}</span>
+					</div>
+				)}
+				{lastCommit && (
+					<div className="flex items-center gap-1.5 text-[10px]">
+						<span className="text-[var(--muted-foreground)]">Last commit:</span>
+						<span className="font-mono text-[var(--foreground)]">{lastCommit}</span>
+					</div>
+				)}
+				{prUrl && (
+					<div className="flex items-center gap-1.5 text-[10px]">
+						<span className="text-[var(--muted-foreground)]">PR:</span>
+						<a
+							href={prUrl}
+							target="_blank"
+							rel="noopener noreferrer"
+							className="text-[var(--primary)] hover:underline truncate"
+						>
+							{prNumber ? `#${prNumber}` : prUrl}
+						</a>
+					</div>
+				)}
+			</div>
 		</div>
 	);
 }
@@ -370,9 +478,11 @@ function PullRequestSection({
 // GitPanel — main exported component
 // ---------------------------------------------------------------------------
 
-export function GitPanel({ sessionId }: GitPanelProps) {
+export function GitPanel({ sessionId, metadata }: GitPanelProps) {
 	const [status, setStatus] = useState<GitStatus | null>(null);
 	const [loading, setLoading] = useState(true);
+	const [initLoading, setInitLoading] = useState(false);
+	const [initError, setInitError] = useState<string | null>(null);
 
 	const fetchStatus = useCallback(async () => {
 		setLoading(true);
@@ -383,6 +493,7 @@ export function GitPanel({ sessionId }: GitPanelProps) {
 			setStatus(data);
 		} catch {
 			setStatus({
+				hasRepo: true,
 				branch: null,
 				isDirty: false,
 				changedFiles: [],
@@ -394,13 +505,42 @@ export function GitPanel({ sessionId }: GitPanelProps) {
 		}
 	}, [sessionId]);
 
+	const handleInitRepo = useCallback(async (remoteUrl?: string) => {
+		setInitLoading(true);
+		setInitError(null);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/github/init`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ remoteUrl }),
+			});
+			const data = await res.json();
+			if (!res.ok || !data.success) {
+				throw new Error(data.error || 'Failed to initialize git repository');
+			}
+			await fetchStatus();
+		} catch (err) {
+			setInitError(err instanceof Error ? err.message : 'Failed to initialize git repository');
+		} finally {
+			setInitLoading(false);
+		}
+	}, [fetchStatus, sessionId]);
+
 	useEffect(() => {
 		fetchStatus();
 	}, [fetchStatus]);
 
 	return (
 		<div className="bg-[var(--card)] flex flex-col max-h-[500px] overflow-auto">
-			<StatusSection status={status} loading={loading} onRefresh={fetchStatus} />
+			<StatusSection
+				status={status}
+				loading={loading}
+				onRefresh={fetchStatus}
+				onInitRepo={handleInitRepo}
+				initLoading={initLoading}
+				initError={initError}
+			/>
+			<MetadataSection metadata={metadata} />
 			<BranchSection sessionId={sessionId} onSuccess={fetchStatus} />
 			<CommitSection sessionId={sessionId} onSuccess={fetchStatus} />
 			<PullRequestSection sessionId={sessionId} baseBranch={status?.branch ?? null} />

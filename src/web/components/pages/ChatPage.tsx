@@ -1,31 +1,29 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
 	Check,
 	Copy,
-	FileCode,
 	GitBranch,
 	GitFork,
-	Link,
+	Circle,
 	ListOrdered,
 	ListTodo,
 	Loader2,
 	Paperclip,
-	Share2,
-	Terminal as TerminalIcon,
-	Wifi,
+	ExternalLink,
+	Terminal,
+	Settings,
 	WifiOff,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
-import { TodoPanel } from '../chat/TodoPanel';
 import { FileExplorer } from '../chat/FileExplorer';
+import { EnvPanel } from '../chat/EnvPanel';
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
-import { TerminalOverlay } from '../chat/TerminalPanel';
 import { GitPanel, useGitStatus } from '../chat/GitPanel';
-import type { Message as ChatMessage, Part, ReasoningPart } from '../../types/opencode';
+import type { Message as ChatMessage, Part, ReasoningPart, ToolPart } from '../../types/opencode';
 import { TextPartView } from '../chat/TextPartView';
 import { ToolCallCard } from '../chat/ToolCallCard';
 import { FilePartView } from '../chat/FilePartView';
@@ -42,6 +40,9 @@ import {
 	ConversationEmptyState,
 	ConversationScrollButton,
 } from '../ai-elements/conversation';
+import { ChainOfThought } from '../ai-elements/chain-of-thought';
+import { Plan } from '../ai-elements/plan';
+import { AgentDisplay } from '../ai-elements/agent';
 import {
 	Message,
 	MessageActions,
@@ -70,7 +71,9 @@ interface ChatPageProps {
     status: string;
     agent: string | null;
     model: string | null;
+    sandboxId: string | null;
     sandboxUrl: string | null;
+    metadata?: Record<string, unknown> | null;
   };
   onForkedSession?: (session: {
     id: string;
@@ -78,19 +81,51 @@ interface ChatPageProps {
     status: string;
     agent: string | null;
     model: string | null;
+    sandboxId: string | null;
     sandboxUrl: string | null;
     createdAt: string;
     flagged: boolean | null;
+    metadata?: Record<string, unknown> | null;
   }) => void;
 }
+
+type QueuedMessage = {
+	text: string;
+	model: string;
+	command?: string;
+};
 
 export function ChatPage({ sessionId, session: initialSession, onForkedSession }: ChatPageProps) {
   const [session, setSession] = useState(initialSession);
   const { toast } = useToast();
+  const [statusStartedAt, setStatusStartedAt] = useState(() => Date.now());
+  const [statusElapsedMs, setStatusElapsedMs] = useState(0);
+  const [archivedMessages, setArchivedMessages] = useState<ChatMessage[]>([]);
+  const [archivedParts, setArchivedParts] = useState<Map<string, Part[]>>(new Map());
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const [isLoadingArchive, setIsLoadingArchive] = useState(false);
 
   useEffect(() => {
     setSession(initialSession);
   }, [initialSession]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    if (session.status === 'active') {
+      setStatusElapsedMs(0);
+      return;
+    }
+    setStatusStartedAt(Date.now());
+    setStatusElapsedMs(0);
+  }, [session.status, sessionId]);
+
+  useEffect(() => {
+    if (session.status === 'active') return;
+    const interval = setInterval(() => {
+      setStatusElapsedMs(Date.now() - statusStartedAt);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [session.status, statusStartedAt]);
 
   // Poll for session readiness when not yet active
   useEffect(() => {
@@ -98,23 +133,90 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 
     const poll = setInterval(async () => {
       try {
-        const res = await fetch(`/api/sessions/${sessionId}`);
-        if (res.ok) {
-          const data = await res.json();
-          if (data.status === 'active') {
-            setSession((prev) => ({
-              ...prev,
-              status: 'active',
-              sandboxUrl: data.sandboxUrl ?? prev.sandboxUrl,
-            }));
-          }
-        }
-      } catch {
+		const res = await fetch(`/api/sessions/${sessionId}`);
+		if (res.ok) {
+			const data = await res.json();
+			if (data.status === 'active') {
+				setSession((prev) => ({
+					...prev,
+					status: 'active',
+					sandboxId: data.sandboxId ?? prev.sandboxId,
+					sandboxUrl: data.sandboxUrl ?? prev.sandboxUrl,
+				}));
+			}
+		}
+	} catch {
         // Ignore — will retry on next interval
       }
     }, 3000);
 
     return () => clearInterval(poll);
+  }, [session.status, sessionId]);
+
+  useEffect(() => {
+    if (session.status !== 'terminated') {
+      setArchivedMessages([]);
+      setArchivedParts(new Map());
+      setArchiveError(null);
+      setIsLoadingArchive(false);
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingArchive(true);
+    setArchiveError(null);
+
+    fetch(`/api/sessions/${sessionId}/messages`)
+      .then((res) => {
+        if (!res.ok) throw new Error('Failed to load messages');
+        return res.json();
+      })
+      .then((data: unknown) => {
+        if (!isMounted) return;
+        const messages: ChatMessage[] = [];
+        const partsByMessage = new Map<string, Part[]>();
+
+        const addPart = (part: Part) => {
+          const existing = partsByMessage.get(part.messageID) ?? [];
+          existing.push(part);
+          partsByMessage.set(part.messageID, existing);
+        };
+
+        const record = data as Record<string, unknown>;
+
+        if (record?.messages && Array.isArray(record.messages)) {
+          for (const item of record.messages as Array<Record<string, unknown>>) {
+            if (item.info) messages.push(item.info as ChatMessage);
+            if (Array.isArray(item.parts)) {
+              for (const part of item.parts as Part[]) addPart(part);
+            }
+          }
+        } else if (Array.isArray(data)) {
+          for (const item of data as Array<Record<string, unknown>>) {
+            if (item.info) messages.push(item.info as ChatMessage);
+            else if (item.role) messages.push(item as unknown as ChatMessage);
+            if (Array.isArray(item.parts)) {
+              for (const part of item.parts as Part[]) addPart(part);
+            }
+          }
+        }
+
+        messages.sort((a, b) => a.time.created - b.time.created);
+        setArchivedMessages(messages);
+        setArchivedParts(partsByMessage);
+      })
+      .catch(() => {
+        if (!isMounted) return;
+        setArchiveError('Unable to load chat history');
+      })
+      .finally(() => {
+        if (!isMounted) return;
+        setIsLoadingArchive(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
   }, [session.status, sessionId]);
 
   // Only connect SSE when session is active (pass undefined to skip connection)
@@ -149,16 +251,19 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 
 	const [inputText, setInputText] = useState('');
 	const [isSending, setIsSending] = useState(false);
-  const [selectedCommand, setSelectedCommand] = useState('/agentuity-coder');
+  const [selectedCommand, setSelectedCommand] = useState('');
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
+	const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
 	const [showTodos, setShowTodos] = useState(false);
 	const [showChanges, setShowChanges] = useState(false);
-	const [showTerminal, setShowTerminal] = useState(false);
-	const [terminalConnected, setTerminalConnected] = useState(false);
 	const [isForking, setIsForking] = useState(false);
 	const [isSharing, setIsSharing] = useState(false);
 	const [shareUrl, setShareUrl] = useState<string | null>(null);
+	const [shareCopied, setShareCopied] = useState(false);
 	const [viewMode, setViewMode] = useState<'chat' | 'ide'>('chat');
+	const [sshCopied, setSshCopied] = useState(false);
+	const [isEditingTitle, setIsEditingTitle] = useState(false);
+	const [editTitle, setEditTitle] = useState(session.title || '');
 	const {
 		tabs,
 		activeId,
@@ -179,49 +284,101 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 		getDiffAnnotations,
 		getFileComments,
 	} = useCodeComments();
+	const [recentFiles, setRecentFiles] = useState<string[]>([]);
+	const processedToolPartsRef = useRef(new Set<string>());
+
+	useEffect(() => {
+		if (!sessionId) return;
+		processedToolPartsRef.current = new Set();
+		setRecentFiles([]);
+	}, [sessionId]);
 	const activeFilePath = activeTab?.filePath ?? null;
 	const isBusy = sessionStatus.type === 'busy';
+	const displayMessages = session.status === 'terminated' ? archivedMessages : messages;
+	const sshCommand = session.sandboxId ? `agentuity cloud ssh ${session.sandboxId}` : '';
+	const getDisplayParts = useCallback(
+		(messageID: string) => {
+			if (session.status === 'terminated') {
+				return archivedParts.get(messageID) ?? [];
+			}
+			return getPartsForMessage(messageID);
+		},
+		[archivedParts, getPartsForMessage, session.status],
+	);
 	const { branch: gitBranch, changedCount: gitChangedCount } = useGitStatus(activeSessionId);
 
-  // Derive display label from selected command
-  const commandLabel = selectedCommand.replace(/^\//, '');
+	useEffect(() => {
+		if (!isEditingTitle) {
+			setEditTitle(session.title || '');
+		}
+	}, [isEditingTitle, session.title]);
+
+	const promptPlaceholder = session.status === 'active'
+		? 'Message the agent...'
+		: session.status === 'terminated'
+			? 'This session is read-only.'
+			: session.status === 'error'
+				? 'Session failed to start.'
+				: 'Waiting for sandbox to be ready...';
+
+	const sendMessage = useCallback(
+		async (payload: QueuedMessage) => {
+			setIsSending(true);
+			try {
+				const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					text: payload.text,
+					model: payload.model,
+					command: payload.command,
+				}),
+				});
+				if (!res.ok) {
+					throw new Error('Failed to send message');
+				}
+			} catch (err) {
+				console.error('Failed to send message:', err);
+				toast({ type: 'error', message: 'Failed to send message' });
+			} finally {
+				setIsSending(false);
+			}
+		},
+		[sessionId, toast],
+	);
 
 	const handleSend = async (text: string) => {
-		if (!text.trim() || isSending || isBusy) return;
-		setInputText('');
-		setIsSending(true);
-
-    try {
-      // Prepend selected command mode to the message
-		const messageText = selectedCommand === '/agentuity-coder'
-			? text
-			: `${selectedCommand} ${text}`;
+		if (!text.trim()) return;
 		const commentsBlock = formatForPrompt();
 		const fullMessage = commentsBlock
-			? `${messageText}\n\n---\nCode Comments:\n${commentsBlock}`
-			: messageText;
+			? `${text}\n\n---\nCode Comments:\n${commentsBlock}`
+			: text;
+		const payload: QueuedMessage = {
+			text: fullMessage,
+			model: selectedModel,
+			command: selectedCommand || undefined,
+		};
 
-		const res = await fetch(`/api/sessions/${sessionId}/messages`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				text: fullMessage,
-				model: selectedModel,
-			}),
-		});
-		if (!res.ok) {
-			throw new Error('Failed to send message');
-		}
+		setInputText('');
 		if (commentCount > 0) {
 			clearComments();
 		}
-    } catch (err) {
-      console.error('Failed to send message:', err);
-      toast({ type: 'error', message: 'Failed to send message' });
-    } finally {
-      setIsSending(false);
-    }
-  };
+
+		if (isBusy || isSending) {
+			setMessageQueue((prev) => [...prev, payload]);
+			return;
+		}
+
+		await sendMessage(payload);
+	};
+
+	useEffect(() => {
+		if (isBusy || isSending || messageQueue.length === 0) return;
+		const [next, ...rest] = messageQueue;
+		if (!next) return;
+		setMessageQueue(rest);
+		void sendMessage(next);
+	}, [isBusy, isSending, messageQueue, sendMessage]);
 
   const handleFork = async () => {
     if (isForking) return;
@@ -241,10 +398,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
     }
   };
 
-  const handleShare = async () => {
-    if (isSharing) return;
-    setIsSharing(true);
-    try {
+	const handleShare = async () => {
+		if (isSharing) return;
+		setIsSharing(true);
+		try {
       const res = await fetch(`/api/sessions/${sessionId}/share`, { method: 'POST' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -256,20 +413,47 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
     } catch (error) {
       console.error('Failed to share session:', error);
       toast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to share session' });
-    } finally {
-      setIsSharing(false);
-    }
-  };
+		} finally {
+			setIsSharing(false);
+		}
+	};
 
-  const handleCopyShareUrl = async () => {
-    if (!shareUrl) return;
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      toast({ type: 'success', message: 'Link copied to clipboard!' });
-    } catch {
-      toast({ type: 'error', message: 'Failed to copy link' });
-    }
-  };
+	const handleCopyShareLink = async () => {
+		if (!shareUrl) return;
+		try {
+			await navigator.clipboard.writeText(shareUrl);
+			setShareCopied(true);
+			setTimeout(() => setShareCopied(false), 2000);
+		} catch {
+			toast({ type: 'error', message: 'Failed to copy link' });
+		}
+	};
+
+	const saveTitle = async () => {
+		const trimmed = editTitle.trim();
+		if (!trimmed || trimmed === session.title) return;
+		try {
+			await fetch(`/api/sessions/${sessionId}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ title: trimmed }),
+			});
+			setSession((prev) => ({ ...prev, title: trimmed }));
+		} catch {
+			// silent
+		}
+	};
+
+	const handleCopySshCommand = useCallback(async () => {
+		if (!sshCommand) return;
+		try {
+			await navigator.clipboard.writeText(sshCommand);
+			setSshCopied(true);
+			setTimeout(() => setSshCopied(false), 2000);
+		} catch {
+			toast({ type: 'error', message: 'Failed to copy SSH command' });
+		}
+	}, [sshCommand, toast]);
 
   // Abort
   const handleAbort = async () => {
@@ -281,20 +465,19 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
   };
 
 	const lastAssistantMessage = useMemo(
-		() => [...messages].reverse().find((message) => message.role === 'assistant'),
-		[messages]
+		() => [...displayMessages].reverse().find((message) => message.role === 'assistant'),
+		[displayMessages]
 	);
 	const lastAssistantParts = lastAssistantMessage
-		? getPartsForMessage(lastAssistantMessage.id)
+		? getDisplayParts(lastAssistantMessage.id)
 		: [];
 	const hasStreamingContent = lastAssistantParts.length > 0;
 	const isStreaming = isBusy;
-	const submitDisabled =
-		session.status !== 'active' || (!isBusy && (!inputText.trim() || isSending));
+	const submitDisabled = session.status !== 'active' || !inputText.trim() || isSending;
 
 	const copyMessage = useCallback(
 		(message: ChatMessage) => {
-			const parts = getPartsForMessage(message.id);
+			const parts = getDisplayParts(message.id);
 			const text = parts
 				.filter((part) => part.type === 'text')
 				.map((part) => (part as { text: string }).text)
@@ -304,7 +487,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 				void navigator.clipboard.writeText(text);
 			}
 		},
-		[getPartsForMessage]
+		[getDisplayParts]
 	);
 
 	const sessionUsage = useMemo(() => {
@@ -320,7 +503,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 			providerIDs: new Set<string>(),
 		};
 
-		for (const message of messages) {
+		for (const message of displayMessages) {
 			if (message.role !== 'assistant') continue;
 			totals.cost += message.cost ?? 0;
 			totals.tokens.input += message.tokens?.input ?? 0;
@@ -345,12 +528,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 			modelID: totals.modelIDs.size === 1 ? Array.from(totals.modelIDs)[0] : null,
 			providerID: totals.providerIDs.size === 1 ? Array.from(totals.providerIDs)[0] : null,
 		};
-	}, [messages]);
+	}, [displayMessages]);
 
-	const queuedCount = useMemo(() => {
-		const lastTime = lastAssistantMessage?.time.created ?? 0;
-		return messages.filter((message) => message.role === 'user' && message.time.created > lastTime).length;
-	}, [messages, lastAssistantMessage]);
+	const queuedCount = messageQueue.length;
 
 	const getSourcesForMessage = useCallback((parts: Part[]): SourceItem[] => {
 		const sources: SourceItem[] = [];
@@ -405,6 +585,126 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 		);
 	};
 
+	type ChainGroup = { type: 'chain'; filePath: string; parts: ToolPart[] };
+	type CurrentChain = {
+		filePath: string;
+		parts: ToolPart[];
+		startsWithRead: boolean;
+		hasWriteOrEdit: boolean;
+	};
+
+	const extractFilePath = useCallback((part: ToolPart): string | null => {
+		const input = part.state?.input;
+		if (!input) return null;
+		try {
+			const parsed = typeof input === 'string' ? JSON.parse(input) : input;
+			const candidate = parsed as { filePath?: string; path?: string; file?: string };
+			return candidate.filePath || candidate.path || candidate.file || null;
+		} catch {
+			return null;
+		}
+	}, []);
+
+	const isReadTool = useCallback((part: ToolPart): boolean => {
+		const input = part.state?.input;
+		if (!input || typeof input !== 'object') return false;
+		return (
+			typeof (input as { filePath?: unknown }).filePath === 'string'
+			&& typeof (input as { content?: unknown }).content !== 'string'
+			&& typeof (input as { oldString?: unknown }).oldString !== 'string'
+			&& typeof (input as { command?: unknown }).command !== 'string'
+		);
+	}, []);
+
+	const isWriteOrEditTool = useCallback((part: ToolPart): boolean => {
+		const input = part.state?.input;
+		if (!input || typeof input !== 'object') return false;
+		const hasEdit =
+			typeof (input as { oldString?: unknown }).oldString === 'string'
+			&& typeof (input as { newString?: unknown }).newString === 'string';
+		const hasWrite = typeof (input as { content?: unknown }).content === 'string';
+		return hasEdit || hasWrite;
+	}, []);
+
+	const groupPartsIntoChains = (parts: Part[]): (Part | ChainGroup)[] => {
+		const groups: (Part | ChainGroup)[] = [];
+		let currentChain: CurrentChain | null = null;
+
+		const flushChain = () => {
+			if (!currentChain) return;
+			const shouldChain =
+				currentChain.parts.length > 1
+				&& currentChain.startsWithRead
+				&& currentChain.hasWriteOrEdit;
+			if (shouldChain) {
+				groups.push({
+					type: 'chain',
+					filePath: currentChain.filePath,
+					parts: currentChain.parts,
+				});
+			} else {
+				groups.push(...currentChain.parts);
+			}
+			currentChain = null;
+		};
+
+		for (const part of parts) {
+			if (part.type === 'tool') {
+				const filePath = extractFilePath(part);
+				if (filePath) {
+					if (currentChain && currentChain.filePath === filePath) {
+						currentChain.parts.push(part);
+						if (isWriteOrEditTool(part)) currentChain.hasWriteOrEdit = true;
+					} else {
+						flushChain();
+						currentChain = {
+							filePath,
+							parts: [part],
+							startsWithRead: isReadTool(part),
+							hasWriteOrEdit: isWriteOrEditTool(part),
+						};
+					}
+					continue;
+				}
+			}
+			flushChain();
+			groups.push(part);
+		}
+
+		flushChain();
+		return groups;
+	};
+
+	useEffect(() => {
+		const newPaths: string[] = [];
+
+		for (const message of displayMessages) {
+			const parts = getDisplayParts(message.id);
+			for (const part of parts) {
+				if (part.type !== 'tool') continue;
+				if (part.state.status !== 'completed') continue;
+				if (!isWriteOrEditTool(part)) continue;
+				if (processedToolPartsRef.current.has(part.id)) continue;
+				processedToolPartsRef.current.add(part.id);
+				const filePath = extractFilePath(part);
+				if (filePath) newPaths.push(filePath);
+			}
+		}
+
+		if (newPaths.length === 0) return;
+
+		setRecentFiles((prev) => {
+			let updated = [...prev];
+			for (const filePath of newPaths) {
+				const existingIndex = updated.indexOf(filePath);
+				if (existingIndex >= 0) updated.splice(existingIndex, 1);
+				updated.unshift(filePath);
+			}
+			return updated;
+		});
+
+	}, [displayMessages, extractFilePath, getDisplayParts, isWriteOrEditTool]);
+
 	const renderPart = (part: Part, message: ChatMessage) => {
 		switch (part.type) {
 			case 'text':
@@ -427,7 +727,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 					onAddComment={addComment}
 					getDiffAnnotations={getDiffAnnotations}
 					getFileComments={getFileComments}
-					onSendMessage={handleSend}
 				/>
 			);
 			case 'file':
@@ -435,20 +734,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 			case 'subtask':
 				return <SubtaskView key={part.id} part={part} />;
 			case 'agent':
-				return (
-					<div key={part.id} className="text-xs font-medium text-[var(--primary)]">
-						Agent: {part.name}
-					</div>
-				);
+				return <AgentDisplay key={part.id} name={part.name} />;
 			case 'step-finish':
-				return (
-					<div
-						key={part.id}
-						className="mt-1 border-t border-[var(--border)] pt-1 text-[10px] text-[var(--muted-foreground)]"
-					>
-						Tokens: {part.tokens.input}in / {part.tokens.output}out · Cost: ${part.cost.toFixed(4)}
-					</div>
-				);
+				return null;
 			case 'patch':
 				return (
 					<div key={part.id} className="rounded-lg border border-[var(--border)] px-3 py-2">
@@ -491,59 +779,120 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 
 	const conversationView = (
 		<Conversation className="flex-1 min-w-0">
-			<ConversationContent>
-				{messages.length === 0 && !isBusy ? (
-					<ConversationEmptyState>
-						{!isConnected && error ? (
-							<div className="text-center">
-								<WifiOff className="mx-auto mb-3 h-8 w-8 text-red-500" />
-								<p className="text-sm font-medium text-[var(--foreground)]">
-									Connection failed
-								</p>
-								<p className="mb-3 mt-1 text-xs text-[var(--muted-foreground)]">
-									Unable to connect to the AI agent
-								</p>
-								<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
-									{isRetrying ? (
-										<>
-											<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-											Retrying...
-										</>
-									) : (
-										'Retry Connection'
-									)}
-								</Button>
-							</div>
-						) : (
-							<div className="text-center">
-								<p className="text-sm text-[var(--muted-foreground)]">
-									Start a conversation...
-								</p>
-								<p className="mt-1 text-xs text-[var(--muted-foreground)]">
-									Press Enter to send, Shift+Enter for newline
-								</p>
-							</div>
+		<ConversationContent>
+			{session.status !== 'active' && (
+				<div
+					className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
+						session.status === 'error'
+							? 'border-red-500/30 bg-red-500/10 text-red-400'
+							: session.status === 'terminated'
+								? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400'
+								: 'border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)]'
+					}`}
+				>
+					<div className="flex items-center justify-between gap-3">
+						<span>
+							{session.status === 'creating' && (statusElapsedMs > 20000
+								? '🔄 Almost ready...'
+								: statusElapsedMs > 10000
+									? '🔄 Setting up AI agent...'
+									: '🔄 Creating sandbox environment...')}
+							{session.status === 'error' && '❌ Failed to create sandbox.'}
+							{session.status === 'terminated' && "This session's sandbox has been terminated. Chat history is read-only."}
+						</span>
+						{session.status === 'error' && (
+							<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
+								{isRetrying ? (
+									<>
+										<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+										Retrying...
+									</>
+								) : (
+									'Retry'
+								)}
+							</Button>
 						)}
-					</ConversationEmptyState>
-				) : (
-					messages.map((message) => {
-					const parts = getPartsForMessage(message.id);
+					</div>
+					{session.status === 'terminated' && (archiveError || isLoadingArchive) && (
+						<p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+							{isLoadingArchive ? 'Loading chat history...' : archiveError}
+						</p>
+					)}
+				</div>
+			)}
+			{displayMessages.length === 0 && !isBusy ? (
+				<ConversationEmptyState>
+					{!isConnected && error ? (
+						<div className="text-center">
+							<WifiOff className="mx-auto mb-3 h-8 w-8 text-red-500" />
+							<p className="text-sm font-medium text-[var(--foreground)]">
+								Connection failed
+							</p>
+							<p className="mb-3 mt-1 text-xs text-[var(--muted-foreground)]">
+								Unable to connect to the AI agent
+							</p>
+							<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
+								{isRetrying ? (
+									<>
+										<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+										Retrying...
+									</>
+								) : (
+									'Retry Connection'
+								)}
+							</Button>
+						</div>
+					) : (
+						<div className="text-center">
+							{session.status === 'terminated' ? (
+								<p className="text-sm text-[var(--muted-foreground)]">
+									No messages available for this session.
+								</p>
+							) : (
+								<>
+									<p className="text-sm text-[var(--muted-foreground)]">
+										Start a conversation...
+									</p>
+									<p className="mt-1 text-xs text-[var(--muted-foreground)]">
+										Press Enter to send, Shift+Enter for newline
+									</p>
+								</>
+							)}
+						</div>
+					)}
+				</ConversationEmptyState>
+			) : (
+				displayMessages.map((message) => {
+					const parts = getDisplayParts(message.id);
 					const agent = 'agent' in message ? message.agent : undefined;
 					const errorInfo = 'error' in message ? message.error : undefined;
 					const sources = message.role === 'assistant' ? getSourcesForMessage(parts) : [];
 
-						return (
-							<Message
-								from={message.role === 'user' ? 'user' : 'assistant'}
-								key={message.id}
-							>
-								<MessageContent>
-									{agent && (
-										<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-											{agent}
-										</div>
-									)}
-								{parts.map((part) => renderPart(part, message))}
+					return (
+						<Message
+							from={message.role === 'user' ? 'user' : 'assistant'}
+							key={message.id}
+						>
+							<MessageContent>
+								{agent && (
+									<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+										{agent}
+									</div>
+								)}
+							{groupPartsIntoChains(parts).map((part) => {
+								if (part.type === 'chain') {
+									return (
+										<ChainOfThought
+											key={`chain-${part.filePath}-${part.parts[0]?.id ?? 'start'}`}
+											filePath={part.filePath}
+											stepCount={part.parts.length}
+										>
+											{part.parts.map((chainPart) => renderPart(chainPart, message))}
+										</ChainOfThought>
+									);
+								}
+								return renderPart(part, message);
+							})}
 								{errorInfo && (
 									<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
 										Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
@@ -572,10 +921,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 									</MessageActions>
 								</MessageToolbar>
 							)}
-							</Message>
-						);
-					})
-				)}
+						</Message>
+					);
+				})
+			)}
 
 				{pendingPermissions.map((perm) => (
 					<PermissionCard key={perm.id} request={perm} sessionId={sessionId} />
@@ -598,12 +947,25 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 
 	const inputArea = (
 		<div className="relative z-40 border-t border-[var(--border)] p-3">
+			{messageQueue.length > 0 && (
+				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
+					<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
+						Queued ({messageQueue.length})
+					</span>
+					{messageQueue.map((msg, i) => (
+						<div key={`${msg.text}-${i}`} className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+							<Circle className="h-2 w-2 shrink-0" />
+							<span className="truncate">{msg.text.slice(0, 60)}...</span>
+						</div>
+					))}
+				</div>
+			)}
 			<PromptInputProvider>
 				<PromptInput onSubmit={({ text }) => handleSend(text)}>
 					<PromptInputTextarea
 						value={inputText}
 						onChange={(event) => setInputText(event.target.value)}
-						placeholder="Message the agent..."
+						placeholder={promptPlaceholder}
 						disabled={session.status !== 'active'}
 					/>
 					<PromptInputFooter>
@@ -622,6 +984,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 							{commentCount > 0 && (
 								<Badge variant="secondary" className="text-[10px]">
 									{commentCount} comment{commentCount > 1 ? 's' : ''}
+								</Badge>
+							)}
+							{queuedCount > 0 && (
+								<Badge variant="secondary" className="text-[10px] gap-1">
+									<ListOrdered className="h-2.5 w-2.5" />
+									Queued {queuedCount}
 								</Badge>
 							)}
 							{commentCount > 0 && (
@@ -647,31 +1015,52 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 		</div>
 	);
 
-  // Show loading state when session isn't ready
-  if (session.status !== 'active') {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin text-[var(--primary)] mx-auto mb-3" />
-          <p className="text-sm font-medium text-[var(--foreground)]">Starting session...</p>
-          <p className="text-xs text-[var(--muted-foreground)] mt-1">Setting up sandbox and AI agent</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
 		<div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-2">
-        <div className="flex items-center gap-2">
-          <h2 className="text-sm font-semibold text-[var(--foreground)]">
-            {session.title || 'Untitled Session'}
-          </h2>
-          {session.status === 'active' && (
-            <Button
-              variant="ghost"
-              size="sm"
+		<div className="flex items-center border-b border-[var(--border)] px-4 py-2">
+			<div className="flex min-w-0 items-center gap-2">
+				{isEditingTitle ? (
+					<input
+						type="text"
+						value={editTitle}
+						onChange={(event) => setEditTitle(event.target.value)}
+						onBlur={() => {
+							void saveTitle();
+							setIsEditingTitle(false);
+						}}
+						onKeyDown={(event) => {
+							if (event.key === 'Enter') {
+								void saveTitle();
+								setIsEditingTitle(false);
+							}
+							if (event.key === 'Escape') {
+								setEditTitle(session.title || '');
+								setIsEditingTitle(false);
+							}
+						}}
+						maxLength={100}
+						className="max-w-[200px] border-b border-[var(--border)] bg-transparent text-sm font-semibold text-[var(--foreground)] outline-none"
+					/>
+				) : (
+					<h2 className="max-w-[200px] text-sm font-semibold text-[var(--foreground)]">
+						<button
+							type="button"
+							className="w-full truncate text-left hover:text-[var(--primary)]"
+							onClick={() => {
+								setEditTitle(session.title || '');
+								setIsEditingTitle(true);
+							}}
+							title="Click to edit"
+						>
+							{session.title || 'Untitled Session'}
+						</button>
+					</h2>
+				)}
+				{session.status === 'active' && (
+					<Button
+						variant="ghost"
+						size="sm"
               onClick={handleFork}
               className="h-7 w-7 p-0"
               title="Fork session"
@@ -684,63 +1073,47 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
               )}
             </Button>
           )}
-          {session.status === 'active' && !shareUrl && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleShare}
-              className="h-7 w-7 p-0"
-              title="Share session"
-              disabled={isSharing}
-            >
-              {isSharing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Share2 className="h-3.5 w-3.5" />
-              )}
-            </Button>
-          )}
-          {shareUrl && (
-            <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleCopyShareUrl}
-                className="h-7 gap-1 px-2 text-[10px] text-[var(--primary)]"
-                title="Copy share link"
-              >
-                <Link className="h-3 w-3" />
-                Copy Link
-              </Button>
-              <a
-                href={shareUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[10px] text-[var(--primary)] hover:underline"
-              >
-                Open
-              </a>
-            </div>
-          )}
-				<Badge variant="secondary" className="text-[10px]">
-					{commandLabel}
-				</Badge>
+				{shareUrl ? (
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={handleCopyShareLink}
+						className="h-7 w-7 p-0"
+						title={shareCopied ? 'Copied!' : 'Copy link'}
+					>
+						{shareCopied ? (
+							<Check className="h-3.5 w-3.5 text-green-500" />
+						) : (
+							<ExternalLink className="h-3.5 w-3.5" />
+						)}
+					</Button>
+				) : (
+					session.status === 'active' && (
+						<Button
+							variant="ghost"
+							size="sm"
+							onClick={handleShare}
+							className="h-7 w-7 p-0"
+							title="Share session"
+							disabled={isSharing}
+						>
+							{isSharing ? (
+								<Loader2 className="h-3.5 w-3.5 animate-spin" />
+							) : (
+								<ExternalLink className="h-3.5 w-3.5" />
+							)}
+						</Button>
+					)
+				)}
 				{sessionUsage.totalTokens > 0 && (
 					<ContextIndicator
 						tokens={sessionUsage.tokens}
 						cost={sessionUsage.cost}
 						modelID={sessionUsage.modelID}
 						providerID={sessionUsage.providerID}
-						label="Session"
 					/>
 				)}
-				{isBusy && (
-					<Badge variant="default" className="text-[10px] gap-1">
-						<Loader2 className="h-2.5 w-2.5 animate-spin" />
-						Working
-					</Badge>
-				)}
-				{isBusy && queuedCount > 1 && (
+				{queuedCount > 0 && (
 					<Badge variant="secondary" className="text-[10px] gap-1">
 						<ListOrdered className="h-2.5 w-2.5" />
 						Queue {queuedCount}
@@ -751,45 +1124,83 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
               Retrying ({sessionStatus.attempt})
             </Badge>
           )}
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Connection indicator */}
-          {isConnected ? (
-            <Wifi className="h-3.5 w-3.5 text-green-500" />
-          ) : (
-            <WifiOff className="h-3.5 w-3.5 text-red-500" />
-          )}
-          {/* View mode toggle */}
-          <div className="flex items-center rounded-md bg-[var(--muted)] p-0.5">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setViewMode('chat')}
-              className={`h-7 px-2 text-xs ${viewMode === 'chat' ? 'bg-[var(--background)] shadow-sm' : ''}`}
-            >
-              Chat
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setViewMode('ide')}
-              className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
-            >
-              IDE
-            </Button>
-          </div>
-          {/* Terminal toggle */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowTerminal(!showTerminal)}
-            className={`h-7 text-xs gap-1 ${showTerminal ? 'bg-[var(--accent)]' : ''}`}
-          >
-            <TerminalIcon className={`h-3.5 w-3.5 ${terminalConnected ? 'text-green-500' : ''}`} />
-            Terminal
-          </Button>
-          {/* Git popover */}
-          <Popover>
+			</div>
+			<div className="ml-auto flex items-center gap-2">
+				{/* SSH info popover */}
+				{session.sandboxId && (
+					<Popover>
+					<PopoverTrigger asChild>
+						<Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
+							<Terminal className="h-3.5 w-3.5" />
+							SSH
+						</Button>
+					</PopoverTrigger>
+					<PopoverContent
+						align="end"
+						side="bottom"
+						className="w-80 border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)]"
+					>
+						<div className="space-y-3">
+							<div className="flex items-center gap-2 text-xs">
+								<span
+									className={`h-2 w-2 rounded-full ${
+										session.status === 'terminated' ? 'bg-gray-500' : 'bg-green-500'
+									}`}
+								/>
+								<span className="text-[var(--muted-foreground)]">
+									{session.status === 'terminated' ? 'Terminated' : 'Active'}
+								</span>
+							</div>
+							<div>
+								<p className="text-xs text-[var(--muted-foreground)] mb-1">Sandbox ID</p>
+								<code className="text-xs bg-[var(--muted)] px-2 py-1 rounded block">
+									{session.sandboxId}
+								</code>
+							</div>
+							<div>
+								<p className="text-xs text-[var(--muted-foreground)] mb-1">SSH Command</p>
+								<div className="flex items-center gap-2">
+									<code className="text-xs bg-[var(--muted)] px-2 py-1 rounded flex-1 block truncate">
+										{sshCommand}
+									</code>
+									<button
+										type="button"
+										onClick={handleCopySshCommand}
+										className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+										title="Copy SSH command"
+									>
+										{sshCopied ? (
+											<Check className="h-3.5 w-3.5 text-green-500" />
+										) : (
+											<Copy className="h-3.5 w-3.5" />
+										)}
+									</button>
+								</div>
+							</div>
+						</div>
+					</PopoverContent>
+					</Popover>
+				)}
+				{/* Env vars popover */}
+				{session.sandboxId && (
+					<Popover>
+						<PopoverTrigger asChild>
+							<Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
+								<Settings className="h-3.5 w-3.5" />
+								Env
+							</Button>
+						</PopoverTrigger>
+						<PopoverContent
+							align="end"
+							side="bottom"
+							className="w-96 max-h-[520px] overflow-auto p-0"
+						>
+							<EnvPanel sessionId={sessionId} disabled={session.status !== 'active'} />
+						</PopoverContent>
+					</Popover>
+				)}
+				{/* Git popover — full-page git view deferred for now. */}
+				<Popover>
             <PopoverTrigger asChild>
               <Button
                 variant="ghost"
@@ -814,32 +1225,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
               side="bottom"
               className="w-80 max-h-[500px] overflow-auto p-0"
             >
-              <GitPanel sessionId={sessionId} />
-            </PopoverContent>
-          </Popover>
-          {/* Files popover */}
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs gap-1"
-              >
-                <FileCode className="h-3.5 w-3.5" />
-                Files
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              side="bottom"
-              className="w-80 max-h-[400px] overflow-auto p-0"
-            >
-              <FileExplorer sessionId={sessionId} onOpenFile={openFile} activeFilePath={activeFilePath} />
-            </PopoverContent>
-          </Popover>
-          {/* Todo toggle */}
-          {todos.length > 0 && (
-            <Button
+						<GitPanel sessionId={sessionId} metadata={session.metadata ?? undefined} />
+					</PopoverContent>
+				</Popover>
+				{/* Todo toggle */}
+				{todos.length > 0 && (
+					<Button
               variant="ghost"
               size="sm"
               onClick={() => {
@@ -849,21 +1240,33 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
             >
               <ListTodo className="h-3.5 w-3.5" />
               {todos.filter(t => t.status !== 'completed').length}
-            </Button>
-          )}
-          {/* Sandbox link */}
-          {session.sandboxUrl && (
-            <a
-              href={session.sandboxUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-[10px] text-[var(--primary)] hover:underline"
-            >
-              Sandbox
-            </a>
-          )}
-        </div>
-      </div>
+					</Button>
+				)}
+				{/* View mode toggle */}
+				<div className="flex items-center rounded-md bg-[var(--muted)] p-0.5">
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={() => setViewMode('chat')}
+						className={`h-7 px-2 text-xs ${viewMode === 'chat' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+					>
+						Chat
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
+						onClick={() => setViewMode('ide')}
+						className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+					>
+						IDE
+					</Button>
+				</div>
+				<div
+					className={`h-2 w-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`}
+					title={isConnected ? 'Connected' : 'Disconnected'}
+				/>
+			</div>
+		</div>
 
 		{/* Body */}
 		{viewMode === 'ide' ? (
@@ -871,7 +1274,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 				<div className="flex-1 min-w-0">
 					<IDELayout
 						sidebar={
-							<FileExplorer sessionId={sessionId} onOpenFile={openFile} activeFilePath={activeFilePath} />
+							<FileExplorer
+								sessionId={sessionId}
+								onOpenFile={openFile}
+								activeFilePath={activeFilePath}
+								recentFiles={recentFiles}
+							/>
 						}
 						codePanel={
 							<CodePanel
@@ -884,7 +1292,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 								onAddComment={addComment}
 								getDiffAnnotations={getDiffAnnotations}
 								getFileComments={getFileComments}
-								onSendMessage={handleSend}
 							/>
 						}
 					/>
@@ -893,6 +1300,19 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 				<div className="relative z-40 border-t border-[var(--border)] px-3 py-2">
 					<PromptInputProvider>
 						<PromptInput onSubmit={({ text }) => handleSend(text)}>
+							{messageQueue.length > 0 && (
+								<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
+									<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
+										Queued ({messageQueue.length})
+									</span>
+									{messageQueue.map((msg, i) => (
+										<div key={`${msg.text}-${i}`} className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+											<Circle className="h-2 w-2 shrink-0" />
+											<span className="truncate">{msg.text.slice(0, 60)}...</span>
+										</div>
+									))}
+								</div>
+							)}
 							<div className="flex items-center gap-2">
 								<div className="flex-1 min-w-0">
 									<PromptInputTextarea
@@ -924,8 +1344,21 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 
 					{/* Todo sidebar */}
 					{showTodos && todos.length > 0 && (
-						<div className="w-48 md:w-64 shrink-0">
-							<TodoPanel todos={todos} />
+						<div className="w-48 md:w-64 shrink-0 border-l border-[var(--border)] bg-[var(--card)] h-full">
+							<div className="p-2">
+								<Plan
+									title="Plan"
+									items={todos.map((todo) => ({
+										text: todo.content,
+										status:
+											todo.status === 'completed'
+												? 'done'
+												: todo.status === 'in_progress'
+													? 'in-progress'
+													: 'pending',
+									}))}
+								/>
+							</div>
 						</div>
 					)}
 				</div>
@@ -933,14 +1366,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 			</>
 		)}
 
-			{/* Terminal full-screen overlay */}
-			{showTerminal && (
-				<TerminalOverlay
-					sessionId={sessionId}
-					onClose={() => setShowTerminal(false)}
-					onConnectionChange={setTerminalConnected}
-				/>
-			)}
 		</div>
 	);
 }

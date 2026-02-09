@@ -1,16 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
-import {
-	ChevronRight,
-	ChevronDown,
-	FolderOpen,
-	Folder,
-	FileText,
-	Loader2,
-	RefreshCw,
-	AlertCircle,
-	FolderTree,
-} from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Loader2, RefreshCw, AlertCircle, FolderTree, ChevronDown, FileEdit, GitCommit } from 'lucide-react';
 import { Button } from '../ui/button';
+import { FileTree, type FileTreeNode } from '../ai-elements/file-tree';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,135 +15,99 @@ interface FileEntry {
 	size?: number;
 }
 
+interface GitStatus {
+	hasRepo: boolean;
+	branch: string | null;
+	isDirty: boolean;
+	changedFiles: string[];
+	remotes: string[];
+	message?: string;
+	error?: string;
+}
+
+interface GitChange {
+	path: string;
+	status: string;
+}
+
 interface FileExplorerProps {
 	sessionId: string;
 	onOpenFile: (path: string) => void;
 	activeFilePath?: string | null;
+	recentFiles?: string[];
 }
 
-// ---------------------------------------------------------------------------
-// FileTreeNode — recursive tree node (directory or file)
-// ---------------------------------------------------------------------------
-
-interface FileTreeNodeProps {
-	entry: FileEntry;
-	sessionId: string;
-	depth: number;
-	onFileSelect: (path: string) => void;
-	selectedFile: string | null;
-}
-
-function FileTreeNode({ entry, sessionId, depth, onFileSelect, selectedFile }: FileTreeNodeProps) {
-	const [expanded, setExpanded] = useState(false);
-	const [children, setChildren] = useState<FileEntry[]>([]);
-	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-
-	const isDir = entry.type === 'directory';
-	const isSelected = entry.path === selectedFile;
-
-	const loadChildren = useCallback(async () => {
-		if (!isDir) return;
-		setLoading(true);
-		setError(null);
-		try {
-			const res = await fetch(
-				`/api/sessions/${sessionId}/files?path=${encodeURIComponent(entry.path)}`,
-			);
-			if (!res.ok) throw new Error(`HTTP ${res.status}`);
-			const data = await res.json();
-			setChildren(data.entries || []);
-		} catch {
-			setError('Failed to load');
-		} finally {
-			setLoading(false);
-		}
-	}, [sessionId, entry.path, isDir]);
-
-	const handleClick = () => {
-		if (isDir) {
-			if (!expanded && children.length === 0) {
-				loadChildren();
-			}
-			setExpanded(!expanded);
-		} else {
-			onFileSelect(entry.path);
-		}
-	};
-
-	return (
-		<div>
-			<button
-				type="button"
-				onClick={handleClick}
-				className={`flex items-center gap-1 w-full text-left px-1 py-0.5 rounded text-xs hover:bg-[var(--accent)] transition-colors ${
-					isSelected ? 'bg-[var(--accent)] text-[var(--foreground)]' : 'text-[var(--foreground)]'
-				}`}
-				style={{ paddingLeft: `${depth * 12 + 4}px` }}
-			>
-				{/* Chevron / spacer */}
-				{isDir ? (
-					expanded ? (
-						<ChevronDown className="h-3 w-3 shrink-0 text-[var(--muted-foreground)]" />
-					) : (
-						<ChevronRight className="h-3 w-3 shrink-0 text-[var(--muted-foreground)]" />
-					)
-				) : (
-					<span className="w-3 shrink-0" />
-				)}
-
-				{/* Icon */}
-				{isDir ? (
-					expanded ? (
-						<FolderOpen className="h-3.5 w-3.5 shrink-0 text-yellow-500" />
-					) : (
-						<Folder className="h-3.5 w-3.5 shrink-0 text-yellow-500" />
-					)
-				) : (
-					<FileText className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
-				)}
-
-				{/* Name */}
-				<span className="truncate">{entry.name}</span>
-
-				{/* Loading indicator */}
-				{loading && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-[var(--muted-foreground)] ml-auto" />}
-			</button>
-
-			{/* Error */}
-			{error && expanded && (
-				<div
-					className="text-[10px] text-red-500 pl-2"
-					style={{ paddingLeft: `${(depth + 1) * 12 + 4}px` }}
-				>
-					{error}
-				</div>
-			)}
-
-			{/* Children */}
-			{expanded &&
-				children.map((child) => (
-					<FileTreeNode
-						key={child.path}
-						entry={child}
-						sessionId={sessionId}
-						depth={depth + 1}
-						onFileSelect={onFileSelect}
-						selectedFile={selectedFile}
-					/>
-				))}
-		</div>
-	);
-}
-
-// ---------------------------------------------------------------------------
-// FileExplorer — main container
-// ---------------------------------------------------------------------------
-
-export function FileExplorer({ sessionId, onOpenFile, activeFilePath }: FileExplorerProps) {
-	const [entries, setEntries] = useState<FileEntry[]>([]);
+export function FileExplorer({ sessionId, onOpenFile, activeFilePath, recentFiles = [] }: FileExplorerProps) {
+	const [nodes, setNodes] = useState<FileTreeNode[]>([]);
+	const [entryCount, setEntryCount] = useState(0);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
+	const [gitLoading, setGitLoading] = useState(false);
+	const [gitError, setGitError] = useState<string | null>(null);
+
+	const buildTree = useCallback((entries: FileEntry[], rawPath: string): FileTreeNode[] => {
+		const basePath = rawPath === '/' ? '/home/agentuity' : rawPath;
+		const normalizedBase = basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
+		const rootNodes: FileTreeNode[] = [];
+		const nodeMap = new Map<string, FileTreeNode>();
+
+		const addNode = (node: FileTreeNode, parent?: FileTreeNode) => {
+			if (parent) {
+				parent.children = parent.children ?? [];
+				parent.children.push(node);
+			} else {
+				rootNodes.push(node);
+			}
+		};
+
+		const getOrCreateDir = (fullPath: string, name: string, parent?: FileTreeNode) => {
+			const existing = nodeMap.get(fullPath);
+			if (existing) return existing;
+			const node: FileTreeNode = { name, path: fullPath, type: 'directory', children: [] };
+			nodeMap.set(fullPath, node);
+			addNode(node, parent);
+			return node;
+		};
+
+		for (const entry of entries) {
+			const relative = entry.path.startsWith(`${normalizedBase}/`)
+				? entry.path.slice(normalizedBase.length + 1)
+				: entry.path.replace(/^\/+/, '');
+			const segments = relative.split('/').filter(Boolean);
+			if (segments.length === 0) continue;
+			let parent: FileTreeNode | undefined;
+			for (let i = 0; i < segments.length; i += 1) {
+				const segment = segments[i] as string;
+				const fullPath = `${normalizedBase}/${segments.slice(0, i + 1).join('/')}`;
+				const isLeaf = i === segments.length - 1;
+				if (!isLeaf || entry.type === 'directory') {
+					parent = getOrCreateDir(fullPath, segment, parent);
+				} else {
+					const fileNode: FileTreeNode = {
+						name: segment,
+						path: entry.path,
+						type: 'file',
+						size: entry.size,
+					};
+					addNode(fileNode, parent);
+				}
+			}
+		}
+
+		const sortNodes = (list: FileTreeNode[]) => {
+			list.sort((a, b) => {
+				if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+				return a.name.localeCompare(b.name);
+			});
+			for (const node of list) {
+				if (node.children) sortNodes(node.children);
+			}
+		};
+
+		sortNodes(rootNodes);
+		return rootNodes;
+	}, []);
 	const fetchRoot = useCallback(async () => {
 		setLoading(true);
 		setError(null);
@@ -159,17 +115,57 @@ export function FileExplorer({ sessionId, onOpenFile, activeFilePath }: FileExpl
 			const res = await fetch(`/api/sessions/${sessionId}/files`);
 			if (!res.ok) throw new Error(`HTTP ${res.status}`);
 			const data = await res.json();
-			setEntries(data.entries || []);
+			const entries = data.entries || [];
+			setEntryCount(entries.length);
+			setNodes(buildTree(entries, data.path || '/'));
 		} catch {
 			setError('Failed to load files');
+			setNodes([]);
+			setEntryCount(0);
 		} finally {
 			setLoading(false);
 		}
+	}, [sessionId, buildTree]);
+
+	const fetchGitStatus = useCallback(async () => {
+		setGitLoading(true);
+		setGitError(null);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/github/status`);
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			const data = await res.json();
+			setGitStatus(data as GitStatus);
+		} catch {
+			setGitError('Failed to load git status');
+			setGitStatus(null);
+		} finally {
+			setGitLoading(false);
+		}
 	}, [sessionId]);
+
+	const handleRefresh = useCallback(() => {
+		void fetchRoot();
+		void fetchGitStatus();
+	}, [fetchGitStatus, fetchRoot]);
 
 	useEffect(() => {
 		fetchRoot();
-	}, [fetchRoot]);
+		fetchGitStatus();
+	}, [fetchGitStatus, fetchRoot]);
+
+	const gitChanges = useMemo<GitChange[]>(() => {
+		if (!gitStatus?.changedFiles?.length) return [];
+		return gitStatus.changedFiles
+			.map((line) => {
+				const status = line.slice(0, 2).trim();
+				const rawPath = line.slice(2).trim();
+				const path = rawPath.includes('->')
+					? rawPath.split('->').pop()?.trim() || rawPath
+					: rawPath;
+				return { status, path };
+			})
+			.filter((change) => Boolean(change.path));
+	}, [gitStatus]);
 
 	return (
 		<div className="bg-[var(--card)] h-full flex flex-col">
@@ -178,13 +174,13 @@ export function FileExplorer({ sessionId, onOpenFile, activeFilePath }: FileExpl
 				<FolderTree className="h-4 w-4 text-[var(--muted-foreground)]" />
 				<span className="text-xs font-medium text-[var(--foreground)]">Files</span>
 				<span className="ml-auto text-[10px] text-[var(--muted-foreground)]">
-					{!loading && !error && `${entries.length} items`}
+					{!loading && !error && `${entryCount} items`}
 				</span>
 				<Button
 					variant="ghost"
 					size="sm"
-					onClick={fetchRoot}
-					disabled={loading}
+					onClick={handleRefresh}
+					disabled={loading || gitLoading}
 					className="h-6 w-6 p-0"
 					title="Refresh"
 				>
@@ -193,9 +189,68 @@ export function FileExplorer({ sessionId, onOpenFile, activeFilePath }: FileExpl
 			</div>
 
 			{/* Tree view */}
-			<div className="overflow-auto p-1 flex-1">
+			<div className="overflow-auto p-1 flex-1 space-y-2">
+				{recentFiles.length > 0 && (
+					<Collapsible defaultOpen className="rounded-md border border-[var(--border)] bg-[var(--muted)]/40">
+						<CollapsibleTrigger className="flex w-full items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+							<span>Recent Changes ({recentFiles.length})</span>
+							<ChevronDown className="h-3 w-3" />
+						</CollapsibleTrigger>
+						<CollapsibleContent className="border-t border-[var(--border)] px-2 py-1.5 space-y-1">
+							{recentFiles.map((file) => (
+								<button
+									key={file}
+									onClick={() => onOpenFile(file)}
+									className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--accent)]"
+									type="button"
+								>
+									<FileEdit className="h-3 w-3 text-yellow-500" />
+									<span className="truncate" title={file}>{file.split('/').pop()}</span>
+								</button>
+							))}
+						</CollapsibleContent>
+					</Collapsible>
+				)}
+				{gitChanges.length > 0 && (
+					<Collapsible defaultOpen className="rounded-md border border-[var(--border)] bg-[var(--muted)]/40">
+						<CollapsibleTrigger className="flex w-full items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
+							<span>Git Changes ({gitChanges.length})</span>
+							<ChevronDown className="h-3 w-3" />
+						</CollapsibleTrigger>
+						<CollapsibleContent className="border-t border-[var(--border)] px-2 py-1.5 space-y-1">
+							{gitChanges.map((change) => {
+								const statusLabel = change.status || 'M';
+								const statusColor = statusLabel.includes('A') || statusLabel.includes('?')
+									? 'text-green-500'
+									: statusLabel.includes('D')
+										? 'text-red-500'
+										: 'text-yellow-500';
+								return (
+									<button
+										key={`${change.status}-${change.path}`}
+										onClick={() => onOpenFile(change.path)}
+										className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--accent)]"
+										type="button"
+									>
+										<GitCommit className="h-3 w-3 text-[var(--muted-foreground)]" />
+										<span className={`w-4 text-center text-[10px] font-semibold ${statusColor}`}>
+											{statusLabel}
+										</span>
+										<span className="truncate" title={change.path}>{change.path.split('/').pop()}</span>
+									</button>
+								);
+							})}
+						</CollapsibleContent>
+					</Collapsible>
+				)}
+				{gitError && (
+					<div className="flex items-center gap-2 px-2 py-1 text-[11px] text-red-500">
+						<AlertCircle className="h-3 w-3 shrink-0" />
+						{gitError}
+					</div>
+				)}
 				{/* Loading */}
-				{loading && entries.length === 0 && (
+				{loading && nodes.length === 0 && (
 					<div className="flex items-center justify-center py-8">
 						<Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
 					</div>
@@ -210,23 +265,16 @@ export function FileExplorer({ sessionId, onOpenFile, activeFilePath }: FileExpl
 				)}
 
 				{/* Empty */}
-				{!loading && !error && entries.length === 0 && (
+				{!loading && !error && nodes.length === 0 && (
 					<div className="text-center py-8">
 						<p className="text-xs text-[var(--muted-foreground)]">No files found</p>
 					</div>
 				)}
 
 				{/* File tree */}
-				{entries.map((entry) => (
-					<FileTreeNode
-						key={entry.path}
-						entry={entry}
-						sessionId={sessionId}
-						depth={0}
-						onFileSelect={onOpenFile}
-						selectedFile={activeFilePath ?? null}
-					/>
-				))}
+				{nodes.length > 0 && (
+					<FileTree nodes={nodes} selectedPath={activeFilePath ?? undefined} onSelect={onOpenFile} />
+				)}
 			</div>
 		</div>
 	);

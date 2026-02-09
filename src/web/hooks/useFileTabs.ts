@@ -11,6 +11,7 @@ export type FileTab = {
 	oldContent?: string;
 	newContent?: string;
 	readonly?: boolean;
+	isModified?: boolean;
 };
 
 export function getFileName(path: string) {
