@@ -8,6 +8,7 @@ import {
 	Loader2,
 	RefreshCw,
 } from 'lucide-react';
+import { GitLog, type GitLogEntry } from '@tomplum/react-git-log';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
@@ -651,6 +652,77 @@ function PullRequestSection({
 	);
 }
 
+function HistorySection({
+	entries,
+	loading,
+	error,
+	currentBranch,
+}: {
+	entries: GitLogEntry[];
+	loading: boolean;
+	error: string | null;
+	currentBranch: string;
+}) {
+	const isDark = typeof document !== 'undefined'
+		? document.documentElement.classList.contains('dark')
+		: false;
+
+	if (loading && entries.length === 0) {
+		return (
+			<div className="border-b border-[var(--border)] px-3 py-2">
+				<div className="flex items-center gap-2">
+					<GitCommit className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+					<span className="text-xs font-medium text-[var(--foreground)]">History</span>
+				</div>
+				<div className="mt-2 flex items-center justify-center py-4">
+					<Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
+				</div>
+			</div>
+		);
+	}
+
+	const resolvedEntries = entries.map((entry) => ({
+		...entry,
+		branch: entry.branch || currentBranch,
+	}));
+
+	return (
+		<div className="border-b border-[var(--border)] px-3 py-2">
+			<div className="flex items-center gap-2">
+				<GitCommit className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+				<span className="text-xs font-medium text-[var(--foreground)]">History</span>
+			</div>
+			{error && (
+				<p className="mt-2 text-[10px] text-[var(--destructive)]">{error}</p>
+			)}
+			{!error && resolvedEntries.length === 0 && (
+				<p className="mt-2 text-[10px] text-[var(--muted-foreground)]">
+					No commits yet.
+				</p>
+			)}
+			{resolvedEntries.length > 0 && (
+				<div className="mt-2 max-h-[220px] overflow-auto rounded border border-[var(--border)] bg-[var(--background)]">
+					<GitLog
+						entries={resolvedEntries}
+						currentBranch={currentBranch}
+						theme={isDark ? 'dark' : 'light'}
+						showHeaders={false}
+						rowSpacing={6}
+						defaultGraphWidth={120}
+						classes={{ containerClass: 'text-[10px]' }}
+					>
+						<GitLog.GraphHTMLGrid nodeSize={10} showCommitNodeTooltips={false} />
+						<GitLog.Table
+							className="text-[10px]"
+							timestampFormat="YYYY-MM-DD"
+						/>
+					</GitLog>
+				</div>
+			)}
+		</div>
+	);
+}
+
 // ---------------------------------------------------------------------------
 // GitPanel — main exported component
 // ---------------------------------------------------------------------------
@@ -667,6 +739,9 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 	const [creatingRepo, setCreatingRepo] = useState(false);
 	const [createError, setCreateError] = useState<string | null>(null);
 	const [createdRepoUrl, setCreatedRepoUrl] = useState<string | null>(null);
+	const [history, setHistory] = useState<GitLogEntry[]>([]);
+	const [historyLoading, setHistoryLoading] = useState(false);
+	const [historyError, setHistoryError] = useState<string | null>(null);
 
 	const fetchStatus = useCallback(async () => {
 		setLoading(true);
@@ -689,6 +764,32 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 		}
 	}, [sessionId]);
 
+	const fetchHistory = useCallback(async () => {
+		setHistoryLoading(true);
+		setHistoryError(null);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/github/log`);
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				throw new Error(data.error || `HTTP ${res.status}`);
+			}
+			const data = await res.json();
+			if (!Array.isArray(data)) {
+				throw new Error('Invalid git log response');
+			}
+			setHistory(data);
+		} catch (err) {
+			setHistoryError(err instanceof Error ? err.message : 'Failed to load history');
+			setHistory([]);
+		} finally {
+			setHistoryLoading(false);
+		}
+	}, [sessionId]);
+
+	const refreshAll = useCallback(async () => {
+		await Promise.all([fetchStatus(), fetchHistory()]);
+	}, [fetchHistory, fetchStatus]);
+
 	const handleInitRepo = useCallback(async (remoteUrl?: string) => {
 		setInitLoading(true);
 		setInitError(null);
@@ -702,13 +803,13 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 			if (!res.ok || !data.success) {
 				throw new Error(data.error || 'Failed to initialize git repository');
 			}
-			await fetchStatus();
+			await refreshAll();
 		} catch (err) {
 			setInitError(err instanceof Error ? err.message : 'Failed to initialize git repository');
 		} finally {
 			setInitLoading(false);
 		}
-	}, [fetchStatus, sessionId]);
+	}, [refreshAll, sessionId]);
 
 	const handleCreateRepo = useCallback(async () => {
 		if (!repoName.trim()) return;
@@ -730,17 +831,17 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 			if (typeof data.repoUrl === 'string' && data.repoUrl.trim()) {
 				setCreatedRepoUrl(data.repoUrl.trim());
 			}
-			await fetchStatus();
+			await refreshAll();
 		} catch (err) {
 			setCreateError(err instanceof Error ? err.message : 'Failed to create repository');
 		} finally {
 			setCreatingRepo(false);
 		}
-	}, [fetchStatus, isPrivate, repoName, sessionId]);
+	}, [isPrivate, refreshAll, repoName, sessionId]);
 
 	useEffect(() => {
-		fetchStatus();
-	}, [fetchStatus]);
+		refreshAll();
+	}, [refreshAll]);
 
 	useEffect(() => {
 		if (!status) return;
@@ -773,13 +874,18 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 	const resolvedMetadata = createdRepoUrl
 		? { ...(metadata || {}), repoUrl: createdRepoUrl }
 		: metadata;
+	const currentBranch =
+		status?.branch
+		|| resolvedMetadata?.branch
+		|| history.find((entry) => entry.branch)?.branch
+		|| 'main';
 
 	return (
 		<div className="bg-[var(--card)] flex h-full flex-col">
 			<StatusSection
 				status={status}
 				loading={loading}
-				onRefresh={fetchStatus}
+				onRefresh={refreshAll}
 				onInitRepo={handleInitRepo}
 				initLoading={initLoading}
 				initError={initError}
@@ -798,9 +904,15 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 				error={createError}
 			/>
 			<MetadataSection metadata={resolvedMetadata} />
-			<BranchSection sessionId={sessionId} onSuccess={fetchStatus} />
-			<CommitSection sessionId={sessionId} onSuccess={fetchStatus} />
-			<PushSection sessionId={sessionId} onSuccess={fetchStatus} />
+			<HistorySection
+				entries={history}
+				loading={historyLoading}
+				error={historyError}
+				currentBranch={currentBranch}
+			/>
+			<BranchSection sessionId={sessionId} onSuccess={refreshAll} />
+			<CommitSection sessionId={sessionId} onSuccess={refreshAll} />
+			<PushSection sessionId={sessionId} onSuccess={refreshAll} />
 			<PullRequestSection sessionId={sessionId} baseBranch={status?.branch ?? null} />
 		</div>
 	);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ChangeEventHandler } from 'react';
 import {
 	Check,
 	Copy,
@@ -13,6 +14,7 @@ import {
 	Terminal,
 	Settings,
 	WifiOff,
+	X,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -64,6 +66,7 @@ import { useToast } from '../ui/toast';
 import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
 import { cn } from '../../lib/utils';
+import { useUrlState } from '../../hooks/useUrlState';
 
 interface ChatPageProps {
   sessionId: string;
@@ -95,7 +98,41 @@ type QueuedMessage = {
 	text: string;
 	model: string;
 	command?: string;
+	attachments?: AttachmentItem[];
 };
+
+type AttachmentItem = {
+	id: string;
+	filename: string;
+	mime: string;
+	size: number;
+	content: string;
+};
+
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const ALLOWED_EXTENSIONS = new Set([
+	'txt',
+	'md',
+	'mdx',
+	'json',
+	'js',
+	'jsx',
+	'ts',
+	'tsx',
+	'py',
+	'java',
+	'go',
+	'rs',
+	'rb',
+	'php',
+	'sh',
+	'yaml',
+	'yml',
+	'toml',
+	'csv',
+	'log',
+]);
 
 export function ChatPage({ sessionId, session: initialSession, onForkedSession, githubAvailable = true }: ChatPageProps) {
   const [session, setSession] = useState(initialSession);
@@ -251,8 +288,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		}
 	};
 
+
 	const [inputText, setInputText] = useState('');
 	const [isSending, setIsSending] = useState(false);
+	const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [selectedCommand, setSelectedCommand] = useState('');
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
 	const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
@@ -262,12 +301,107 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [isSharing, setIsSharing] = useState(false);
 	const [shareUrl, setShareUrl] = useState<string | null>(null);
 	const [shareCopied, setShareCopied] = useState(false);
-	const [viewMode, setViewMode] = useState<'chat' | 'ide'>('chat');
-	const [sidebarTab, setSidebarTab] = useState<'files' | 'git'>('files');
+	const [urlState, setUrlState] = useUrlState();
+	const viewMode = urlState.v;
+	const sidebarTab = urlState.tab === 'env' ? 'files' : urlState.tab;
 	const [sshCopied, setSshCopied] = useState(false);
 	const [sandboxCopied, setSandboxCopied] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
+	const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+	const formatFileSize = useCallback((size: number) => {
+		if (size < 1024) return `${size} B`;
+		if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+		return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+	}, []);
+
+	const handleOpenAttachmentPicker = useCallback(() => {
+		fileInputRef.current?.click();
+	}, []);
+
+	const handleRemoveAttachment = useCallback((id: string) => {
+		setAttachments((prev) => prev.filter((item) => item.id !== id));
+	}, []);
+
+	const handleAttachmentChange: ChangeEventHandler<HTMLInputElement> = useCallback(
+		async (event) => {
+			const files = Array.from(event.target.files || []);
+			event.target.value = '';
+			if (files.length === 0) return;
+
+			const remainingSlots = MAX_ATTACHMENTS - attachments.length;
+			if (remainingSlots <= 0) {
+				toast({ type: 'error', message: `You can only attach ${MAX_ATTACHMENTS} files.` });
+				return;
+			}
+
+			const accepted = files.slice(0, remainingSlots);
+			const rejected = files.slice(remainingSlots);
+			if (rejected.length > 0) {
+				toast({ type: 'error', message: `Only ${MAX_ATTACHMENTS} files can be attached at once.` });
+			}
+
+			const invalidFiles: string[] = [];
+			const oversizedFiles: string[] = [];
+
+			const readFile = (file: File) =>
+				new Promise<AttachmentItem>((resolve, reject) => {
+					const reader = new FileReader();
+					reader.onload = () => {
+						const result = typeof reader.result === 'string' ? reader.result : '';
+						const base64 = result.includes(',') ? result.split(',')[1] || '' : '';
+						resolve({
+							id: `${file.name}-${file.lastModified}-${Math.random().toString(16).slice(2)}`,
+							filename: file.name,
+							mime: file.type || 'text/plain',
+							size: file.size,
+							content: base64,
+						});
+					};
+					reader.onerror = () => reject(new Error('Failed to read file'));
+					reader.readAsDataURL(file);
+				});
+
+			const newItems: AttachmentItem[] = [];
+			for (const file of accepted) {
+				const ext = file.name.split('.').pop()?.toLowerCase() || '';
+				if (!ALLOWED_EXTENSIONS.has(ext)) {
+					invalidFiles.push(file.name);
+					continue;
+				}
+				if (file.size > MAX_ATTACHMENT_SIZE) {
+					oversizedFiles.push(file.name);
+					continue;
+				}
+				try {
+					const item = await readFile(file);
+					newItems.push(item);
+				} catch {
+					invalidFiles.push(file.name);
+				}
+			}
+
+			if (invalidFiles.length > 0) {
+				toast({
+					type: 'error',
+					message: `Unsupported file types: ${invalidFiles.slice(0, 3).join(', ')}`,
+				});
+			}
+
+			if (oversizedFiles.length > 0) {
+				toast({
+					type: 'error',
+					message: `Files over 10MB: ${oversizedFiles.slice(0, 3).join(', ')}`,
+				});
+			}
+
+			if (newItems.length > 0) {
+				setAttachments((prev) => [...prev, ...newItems]);
+			}
+		},
+		[attachments.length, toast],
+	);
 	const {
 		tabs,
 		activeId,
@@ -293,6 +427,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		if (!sessionId) return;
 		processedToolPartsRef.current = new Set();
 		setRecentFiles([]);
+		setAttachments([]);
 	}, [sessionId]);
 
 	const handleOpenRecentDiff = useCallback(async (filePath: string) => {
@@ -304,6 +439,17 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			const data = await res.json();
 			if (data.oldContent !== undefined && data.newContent !== undefined) {
 				openDiff(filePath, data.oldContent, data.newContent);
+				return;
+			}
+		} catch {
+			// fallback below
+		}
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/files/content?path=${encodeURIComponent(filePath)}`);
+			if (!res.ok) throw new Error('Failed to load file');
+			const data = await res.json();
+			if (typeof data.content === 'string') {
+				openFile(filePath, data.content);
 				return;
 			}
 		} catch {
@@ -339,11 +485,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			: session.status === 'error'
 				? 'Session failed to start.'
 				: 'Waiting for sandbox to be ready...';
+	const attachmentAccept = Array.from(ALLOWED_EXTENSIONS)
+		.map((ext) => `.${ext}`)
+		.join(',');
+	const attachmentDisabled = session.status !== 'active' || attachments.length >= MAX_ATTACHMENTS;
 
 	const sendMessage = useCallback(
 		async (payload: QueuedMessage) => {
 			setIsSending(true);
 			try {
+				if (payload.command && payload.attachments && payload.attachments.length > 0) {
+					throw new Error('Attachments are not supported for commands.');
+				}
 				const res = await fetch(`/api/sessions/${sessionId}/messages`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
@@ -351,6 +504,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					text: payload.text,
 					model: payload.model,
 					command: payload.command,
+					attachments: payload.attachments?.map(({ filename, mime, content }) => ({
+						filename,
+						mime,
+						content,
+					})),
 				}),
 				});
 				if (!res.ok) {
@@ -367,18 +525,26 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	);
 
 	const handleSend = async (text: string) => {
-		if (!text.trim()) return;
+		if (!text.trim() && attachments.length === 0) return;
+		if (selectedCommand && attachments.length > 0) {
+			toast({ type: 'error', message: 'Attachments are not supported with commands.' });
+			return;
+		}
 		const commentsBlock = formatForPrompt();
+		const baseText = text.trim() || (attachments.length > 0 ? 'Attached files.' : '');
 		const fullMessage = commentsBlock
-			? `${text}\n\n---\nCode Comments:\n${commentsBlock}`
-			: text;
+			? `${baseText}\n\n---\nCode Comments:\n${commentsBlock}`
+			: baseText;
+		const nextAttachments = attachments;
 		const payload: QueuedMessage = {
 			text: fullMessage,
 			model: selectedModel,
 			command: selectedCommand || undefined,
+			attachments: nextAttachments,
 		};
 
 		setInputText('');
+		setAttachments([]);
 		if (commentCount > 0) {
 			clearComments();
 		}
@@ -503,7 +669,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		: [];
 	const hasStreamingContent = lastAssistantParts.length > 0;
 	const isStreaming = isBusy;
-	const submitDisabled = session.status !== 'active' || !inputText.trim() || isSending;
+	const submitDisabled =
+		session.status !== 'active'
+		|| isSending
+		|| (!inputText.trim() && attachments.length === 0);
 
 	const copyMessage = useCallback(
 		(message: ChatMessage) => {
@@ -734,12 +903,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 	const renderPart = (part: Part, message: ChatMessage) => {
 		switch (part.type) {
-			case 'text':
-				return (
-					<MessageResponse key={part.id}>
-						<TextPartView part={part} />
-					</MessageResponse>
-				);
+		case 'text':
+			return (
+				<MessageResponse key={part.id}>
+					<TextPartView part={part} isStreaming={isStreaming && message.id === lastAssistantMessage?.id} />
+				</MessageResponse>
+			);
 			case 'reasoning':
 				return renderReasoning(part, message);
 		case 'tool':
@@ -967,6 +1136,17 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		</Conversation>
 	);
 
+	const attachmentInput = (
+		<input
+			ref={fileInputRef}
+			type="file"
+			accept={attachmentAccept}
+			multiple
+			onChange={handleAttachmentChange}
+			className="hidden"
+		/>
+	);
+
 	const inputArea = (
 		<div className="relative z-40 border-t border-[var(--border)] p-3">
 			{messageQueue.length > 0 && (
@@ -990,16 +1170,33 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						placeholder={promptPlaceholder}
 						disabled={session.status !== 'active'}
 					/>
+					{attachments.length > 0 && (
+						<div className="flex flex-wrap gap-2 px-3 pb-2">
+							{attachments.map((attachment) => (
+								<div
+									key={attachment.id}
+									className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2 py-1 text-[10px] text-[var(--foreground)]"
+								>
+									<span className="max-w-[140px] truncate" title={attachment.filename}>
+										{attachment.filename}
+									</span>
+									<span className="text-[10px] text-[var(--muted-foreground)]">
+										{formatFileSize(attachment.size)}
+									</span>
+									<button
+										type="button"
+										className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+										onClick={() => handleRemoveAttachment(attachment.id)}
+										title="Remove attachment"
+									>
+										<X className="h-3 w-3" />
+									</button>
+								</div>
+							))}
+						</div>
+					)}
 					<PromptInputFooter>
 						<div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
-							<button
-								type="button"
-								className="inline-flex items-center gap-1 rounded-md border border-dashed border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted-foreground)]"
-								title="Attach files (coming soon)"
-							>
-								<Paperclip className="h-3 w-3" />
-								Attach
-							</button>
 						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
 						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
 						<span>Enter to send · Shift+Enter for new line</span>
@@ -1026,11 +1223,25 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 								</Button>
 							)}
 						</div>
-						<PromptInputSubmit
-							disabled={submitDisabled}
-							status={isBusy ? 'streaming' : 'ready'}
-							onStop={handleAbort}
-						/>
+						<div className="flex items-center gap-2">
+							<Button
+								variant="ghost"
+								size="icon"
+								type="button"
+								onClick={handleOpenAttachmentPicker}
+								disabled={attachmentDisabled}
+								className="h-9 w-9"
+								aria-label="Attach files"
+								title="Attach files"
+							>
+								<Paperclip className="h-4 w-4" />
+							</Button>
+							<PromptInputSubmit
+								disabled={submitDisabled}
+								status={isBusy ? 'streaming' : 'ready'}
+								onStop={handleAbort}
+							/>
+						</div>
 					</PromptInputFooter>
 				</PromptInput>
 			</PromptInputProvider>
@@ -1039,6 +1250,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
   return (
 		<div className="flex h-full flex-col">
+			{attachmentInput}
       {/* Header */}
 		<div className="flex items-center border-b border-[var(--border)] px-4 py-2">
 			<div className="flex min-w-0 items-center gap-2">
@@ -1268,7 +1480,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={() => setViewMode('chat')}
+						onClick={() => setUrlState({ v: 'chat' })}
 						className={`h-7 px-2 text-xs ${viewMode === 'chat' ? 'bg-[var(--background)] shadow-sm' : ''}`}
 					>
 						Chat
@@ -1276,7 +1488,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={() => setViewMode('ide')}
+						onClick={() => setUrlState({ v: 'ide' })}
 						className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
 					>
 						IDE
@@ -1305,7 +1517,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 												? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
 												: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
 										)}
-										onClick={() => setSidebarTab('files')}
+										onClick={() => setUrlState({ tab: 'files' })}
 										type="button"
 									>
 										Files
@@ -1317,7 +1529,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 												? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
 												: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
 										)}
-										onClick={() => setSidebarTab('git')}
+										onClick={() => setUrlState({ tab: 'git' })}
 										type="button"
 									>
 										<span>Git</span>
@@ -1369,6 +1581,31 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<div className="relative z-40 border-t border-[var(--border)] px-3 py-2">
 					<PromptInputProvider>
 						<PromptInput onSubmit={({ text }) => handleSend(text)}>
+							{attachments.length > 0 && (
+								<div className="flex flex-wrap gap-2 px-3 pb-2">
+									{attachments.map((attachment) => (
+										<div
+											key={attachment.id}
+											className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2 py-1 text-[10px] text-[var(--foreground)]"
+										>
+											<span className="max-w-[140px] truncate" title={attachment.filename}>
+												{attachment.filename}
+											</span>
+											<span className="text-[10px] text-[var(--muted-foreground)]">
+												{formatFileSize(attachment.size)}
+											</span>
+											<button
+												type="button"
+												className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+												onClick={() => handleRemoveAttachment(attachment.id)}
+												title="Remove attachment"
+											>
+												<X className="h-3 w-3" />
+											</button>
+										</div>
+									))}
+								</div>
+							)}
 							{messageQueue.length > 0 && (
 								<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
 									<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
@@ -1396,6 +1633,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 										{commentCount} comment{commentCount > 1 ? 's' : ''}
 									</Badge>
 								)}
+								<Button
+									variant="ghost"
+									size="icon"
+									type="button"
+									onClick={handleOpenAttachmentPicker}
+									disabled={attachmentDisabled}
+									className="h-9 w-9"
+									aria-label="Attach files"
+									title="Attach files"
+								>
+									<Paperclip className="h-4 w-4" />
+								</Button>
 								<PromptInputSubmit
 									disabled={submitDisabled}
 									status={isBusy ? 'streaming' : 'ready'}

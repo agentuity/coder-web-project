@@ -7,6 +7,7 @@ import type { TextPart } from '../../types/opencode';
 
 interface TextPartViewProps {
   part: TextPart;
+  isStreaming?: boolean;
 }
 
 // Create a code plugin with dual themes for dark/light support
@@ -120,11 +121,17 @@ const components = {
   ),
 };
 
-export function TextPartView({ part }: TextPartViewProps) {
+export function TextPartView({ part, isStreaming }: TextPartViewProps) {
   if (part.ignored) return null;
   return (
     <div className="max-w-none text-sm text-[var(--foreground)]">
-      <Streamdown plugins={{ code: codePlugin }} components={components}>
+      <Streamdown
+        plugins={{ code: codePlugin }}
+        components={components}
+        isAnimating={isStreaming}
+        caret={isStreaming ? 'block' : undefined}
+        mode={isStreaming ? 'streaming' : undefined}
+      >
         {part.text}
       </Streamdown>
     </div>

@@ -142,6 +142,13 @@ export function CodePanel({
 		);
 	}, [activeTab]);
 
+	const isNewFileDiff = Boolean(
+		activeTab
+		&& activeTab.kind === 'diff'
+		&& activeTab.oldContent === ''
+		&& (activeTab.newContent ?? '') !== '',
+	);
+
 	const handleAddComment = () => {
 		if (!activeTab || !selectedRange) return;
 		const trimmed = commentText.trim();
@@ -205,11 +212,39 @@ export function CodePanel({
 						<div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-3 py-2">
 							<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
 								<span className="font-mono truncate" title={activeTab.filePath}>{activeTab.filePath}</span>
-								<Badge variant="secondary" className="text-[10px]">Diff</Badge>
+								<Badge variant="secondary" className="text-[10px]">
+									{isNewFileDiff ? 'New File' : 'Diff'}
+								</Badge>
 							</div>
 						</div>
 						<div className="flex-1 min-h-0 overflow-y-auto">
-							{diffData ? (
+							{isNewFileDiff ? (
+								<div className="px-3 py-2">
+									<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
+										<PierreFile
+											file={{
+												name: activeTab.filePath,
+												contents: activeTab.newContent ?? '',
+												lang: getLangFromPath(activeTab.filePath) as any,
+											}}
+											selectedLines={selectedRange}
+											lineAnnotations={getDiffAnnotations(activeTab.filePath)}
+											renderAnnotation={(annotation) => (
+												<div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
+													{annotation.metadata?.comment ?? 'Comment'}
+												</div>
+											)}
+											options={{
+												theme: { dark: 'github-dark', light: 'github-light' },
+												themeType: 'system',
+												disableFileHeader: true,
+												enableLineSelection: true,
+												onLineSelected: (range) => setSelectedRange(range),
+											}}
+										/>
+									</div>
+								</div>
+							) : diffData ? (
 								<div className="px-3 py-2">
 									<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
 										<PierreDiff

@@ -159,7 +159,11 @@ export const ReasoningContent = memo(
 							<Shimmer className="block h-2 w-1/2 rounded bg-[var(--muted)]">&nbsp;</Shimmer>
 						</div>
 					) : (
-						<Streamdown>{children}</Streamdown>
+						<Streamdown
+						isAnimating={isStreaming}
+						caret={isStreaming ? 'block' : undefined}
+						mode={isStreaming ? 'streaming' : undefined}
+					>{children}</Streamdown>
 					)}
 				</div>
 			</CollapsibleContent>

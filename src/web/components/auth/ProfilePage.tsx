@@ -1,26 +1,43 @@
-import { authClient } from '../../lib/auth-client';
+import {
+	AccountSettingsCards,
+	ApiKeysCard,
+	OrganizationSettingsCards,
+	OrganizationSwitcher,
+	SecuritySettingsCards,
+} from '@daveyplate/better-auth-ui';
 
 export function ProfilePage() {
-	const { data: session } = authClient.useSession();
-	const userName = session?.user?.name ? String(session.user.name) : 'Not set';
-	const userEmail = session?.user?.email ? String(session.user.email) : 'Not set';
-
 	return (
-		<div className="p-6 space-y-4 max-w-md">
-			<h2 className="text-lg font-semibold">Profile</h2>
-			<div className="space-y-2">
-				<div>
-					<p className="text-xs text-[var(--muted-foreground)]">Name</p>
-					<p className="text-sm">{userName}</p>
-				</div>
-				<div>
-					<p className="text-xs text-[var(--muted-foreground)]">Email</p>
-					<p className="text-sm">{userEmail}</p>
-				</div>
+		<div className="mx-auto max-w-2xl space-y-8 p-6">
+			<div>
+				<h1 className="text-2xl font-semibold text-[var(--foreground)]">Settings</h1>
+				<p className="text-sm text-[var(--muted-foreground)]">
+					Manage your account, security, and organization.
+				</p>
 			</div>
-			<p className="text-xs text-[var(--muted-foreground)]">
-				Full profile management coming soon via Better Auth UI.
-			</p>
+
+			<section className="space-y-2">
+				<h2 className="text-lg font-medium text-[var(--foreground)]">Account</h2>
+				<AccountSettingsCards />
+			</section>
+
+			<section className="space-y-2">
+				<h2 className="text-lg font-medium text-[var(--foreground)]">Security</h2>
+				<SecuritySettingsCards />
+			</section>
+
+			<section className="space-y-2">
+				<div className="flex items-center justify-between">
+					<h2 className="text-lg font-medium text-[var(--foreground)]">Organization</h2>
+					<OrganizationSwitcher />
+				</div>
+				<OrganizationSettingsCards />
+			</section>
+
+			<section className="space-y-2">
+				<h2 className="text-lg font-medium text-[var(--foreground)]">API Keys</h2>
+				<ApiKeysCard />
+			</section>
 		</div>
 	);
 }

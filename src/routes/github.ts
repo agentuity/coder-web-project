@@ -15,6 +15,18 @@ const api = createRouter();
 const SANDBOX_HOME = '/home/agentuity';
 const PROJECT_DIR = '/home/agentuity/project';
 
+type GitLogEntry = {
+	hash: string;
+	parents: string[];
+	branch: string;
+	message: string;
+	committerDate: string;
+	author?: {
+		name: string;
+		email: string;
+	};
+};
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -93,6 +105,19 @@ function normalizeGitFile(input: string) {
 	const renameMatch = trimmed.match(/->\s*(.+)$/);
 	if (renameMatch?.[1]) return renameMatch[1].trim();
 	return trimmed.replace(/^[ MADRCU?!]{1,2}\s+/, '');
+}
+
+function parseGitBranch(refs: string): string {
+	const entries = refs
+		.split(',')
+		.map((ref) => ref.trim())
+		.filter(Boolean);
+	const headRef = entries.find((ref) => ref.startsWith('HEAD -> '));
+	if (headRef) return headRef.replace('HEAD -> ', '').trim();
+	const branchRef = entries.find(
+		(ref) => !ref.startsWith('tag: ') && !ref.startsWith('origin/') && !ref.startsWith('refs/')
+	);
+	return branchRef ? branchRef.trim() : '';
 }
 
 /** Look up a session and validate it has a sandbox. */
@@ -181,6 +206,69 @@ api.get('/:id/github/status', async (c) => {
 		});
 	} catch (error) {
 		return c.json({ error: 'Failed to get git status', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// GET /:id/github/log — git commit history
+// ---------------------------------------------------------------------------
+api.get('/:id/github/log', async (c) => {
+	const result = await getSession(c.req.param('id')!);
+	if ('error' in result) return c.json({ error: result.error }, result.status);
+	const { session } = result;
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
+
+		const checkResult = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			'test -d .git && echo "YES" || echo "NO"',
+			projectDir,
+		);
+
+		if (checkResult.stdout.trim() !== 'YES') {
+			return c.json([] as GitLogEntry[]);
+		}
+
+		const { stdout, stderr, exitCode } = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			"git log --all --pretty=format:'%h|||%p|||%D|||%s|||%cd|||%an|||%ae' --date=iso -50",
+			projectDir,
+		);
+
+		if (exitCode !== 0) {
+			return c.json({ error: stderr.trim() || 'Failed to load git log' }, 400);
+		}
+
+		const entries: GitLogEntry[] = stdout
+			.split('\n')
+			.map((line) => line.trim())
+			.filter(Boolean)
+			.map((line) => {
+				const [hash, parentsRaw, refsRaw, message, committerDate, authorName, authorEmail] =
+					line.split('|||');
+				const parents = parentsRaw ? parentsRaw.split(' ').filter(Boolean) : [];
+				const refs = refsRaw?.trim() ?? '';
+				return {
+					hash: hash?.trim() ?? '',
+					parents,
+					branch: refs ? parseGitBranch(refs) : '',
+					message: message?.trim() ?? '',
+					committerDate: committerDate?.trim() ?? '',
+					author: {
+						name: authorName?.trim() ?? '',
+						email: authorEmail?.trim() ?? '',
+					},
+				};
+			})
+			.filter((entry) => entry.hash);
+
+		return c.json(entries);
+	} catch (error) {
+		return c.json({ error: 'Failed to load git log', details: String(error) }, 500);
 	}
 });
 

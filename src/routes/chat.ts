@@ -13,6 +13,31 @@ import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxSetEnv, sandb
 import { normalizeSandboxPath } from '../lib/path-utils';
 
 const SANDBOX_HOME = '/home/agentuity';
+const UPLOADS_DIR = `${SANDBOX_HOME}/uploads`;
+const MAX_ATTACHMENTS = 5;
+const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
+const ALLOWED_EXTENSIONS = new Set([
+	'txt',
+	'md',
+	'mdx',
+	'json',
+	'js',
+	'jsx',
+	'ts',
+	'tsx',
+	'py',
+	'java',
+	'go',
+	'rs',
+	'rb',
+	'php',
+	'sh',
+	'yaml',
+	'yml',
+	'toml',
+	'csv',
+	'log',
+]);
 
 /** Ensure a sandbox file path is absolute (rooted at /home/agentuity). */
 function toAbsoluteSandboxPath(p: string): string {
@@ -32,6 +57,17 @@ function toAbsoluteSandboxPath(p: string): string {
 		throw new Error('Path traversal detected');
 	}
 	return normalized;
+}
+
+function sanitizeFilename(filename: string, fallback: string) {
+	const trimmed = filename.trim().split('/').pop()?.split('\\').pop() || '';
+	const safe = trimmed.replace(/[^a-zA-Z0-9._-]/g, '_');
+	return safe || fallback;
+}
+
+function isAllowedFilename(filename: string) {
+	const ext = filename.split('.').pop()?.toLowerCase() || '';
+	return ALLOWED_EXTENSIONS.has(ext);
 }
 
 const api = createRouter();
@@ -77,9 +113,64 @@ api.post('/:id/messages', async (c) => {
 		text: string;
 		model?: string;
 		command?: string;
+		attachments?: Array<{ filename: string; mime: string; content: string }>;
 	}>();
 
+	const messageText = typeof body.text === 'string' ? body.text : '';
+	const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+	if (attachments.length > MAX_ATTACHMENTS) {
+		return c.json({ error: `Too many attachments (max ${MAX_ATTACHMENTS}).` }, 400);
+	}
+	if (body.command && attachments.length > 0) {
+		return c.json({ error: 'Attachments are not supported for commands.' }, 400);
+	}
+
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const apiClient = (c.var.sandbox as any).client;
+	const fileParts: Array<{ type: 'file'; mime: string; filename?: string; url: string }> = [];
+
+	if (attachments.length > 0) {
+		const execution = await sandboxExecute(apiClient, {
+			sandboxId: session.sandboxId,
+			options: {
+				command: ['bash', '-c', `mkdir -p '${UPLOADS_DIR}'`],
+				timeout: '10s',
+			},
+		});
+		if (execution.status !== 'completed') {
+			return c.json({ error: 'Failed to prepare upload directory.' }, 500);
+		}
+
+		const now = Date.now();
+		const filesToWrite: { path: string; content: Buffer }[] = [];
+		for (const [index, attachment] of attachments.entries()) {
+			if (!attachment?.filename || !attachment?.content) {
+				return c.json({ error: 'Invalid attachment payload.' }, 400);
+			}
+			const safeName = sanitizeFilename(attachment.filename, `attachment-${index}`);
+			if (!isAllowedFilename(safeName)) {
+				return c.json({ error: `Unsupported file type: ${attachment.filename}` }, 400);
+			}
+			const buffer = Buffer.from(attachment.content, 'base64');
+			if (buffer.length > MAX_ATTACHMENT_SIZE) {
+				return c.json({ error: `Attachment too large: ${attachment.filename}` }, 400);
+			}
+			const filename = `${now}-${index}-${safeName}`;
+			const filePath = `${UPLOADS_DIR}/${filename}`;
+			filesToWrite.push({ path: filePath, content: buffer });
+			fileParts.push({
+				type: 'file',
+				mime: attachment.mime || 'application/octet-stream',
+				filename: safeName,
+				url: `file://${filePath}`,
+			});
+		}
+
+		await sandboxWriteFiles(apiClient, {
+			sandboxId: session.sandboxId,
+			files: filesToWrite,
+		});
+	}
 
 	try {
 		if (body.command) {
@@ -97,15 +188,15 @@ api.post('/:id/messages', async (c) => {
 			await client.session.promptAsync({
 				path: { id: session.opencodeSessionId },
 				body: {
-					parts: [{ type: 'text' as const, text: body.text }],
+					parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
 					...(providerID && modelID ? { model: { providerID, modelID } } : {}),
 				},
 			});
 		}
 
 		// Auto-title from first message if untitled
-		if (!session.title && body.text) {
-			const title = body.text.length > 60 ? body.text.slice(0, 57) + '...' : body.text;
+		if (!session.title && messageText) {
+			const title = messageText.length > 60 ? messageText.slice(0, 57) + '...' : messageText;
 			await db
 				.update(chatSessions)
 				.set({ title, updatedAt: new Date() })

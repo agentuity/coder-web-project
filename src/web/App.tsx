@@ -14,6 +14,7 @@ import { SettingsPage } from './components/pages/SettingsPage';
 import { SharedSessionPage } from './components/pages/SharedSessionPage';
 import { useAPI } from '@agentuity/react';
 import { ToastProvider, useToast } from './components/ui/toast';
+import { useUrlState } from './hooks/useUrlState';
 
 /**
  * Detect if the current URL is a shared session route.
@@ -51,8 +52,9 @@ function AppContent() {
   const userEmail = user?.email ? String(user.email) : undefined;
   const hasUser = Boolean(userName || userEmail);
 
-	const [currentPage, setCurrentPage] = useState<'home' | 'chat' | 'skills' | 'sources' | 'settings' | 'profile'>('home');
-  const [activeSessionId, setActiveSessionId] = useState<string | undefined>();
+  const [urlState, setUrlState] = useUrlState();
+  const activeSessionId = urlState.s ?? undefined;
+  const currentPage = urlState.p;
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
@@ -142,40 +144,37 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [workspaceId]);
 
-  const handleNewSession = useCallback(async (data: { repoUrl?: string; branch?: string; prompt?: string }) => {
-    if (!workspaceId) return;
-    setIsCreating(true);
-    try {
-      const res = await fetch(`/api/workspaces/${workspaceId}/sessions`, {
+	const handleNewSession = useCallback(async (data: { repoUrl?: string; branch?: string; prompt?: string }) => {
+		if (!workspaceId) return;
+		setIsCreating(true);
+		try {
+			const res = await fetch(`/api/workspaces/${workspaceId}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       });
       if (!res.ok) {
         throw new Error('Failed to create session');
-      }
-      const session = await res.json();
-      setSessions(prev => [session, ...prev]);
-      setActiveSessionId(session.id);
-      setCurrentPage('chat');
-      setShowNewDialog(false);
-    } catch (error) {
-      console.error('Failed to create session:', error);
-      toast({ type: 'error', message: 'Failed to create session' });
-    } finally {
-      setIsCreating(false);
-    }
-  }, [toast, workspaceId]);
+			}
+			const session = await res.json();
+			setSessions(prev => [session, ...prev]);
+			setUrlState({ s: session.id, p: 'chat' });
+			setShowNewDialog(false);
+		} catch (error) {
+			console.error('Failed to create session:', error);
+			toast({ type: 'error', message: 'Failed to create session' });
+		} finally {
+			setIsCreating(false);
+		}
+	}, [setUrlState, toast, workspaceId]);
 
-  const handleSelectSession = useCallback((id: string) => {
-    setActiveSessionId(id);
-    setCurrentPage('chat');
-  }, []);
+	const handleSelectSession = useCallback((id: string) => {
+		setUrlState({ s: id, p: 'chat' });
+	}, [setUrlState]);
 
 	const handleNavigate = useCallback((page: 'skills' | 'sources' | 'settings' | 'profile') => {
-		setActiveSessionId(undefined);
-		setCurrentPage(page);
-	}, []);
+		setUrlState({ s: null, p: page });
+	}, [setUrlState]);
 
   const handleFlagSession = useCallback(async (id: string, flagged: boolean) => {
     try {
@@ -204,32 +203,30 @@ function AppContent() {
     }
   }, [toast]);
 
-  const handleDeleteSession = useCallback(async (id: string) => {
-    try {
-      const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
-      if (!res.ok) {
-        throw new Error('Failed to delete session');
-      }
-      setSessions((prev) => {
-        const updated = prev.filter((session) => session.id !== id);
-        if (activeSessionId === id) {
-          const nextSession = updated[0];
-          setActiveSessionId(nextSession?.id);
-          setCurrentPage(nextSession ? 'chat' : 'home');
-        }
-        return updated;
-      });
-    } catch (error) {
-      console.error('Failed to delete session:', error);
-      toast({ type: 'error', message: 'Failed to delete session' });
-    }
-  }, [activeSessionId, toast]);
+	const handleDeleteSession = useCallback(async (id: string) => {
+		try {
+			const res = await fetch(`/api/sessions/${id}`, { method: 'DELETE' });
+			if (!res.ok) {
+				throw new Error('Failed to delete session');
+			}
+			setSessions((prev) => {
+				const updated = prev.filter((session) => session.id !== id);
+				if (activeSessionId === id) {
+					const nextSession = updated[0];
+					setUrlState({ s: nextSession?.id ?? null, p: 'chat' });
+				}
+				return updated;
+			});
+		} catch (error) {
+			console.error('Failed to delete session:', error);
+			toast({ type: 'error', message: 'Failed to delete session' });
+		}
+	}, [activeSessionId, setUrlState, toast]);
 
-  const handleForkedSession = useCallback((session: Session) => {
-    setSessions(prev => [session, ...prev]);
-    setActiveSessionId(session.id);
-    setCurrentPage('chat');
-  }, []);
+	const handleForkedSession = useCallback((session: Session) => {
+		setSessions(prev => [session, ...prev]);
+		setUrlState({ s: session.id, p: 'chat' });
+	}, [setUrlState]);
 
   // Auth loading state
   if (authLoading) {

@@ -1,147 +1,165 @@
-# agent-code-1000
+# Agentuity Coder
 
-A new Agentuity project created with `agentuity create`.
+A web-based AI coding agent IDE built on the [Agentuity](https://agentuity.dev) platform. Uses [OpenCode](https://opencode.ai) servers running in Agentuity sandboxes as the AI execution engine, with a custom React web UI.
 
-## What You Get
-
-A fully configured Agentuity project with:
-
-- ✅ **TypeScript** - Full type safety out of the box
-- ✅ **Bun runtime** - Fast JavaScript runtime and package manager
-- ✅ **Hot reload** - Development server with auto-rebuild
-- ✅ **Example agent** - Sample "hello" agent to get started
-- ✅ **React frontend** - Pre-configured web interface
-- ✅ **API routes** - Example API endpoints
-- ✅ **Type checking** - TypeScript configuration ready to go
-
-## Project Structure
+## Architecture
 
 ```
-my-app/
-├── src/
-│   ├── agent/            # Agent definitions
-│   │   └── hello/
-│   │       ├── agent.ts  # Example agent
-│   │       └── index.ts  # Default exports
-│   ├── api/              # API definitions
-│   │   └── index.ts      # Example routes
-│   └── web/              # React web application
-│       ├── public/       # Static assets
-│       ├── App.tsx       # Main React component
-│       ├── frontend.tsx  # Entry point
-│       └── index.html    # HTML template
-├── AGENTS.md             # Agent guidelines
-├── app.ts                # Application entry point
-├── tsconfig.json         # TypeScript configuration
-├── package.json          # Dependencies and scripts
-└── README.md             # Project documentation
+Browser → React UI → Hono API → @opencode-ai/sdk → OpenCode server (in Agentuity sandbox)
 ```
 
-## Available Commands
+Each coding session gets its own isolated sandbox with a full development environment, git, and GitHub CLI.
 
-After creating your project, you can run:
+## Features
 
-### Development
+- **AI Chat** with streaming markdown (Streamdown), tool call visualization, and code diffs
+- **IDE Mode** with file explorer, code panel, inline diffs (@pierre/diffs), and line-level commenting
+- **Git Integration** built into the IDE sidebar: status, commit, push, PR creation, repo creation, commit history visualization
+- **File Attachments** in chat (upload files to sandbox, pass to AI as context)
+- **Deep Linking** via URL params (sessions, views, tabs persist across refresh/navigation)
+- **Auth** with BetterAuth (email/password dev, Google OAuth prod), organization management, API keys
+- **Skills & Sources** per-workspace configuration injected into AI context
+- **Session Sharing** via public URLs
+- **Dark Mode** with full theme support
+
+## Prerequisites
+
+- [Bun](https://bun.sh/) v1.0+
+- [Agentuity CLI](https://agentuity.dev) (`npm install -g @agentuity/cli`)
+- PostgreSQL database
+- An Agentuity account and project
+
+## Setup
+
+1. **Clone and install:**
 
 ```bash
-bun dev
+git clone https://github.com/agentuity/coder-web-project.git
+cd coder-web-project
+bun install
 ```
 
-Starts the development server at `http://localhost:3500`
+2. **Configure environment:**
 
-### Build
+Create a `.env` file with the required variables:
 
 ```bash
-bun build
+# Database (PostgreSQL connection string)
+DATABASE_URL=postgresql://user:password@host:5432/dbname
+
+# Auth secret (generate a random string)
+AGENTUITY_AUTH_SECRET=your-random-secret-here
+
+# Google OAuth (optional, for production auth)
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+
+# GitHub integration (optional, for git features)
+# Fine-grained PAT with: Contents R/W, Pull requests R/W, Metadata R, Administration R/W
+GH_TOKEN=ghp_your_github_token
 ```
 
-Compiles your application into the `.agentuity/` directory
+The Agentuity SDK key (`AGENTUITY_SDK_KEY`) is automatically set by the platform when deployed. For local development, run `agentuity dev` which handles this for you.
 
-### Type Check
+3. **Run the database migrations:**
+
+The app uses Drizzle ORM. Migrations run automatically on first start.
+
+## Development
 
 ```bash
-bun typecheck
+bun run dev
 ```
 
-Runs TypeScript type checking
+Starts the development server with hot reload. The app will be available at the URL shown in the terminal.
 
-### Deploy to Agentuity
+## Build
+
+```bash
+bun run build
+```
+
+Compiles the application. The build system automatically bundles the React frontend.
+
+## Type Check
+
+```bash
+bun run typecheck
+```
+
+## Deploy
 
 ```bash
 bun run deploy
 ```
 
-Deploys your application to the Agentuity cloud
+Deploys to the Agentuity cloud. The app gets a public URL at `https://<project-id>.agentuity.run`.
 
-## Next Steps
+## Project Structure
 
-After creating your project:
-
-1. **Customize the example agent** - Edit `src/agent/hello/agent.ts`
-2. **Add new agents** - Create new folders in `src/agent/`
-3. **Add new APIs** - Create new folders in `src/api/`
-4. **Add Web files** - Create new routes in `src/web/`
-5. **Customize the UI** - Edit `src/web/app.tsx`
-6. **Configure your app** - Modify `app.ts` to add middleware, configure services, etc.
-
-## Creating Custom Agents
-
-Create a new agent by adding a folder in `src/agent/`:
-
-```typescript
-// src/agent/my-agent/agent.ts
-import { createAgent } from '@agentuity/runtime';
-import { s } from '@agentuity/schema';
-
-const agent = createAgent({
-	description: 'My amazing agent',
-	schema: {
-		input: s.object({
-			name: s.string(),
-		}),
-		output: s.string(),
-	},
-	handler: async (_ctx, { name }) => {
-		return `Hello, ${name}! This is my custom agent.`;
-	},
-});
-
-export default agent;
+```
+src/
+├── api/                    # Auto-discovered API routes (Agentuity convention)
+│   └── index.ts            # Main API router — mounts all route modules
+├── routes/                 # Route modules (mounted manually in api/index.ts)
+│   ├── chat.ts             # Chat endpoints (prompt, SSE streaming, file ops)
+│   ├── github.ts           # Session-scoped git operations (commit, push, PR, diff, log)
+│   ├── github-global.ts    # Global GitHub endpoints (repos, branches, status)
+│   ├── sessions.ts         # Session CRUD and lifecycle
+│   ├── session-detail.ts   # Single session operations (fork, retry, share, archive)
+│   ├── workspaces.ts       # Workspace CRUD
+│   ├── skills.ts           # Skills CRUD (per workspace)
+│   └── sources.ts          # Sources CRUD (per workspace)
+├── db/
+│   ├── index.ts            # Drizzle DB connection
+│   └── schema.ts           # Database schema
+└── web/                    # React frontend (auto-bundled)
+    ├── index.html          # HTML entry point
+    ├── frontend.tsx         # React entry (providers: Auth, NuqsAdapter, AuthUI)
+    ├── styles.css           # Global styles + ShadCN CSS variables
+    ├── App.tsx              # Main app component (URL-based routing via nuqs)
+    ├── hooks/               # Custom hooks (useFileTabs, useUrlState, etc.)
+    ├── lib/                 # Utilities (auth client, shiki, etc.)
+    ├── types/               # TypeScript type definitions
+    └── components/
+        ├── ui/              # ShadCN/ui primitives (button, card, dialog, etc.)
+        ├── ai-elements/     # AI chat UI components (message, tool, reasoning, etc.)
+        ├── auth/            # Auth pages (SignIn, ProfilePage)
+        ├── chat/            # Chat-specific components (ToolCallCard, GitPanel, etc.)
+        ├── ide/             # IDE components (CodePanel, IDELayout, FileTabs)
+        ├── pages/           # Page-level components (ChatPage, SettingsPage, etc.)
+        ├── sessions/        # Session management (NewSessionDialog)
+        └── shell/           # App shell (AppShell, Sidebar)
 ```
 
-## Adding API Routes
+## Tech Stack
 
-Create custom routes in `src/api/`:
+| Layer | Technology |
+|-------|-----------|
+| Runtime | Bun |
+| Backend | Hono (via `@agentuity/runtime`) |
+| Frontend | React 19 + TailwindCSS v4 |
+| Auth | `@agentuity/auth` (BetterAuth) + `@daveyplate/better-auth-ui` |
+| Database | PostgreSQL via `@agentuity/drizzle` |
+| AI Engine | `@opencode-ai/sdk` → OpenCode server in sandbox |
+| Markdown | `streamdown` + `@streamdown/code` (streaming animation) |
+| Diffs | `@pierre/diffs` (FileDiff + PierreFile) |
+| URL State | `nuqs` (type-safe URL search params) |
+| Git Viz | `@tomplum/react-git-log` |
 
-```typescript
-// src/api/my-agent/route.ts
-import { createRouter } from '@agentuity/runtime';
-import myAgent from './agent';
+## URL Parameters
 
-const router = createRouter();
+The app uses URL search params for deep linking:
 
-router.get('/', async (c) => {
-	const result = await myAgent.run({ message: 'Hello!' });
-	return c.json(result);
-});
+| Param | Values | Description |
+|-------|--------|-------------|
+| `s` | session ID | Active session |
+| `v` | `chat` \| `ide` | View mode |
+| `p` | `chat` \| `settings` \| `skills` \| `sources` \| `profile` | Current page |
+| `tab` | `files` \| `git` | IDE sidebar tab |
 
-router.post('/', myAgent.validator(), async (c) => {
-	const data = c.req.valid('json');
-	const result = await myAgent.run(data);
-	return c.json(result);
-});
+Example: `/?s=abc123&v=ide&tab=git` opens session abc123 in IDE mode with git panel.
 
-export default router;
-```
+## License
 
-## Learn More
-
-- [Agentuity Documentation](https://agentuity.dev)
-- [Bun Documentation](https://bun.sh/docs)
-- [Hono Documentation](https://hono.dev/)
-- [Zod Documentation](https://zod.dev/)
-
-## Requirements
-
-- [Bun](https://bun.sh/) v1.0 or higher
-- TypeScript 5+
+Proprietary. Copyright Agentuity, Inc.
