@@ -297,14 +297,31 @@ api.get('/:id/files', async (c) => {
 			path: path === '/' ? undefined : path,
 		});
 
-		// Transform FileInfo[] into the shape the frontend expects
+		// Transform FileInfo[] into the shape the frontend expects.
+		// f.path from the SDK is relative to the listed directory.
+		// Normalise to absolute paths, avoiding double-slash or duplicate segments.
+		const seen = new Set<string>();
 		const entries = result.files
-			.map((f) => ({
-				name: f.path.split('/').pop() || f.path,
-				path: path === '/' ? `/${f.path}` : `${path}/${f.path}`,
-				type: f.isDir ? ('directory' as const) : ('file' as const),
-				size: f.size,
-			}))
+			.map((f) => {
+				const name = f.path.split('/').pop() || f.path;
+				// Build absolute path: parent + relative name
+				const abs =
+					path === '/'
+						? `/${f.path}`
+						: `${path.replace(/\/+$/, '')}/${f.path.replace(/^\/+/, '')}`;
+				return {
+					name,
+					path: abs,
+					type: f.isDir ? ('directory' as const) : ('file' as const),
+					size: f.size,
+				};
+			})
+			.filter((e) => {
+				// Deduplicate by path
+				if (seen.has(e.path)) return false;
+				seen.add(e.path);
+				return true;
+			})
 			.sort((a, b) => {
 				if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
 				return a.name.localeCompare(b.name);

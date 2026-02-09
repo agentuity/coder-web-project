@@ -1,7 +1,8 @@
-import { useMemo } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import type { ToolPart } from '../../types/opencode';
 import { FileDiff as PierreDiff } from '@pierre/diffs/react';
 import { parseDiffFromFile } from '@pierre/diffs';
+import type { BundledLanguage } from 'shiki';
 import {
 	Tool,
 	ToolContent,
@@ -76,6 +77,54 @@ function getLangFromPath(filePath: string): string | undefined {
     rs: 'rust', go: 'go', sql: 'sql', toml: 'toml',
   };
   return ext ? map[ext] : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Parse read tool output — strip <file> tags and line number prefixes
+// ---------------------------------------------------------------------------
+
+function parseFileOutput(output: string): string {
+  return output
+    .replace(/^<file>\n?/, '')                  // Remove opening <file> tag
+    .replace(/\n?\(End of file[^\)]*\)$/, '')   // Remove "(End of file - total N lines)"
+    .replace(/\n?<\/file>$/, '')                // Remove closing </file> tag
+    .split('\n')
+    .map(line => line.replace(/^\d{5}\| ?/, ''))  // Remove "00001| " line number prefix
+    .join('\n')
+    .trim();
+}
+
+// ---------------------------------------------------------------------------
+// Lazy Shiki highlighter singleton (shared with FileExplorer)
+// ---------------------------------------------------------------------------
+
+let _readHighlighterPromise: Promise<any> | null = null;
+
+function getReadHighlighter() {
+  if (!_readHighlighterPromise) {
+    _readHighlighterPromise = import('shiki').then((shiki) =>
+      shiki.createHighlighter({
+        themes: ['github-dark', 'github-light'],
+        langs: [
+          'typescript', 'tsx', 'javascript', 'jsx', 'json', 'markdown',
+          'css', 'html', 'yaml', 'bash', 'python', 'rust', 'go', 'sql', 'toml', 'xml',
+        ],
+      }),
+    );
+  }
+  return _readHighlighterPromise;
+}
+
+function getLangForShiki(filePath: string): BundledLanguage | 'text' {
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
+  const map: Record<string, BundledLanguage | 'text'> = {
+    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
+    json: 'json', md: 'markdown', css: 'css', html: 'html',
+    yml: 'yaml', yaml: 'yaml', sh: 'bash', bash: 'bash',
+    py: 'python', rs: 'rust', go: 'go', sql: 'sql',
+    toml: 'toml', xml: 'xml', svg: 'xml', txt: 'text',
+  };
+  return map[ext] || 'text';
 }
 
 // ---------------------------------------------------------------------------
@@ -187,16 +236,48 @@ function WriteView({ filePath, content, output }: { filePath: string; content: s
 }
 
 function ReadView({ filePath, output }: { filePath: string; output?: string }) {
+  const parsed = useMemo(() => (output ? parseFileOutput(output) : ''), [output]);
+  const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
+  const lang = getLangForShiki(filePath);
+
+  useEffect(() => {
+    if (!parsed || lang === 'text') return;
+    let cancelled = false;
+    getReadHighlighter()
+      .then((highlighter) => {
+        if (cancelled) return;
+        const html = highlighter.codeToHtml(parsed, {
+          lang,
+          theme: 'github-dark',
+        });
+        setHighlightedHtml(html);
+      })
+      .catch(() => { /* fallback to plain text */ });
+    return () => { cancelled = true; };
+  }, [parsed, lang]);
+
+  const lines = parsed.split('\n');
+
   return (
     <div className="px-3 py-2">
       <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
         <span>📖</span>
         <span className="font-mono truncate" title={filePath}>Read: {shortenPath(filePath)}</span>
+        <span className="ml-auto text-[10px]">{lines.length} lines</span>
       </div>
-      {output && (
-        <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-64 overflow-auto rounded-md border border-[var(--border)] px-2 py-1">
-          {output}
-        </pre>
+      {parsed && (
+        <div className="rounded-md border border-[var(--border)] overflow-hidden max-h-64 overflow-y-auto overflow-x-auto">
+          {highlightedHtml ? (
+            <div
+              className="file-viewer-shiki text-[11px] leading-[1.6] font-mono min-h-full [&_pre]:m-0 [&_pre]:p-2 [&_pre]:min-h-full [&_code]:!text-[11px] [&_.line]:before:content-[attr(data-line)] [&_.line]:before:text-[var(--muted-foreground)] [&_.line]:before:opacity-50 [&_.line]:before:text-right [&_.line]:before:inline-block [&_.line]:before:w-10 [&_.line]:before:pr-3 [&_.line]:before:select-none"
+              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
+            />
+          ) : (
+            <pre className="text-[11px] leading-[1.6] font-mono m-0 px-2 py-1 text-[var(--foreground)] bg-[var(--muted)]">
+              {parsed}
+            </pre>
+          )}
+        </div>
       )}
     </div>
   );

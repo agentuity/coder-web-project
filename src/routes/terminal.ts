@@ -38,7 +38,7 @@ api.get(
 				const sandboxId = session.sandboxId;
 
 				// Spawn agentuity cloud ssh as a subprocess
-				proc = Bun.spawn(['agentuity', 'cloud', 'ssh', sandboxId, '--', 'bash', '-l'], {
+				proc = Bun.spawn(['agentuity', 'cloud', 'ssh', sandboxId, 'bash -l'], {
 					stdin: 'pipe',
 					stdout: 'pipe',
 					stderr: 'pipe',
