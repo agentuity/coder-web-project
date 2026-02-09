@@ -21,7 +21,7 @@ interface SidebarProps {
   activeSessionId?: string;
   onNewSession: () => void;
   onSelectSession: (id: string) => void;
-	onNavigate: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
+  onNavigate: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
   onFlagSession?: (id: string, flagged: boolean) => void;
   onRetrySession?: (id: string) => void;
   onDeleteSession?: (id: string) => void;
@@ -176,9 +176,9 @@ export function Sidebar({
           : 'hidden md:flex',
       )}
     >
-		<div className={cn('flex items-center gap-2 px-4 py-3', isCollapsed && 'justify-center px-2')}>
+      <div className={cn('flex items-center gap-2 px-4 py-3', isCollapsed && 'justify-center px-2')}>
         <AgentuityLogo size={20} className="text-cyan-400" />
-        {!isCollapsed && <span className="text-xl font-semibold tracking-tight">Coder</span>}
+        {!isCollapsed && <span id="logo" className="text-xl font-semibold tracking-tight">Coder</span>}
       </div>
       <div className={cn('p-3', isCollapsed && 'px-2')}>
         {isCollapsed ? (
@@ -297,43 +297,43 @@ export function Sidebar({
           {!isCollapsed && 'Settings'}
         </button>
       </div>
-		<div className="mt-auto border-t border-[var(--border)]">
-			<div className={cn('flex items-center gap-2 p-3', isCollapsed && 'flex-col p-2')}>
-				{!isCollapsed && (
-					<div className="flex-1 min-w-0">
-						<p className="text-xs font-medium truncate">{displayName}</p>
-						{showEmail && <p className="text-[10px] text-[var(--muted-foreground)] truncate">{userEmail}</p>}
-					</div>
-				)}
-				<button
-					onClick={() => onNavigate('profile')}
-					className={cn(
-						'shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]',
-						currentPage === 'profile' && 'text-[var(--foreground)]'
-					)}
-					title="Profile"
-					aria-label="Profile"
-					type="button"
-				>
-					<User className="h-3.5 w-3.5" />
-				</button>
-				<button
-					onClick={onToggleTheme}
-					className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
-					title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
-					type="button"
-				>
-					{theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-				</button>
-				<button
-					onClick={onSignOut}
-					className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-red-500 hover:bg-[var(--accent)]"
-					title="Sign out"
-					type="button"
-				>
-					<LogOut className="h-3.5 w-3.5" />
-				</button>
-			</div>
+      <div className="mt-auto border-t border-[var(--border)]">
+        <div className={cn('flex items-center gap-2 p-3', isCollapsed && 'flex-col p-2')}>
+          {!isCollapsed && (
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate">{displayName}</p>
+              {showEmail && <p className="text-[10px] text-[var(--muted-foreground)] truncate">{userEmail}</p>}
+            </div>
+          )}
+          <button
+            onClick={() => onNavigate('profile')}
+            className={cn(
+              'shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]',
+              currentPage === 'profile' && 'text-[var(--foreground)]'
+            )}
+            title="Profile"
+            aria-label="Profile"
+            type="button"
+          >
+            <User className="h-3.5 w-3.5" />
+          </button>
+          <button
+            onClick={onToggleTheme}
+            className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            type="button"
+          >
+            {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+          </button>
+          <button
+            onClick={onSignOut}
+            className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-red-500 hover:bg-[var(--accent)]"
+            title="Sign out"
+            type="button"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+          </button>
+        </div>
         <div className="p-2">
           <button
             onClick={onToggleCollapse}

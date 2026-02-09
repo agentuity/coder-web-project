@@ -12,6 +12,7 @@ import skillRoutes from '../routes/skills';
 import sourceRoutes from '../routes/sources';
 import sharedRoutes from '../routes/shared';
 import githubRoutes from '../routes/github';
+import githubGlobalRoutes from '../routes/github-global';
 
 const api = createRouter();
 
@@ -35,10 +36,13 @@ api.use('/*', authMiddleware);
 
 // GET /api/me — current authenticated user
 api.get('/me', async (c) => {
-  const session = c.get('session');
-  const user = c.get('user');
-  return c.json({ user, session });
+	const session = c.get('session');
+	const user = c.get('user');
+	return c.json({ user, session });
 });
+
+// GitHub routes (non-session scoped)
+api.route('/github', githubGlobalRoutes);
 
 // Workspace routes
 api.route('/workspaces', workspaceRoutes);

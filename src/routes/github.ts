@@ -12,6 +12,7 @@ import { sandboxExecute } from '@agentuity/server';
 
 const api = createRouter();
 
+const SANDBOX_HOME = '/home/agentuity';
 const PROJECT_DIR = '/home/agentuity/project';
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,35 @@ async function execInSandbox(
 	}
 
 	return { stdout, stderr, exitCode: execution.exitCode ?? -1 };
+}
+
+/** Ensure a sandbox file path is absolute (rooted at /home/agentuity). */
+function toAbsoluteSandboxPath(p: string): string {
+	if (p.startsWith(SANDBOX_HOME)) {
+		// Even if it starts with SANDBOX_HOME, normalize to prevent /home/agentuity/../../../etc/passwd
+		const normalized = new URL(p, 'file:///').pathname;
+		if (!normalized.startsWith(SANDBOX_HOME)) {
+			throw new Error('Path traversal detected');
+		}
+		return normalized;
+	}
+	const rel = p.startsWith('/') ? p.slice(1) : p;
+	const joined = `${SANDBOX_HOME}/${rel}`;
+	// Use URL to normalize the path (resolves .., ., double slashes)
+	const normalized = new URL(joined, 'file:///').pathname;
+	if (!normalized.startsWith(SANDBOX_HOME)) {
+		throw new Error('Path traversal detected');
+	}
+	return normalized;
+}
+
+function toRepoRelativePath(rawPath: string, projectDir: string) {
+	const absolute = toAbsoluteSandboxPath(rawPath);
+	if (absolute === projectDir) return '';
+	if (absolute.startsWith(`${projectDir}/`)) {
+		return absolute.slice(projectDir.length + 1);
+	}
+	return rawPath.replace(/^\/+/, '');
 }
 
 function getProjectDir(session: typeof chatSessions.$inferSelect) {
@@ -200,6 +230,138 @@ api.post('/:id/github/init', async (c) => {
 		return c.json({ success: true });
 	} catch (error) {
 		return c.json({ error: 'Failed to initialize repository', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/github/create-repo — create a GitHub repo and push
+// ---------------------------------------------------------------------------
+api.post('/:id/github/create-repo', async (c) => {
+	const result = await getSession(c.req.param('id')!);
+	if ('error' in result) return c.json({ error: result.error }, result.status);
+	const { session } = result;
+
+	const body = await c.req
+		.json<{ name: string; description?: string; isPrivate?: boolean }>()
+		.catch(() => ({} as { name: string; description?: string; isPrivate?: boolean }));
+	const name = typeof body.name === 'string' ? body.name.trim() : '';
+	const description = typeof body.description === 'string' ? body.description.trim() : '';
+	const isPrivate = body.isPrivate !== false;
+
+	if (!name || !/^[a-zA-Z0-9._-]+$/.test(name)) {
+		return c.json({ success: false, error: 'Invalid repository name' }, 400);
+	}
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
+		const safeName = name.replace(/'/g, "'\\''");
+		const safeDescription = description ? description.replace(/'/g, "'\\''") : '';
+
+		const repoCheck = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			'test -d .git && echo "YES" || echo "NO"',
+			projectDir,
+		);
+
+		if (repoCheck.stdout.trim() !== 'YES') {
+			const { stderr, exitCode } = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				'git init',
+				projectDir,
+			);
+			if (exitCode !== 0) {
+				return c.json({ success: false, error: stderr.trim() || 'Failed to initialize repository' }, 400);
+			}
+		}
+
+		const commitCheck = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			'git rev-parse --verify HEAD',
+			projectDir,
+		);
+
+		if (commitCheck.exitCode !== 0) {
+			const addResult = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				'git add -A',
+				projectDir,
+			);
+			if (addResult.exitCode !== 0) {
+				return c.json({ success: false, error: addResult.stderr.trim() || 'Failed to stage files' }, 400);
+			}
+
+			const commitResult = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				"git commit -m 'Initial commit'",
+				projectDir,
+			);
+
+			if (commitResult.exitCode !== 0) {
+				const allowEmptyResult = await execInSandbox(
+					apiClient,
+					session.sandboxId!,
+					"git commit --allow-empty -m 'Initial commit'",
+					projectDir,
+				);
+				if (allowEmptyResult.exitCode !== 0) {
+					return c.json({
+						success: false,
+						error: allowEmptyResult.stderr.trim() || allowEmptyResult.stdout.trim() || 'Failed to commit',
+					}, 400);
+				}
+			}
+		}
+
+		const authResult = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			'gh auth setup-git',
+			projectDir,
+		);
+		if (authResult.exitCode !== 0) {
+			return c.json({
+				success: false,
+				error: authResult.stderr.trim() || 'Failed to setup git authentication',
+			}, 400);
+		}
+
+		const visibilityFlag = isPrivate ? '--private' : '--public';
+		const descriptionFlag = safeDescription ? ` --description '${safeDescription}'` : '';
+		const createCmd = `gh repo create '${safeName}' ${visibilityFlag} --source=. --push${descriptionFlag}`;
+		const { stdout, stderr, exitCode } = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			createCmd,
+			projectDir,
+		);
+
+		if (exitCode !== 0) {
+			return c.json({
+				success: false,
+				error: stderr.trim() || 'Failed to create GitHub repository',
+			}, 400);
+		}
+
+		const urlMatch = stdout.match(/https?:\/\/\S+/);
+		const repoUrl = urlMatch ? urlMatch[0].replace(/\.git$/, '') : undefined;
+
+		if (repoUrl) {
+			const metadata = (session.metadata || {}) as Record<string, unknown>;
+			await db
+				.update(chatSessions)
+				.set({ metadata: { ...metadata, repoUrl } })
+				.where(eq(chatSessions.id, session.id));
+		}
+
+		return c.json({ success: true, repoUrl });
+	} catch (error) {
+		return c.json({ error: 'Failed to create GitHub repository', details: String(error) }, 500);
 	}
 });
 
@@ -428,6 +590,38 @@ api.post('/:id/github/pr', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /:id/github/push — push current branch to remote
+// ---------------------------------------------------------------------------
+api.post('/:id/github/push', async (c) => {
+	const result = await getSession(c.req.param('id')!);
+	if ('error' in result) return c.json({ error: result.error }, result.status);
+	const { session } = result;
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
+
+		const { stderr, exitCode } = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			'git push -u origin HEAD',
+			projectDir,
+		);
+
+		if (exitCode !== 0) {
+			return c.json({
+				success: false,
+				error: stderr.trim() || 'Failed to push branch',
+			}, 400);
+		}
+
+		return c.json({ success: true });
+	} catch (error) {
+		return c.json({ error: 'Failed to push branch', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
 // GET /:id/github/diff — current working tree diff
 // ---------------------------------------------------------------------------
 api.get('/:id/github/diff', async (c) => {
@@ -450,6 +644,102 @@ api.get('/:id/github/diff', async (c) => {
 		return c.json({ diff: stdout });
 	} catch (error) {
 		return c.json({ error: 'Failed to get diff', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// GET /:id/github/diff-file — per-file diff and content
+// ---------------------------------------------------------------------------
+api.get('/:id/github/diff-file', async (c) => {
+	const result = await getSession(c.req.param('id')!);
+	if ('error' in result) return c.json({ error: result.error }, result.status);
+	const { session } = result;
+
+	const rawPath = c.req.query('path');
+	if (!rawPath) return c.json({ error: 'path query is required' }, 400);
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
+		const repoPath = toRepoRelativePath(rawPath, projectDir);
+		if (!repoPath) return c.json({ error: 'Invalid file path' }, 400);
+		const absolutePath = toAbsoluteSandboxPath(rawPath);
+		const safeRepoPath = repoPath.replace(/'/g, "'\\''");
+		const safeAbsolutePath = absolutePath.replace(/'/g, "'\\''");
+
+		const statusResult = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			`git status --porcelain -- '${safeRepoPath}'`,
+			projectDir,
+		);
+		const statusLine = statusResult.stdout.trim().split('\n').find(Boolean) || '';
+		const status = statusLine.slice(0, 2).trim();
+		const isUntracked = status === '??';
+		const isAdded = status.includes('A');
+		const isDeleted = status.includes('D');
+
+		const diffResult = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			`git diff -- '${safeRepoPath}' 2>/dev/null`,
+			projectDir,
+		);
+
+		let oldContent = '';
+		let newContent = '';
+
+		if (isDeleted) {
+			const oldResult = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				`git show HEAD:'${safeRepoPath}' 2>/dev/null`,
+				projectDir,
+			);
+			if (oldResult.exitCode === 0) {
+				oldContent = oldResult.stdout;
+			}
+			newContent = '';
+		} else if (isUntracked || isAdded) {
+			const newResult = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				`cat '${safeAbsolutePath}' 2>/dev/null`,
+				projectDir,
+			);
+			if (newResult.exitCode === 0) {
+				newContent = newResult.stdout;
+			}
+			oldContent = '';
+		} else {
+			const oldResult = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				`git show HEAD:'${safeRepoPath}' 2>/dev/null`,
+				projectDir,
+			);
+			if (oldResult.exitCode === 0) {
+				oldContent = oldResult.stdout;
+			}
+			const newResult = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				`cat '${safeAbsolutePath}' 2>/dev/null`,
+				projectDir,
+			);
+			if (newResult.exitCode === 0) {
+				newContent = newResult.stdout;
+			}
+		}
+
+		return c.json({
+			path: rawPath,
+			diff: diffResult.stdout,
+			oldContent,
+			newContent,
+		});
+	} catch (error) {
+		return c.json({ error: 'Failed to get diff file', details: String(error) }, 500);
 	}
 });
 

@@ -12,6 +12,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
 import { Textarea } from '../ui/textarea';
+import { cn } from '../../lib/utils';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,6 +45,7 @@ interface GitMetadata {
 interface GitPanelProps {
 	sessionId: string;
 	metadata?: GitMetadata;
+	onOpenDiff: (filePath: string, oldContent: string, newContent: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -57,6 +59,9 @@ function StatusSection({
 	onInitRepo,
 	initLoading,
 	initError,
+	onOpenDiff,
+	diffLoadingPath,
+	diffError,
 }: {
 	status: GitStatus | null;
 	loading: boolean;
@@ -64,8 +69,31 @@ function StatusSection({
 	onInitRepo: (remoteUrl?: string) => void;
 	initLoading: boolean;
 	initError: string | null;
+	onOpenDiff: (filePath: string) => void;
+	diffLoadingPath: string | null;
+	diffError: string | null;
 }) {
 	const [remoteUrl, setRemoteUrl] = useState('');
+	const changes = (status?.changedFiles || [])
+		.map((line) => {
+			const statusLabel = line.slice(0, 2).trim();
+			const rawPath = line.slice(2).trim();
+			const path = rawPath.includes('->')
+				? rawPath.split('->').pop()?.trim() || rawPath
+				: rawPath;
+			return { status: statusLabel, path };
+		})
+		.filter((change) => Boolean(change.path));
+
+	const getStatusClass = (statusLabel: string) => {
+		if (statusLabel.includes('A') || statusLabel.includes('?')) {
+			return 'text-[var(--primary)]';
+		}
+		if (statusLabel.includes('D')) {
+			return 'text-[var(--destructive)]';
+		}
+		return 'text-[var(--foreground)]';
+	};
 
 	return (
 		<div className="border-b border-[var(--border)] px-3 py-2">
@@ -137,17 +165,31 @@ function StatusSection({
 							</Badge>
 						)}
 					</div>
-					{status.isDirty && status.changedFiles.length > 0 && (
-						<div className="max-h-24 overflow-auto rounded border border-[var(--border)] bg-[var(--muted)] p-1.5">
-							{status.changedFiles.map((file) => (
-								<div
-									key={file}
-									className="truncate font-mono text-[10px] text-[var(--muted-foreground)]"
+					{status.isDirty && changes.length > 0 && (
+						<div className="rounded border border-[var(--border)] bg-[var(--muted)] p-1.5">
+							{changes.map((change) => (
+								<button
+									key={`${change.status}-${change.path}`}
+									className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[10px] font-mono text-[var(--muted-foreground)] hover:bg-[var(--accent)] cursor-pointer"
+									onClick={() => onOpenDiff(change.path)}
+									type="button"
+									disabled={diffLoadingPath === change.path}
 								>
-									{file}
-								</div>
+									<span className={`w-4 text-center text-[10px] font-semibold ${getStatusClass(change.status || 'M')}`}>
+										{change.status || 'M'}
+									</span>
+									<span className="truncate" title={change.path}>
+										{change.path}
+									</span>
+									{diffLoadingPath === change.path && (
+										<Loader2 className="h-3 w-3 animate-spin text-[var(--muted-foreground)]" />
+									)}
+								</button>
 							))}
 						</div>
+					)}
+					{diffError && (
+						<p className="text-[10px] text-[var(--destructive)]">{diffError}</p>
 					)}
 				</div>
 			)}
@@ -207,6 +249,76 @@ function MetadataSection({ metadata }: { metadata?: GitMetadata }) {
 							{prNumber ? `#${prNumber}` : prUrl}
 						</a>
 					</div>
+				)}
+			</div>
+		</div>
+	);
+}
+
+function CreateRepoSection({
+	show,
+	repoName,
+	onRepoNameChange,
+	isPrivate,
+	onPrivateChange,
+	onCreate,
+	creating,
+	error,
+}: {
+	show: boolean;
+	repoName: string;
+	onRepoNameChange: (value: string) => void;
+	isPrivate: boolean;
+	onPrivateChange: (value: boolean) => void;
+	onCreate: () => void;
+	creating: boolean;
+	error: string | null;
+}) {
+	if (!show) return null;
+
+	return (
+		<div className="border-b border-[var(--border)] px-3 py-2">
+			<div className="flex items-center gap-2 mb-2">
+				<GitBranch className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+				<span className="text-xs font-medium text-[var(--foreground)]">Create GitHub Repo &amp; Push</span>
+			</div>
+			<p className="text-[10px] text-[var(--muted-foreground)] mb-2">
+				Create a new repository on GitHub and push your current project.
+			</p>
+			<div className="space-y-2">
+				<Input
+					value={repoName}
+					onChange={(e) => onRepoNameChange(e.target.value)}
+					placeholder="Repository name"
+					className="h-7 text-xs"
+				/>
+				<label className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+					<input
+						type="checkbox"
+						checked={isPrivate}
+						onChange={(e) => onPrivateChange(e.target.checked)}
+						className="h-3 w-3 rounded border border-[var(--border)] accent-[var(--primary)]"
+					/>
+					<span>Private repository</span>
+				</label>
+				<Button
+					variant="default"
+					size="sm"
+					onClick={onCreate}
+					disabled={creating || !repoName.trim()}
+					className={cn('h-7 text-xs w-full', creating && 'cursor-wait')}
+				>
+					{creating ? (
+						<>
+							<Loader2 className="h-3 w-3 animate-spin mr-1" />
+							Creating...
+						</>
+					) : (
+						'Create Repo & Push'
+					)}
+				</Button>
+				{error && (
+					<p className="text-[10px] text-[var(--destructive)]">{error}</p>
 				)}
 			</div>
 		</div>
@@ -363,6 +475,71 @@ function CommitSection({
 	);
 }
 
+function PushSection({
+	sessionId,
+	onSuccess,
+}: {
+	sessionId: string;
+	onSuccess: () => void;
+}) {
+	const [loading, setLoading] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const [success, setSuccess] = useState(false);
+
+	const handlePush = async () => {
+		setLoading(true);
+		setError(null);
+		setSuccess(false);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/github/push`, {
+				method: 'POST',
+			});
+			const data = await res.json();
+			if (!res.ok || !data.success) {
+				throw new Error(data.error || 'Failed to push branch');
+			}
+			setSuccess(true);
+			onSuccess();
+			setTimeout(() => setSuccess(false), 2000);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : 'Failed to push branch');
+		} finally {
+			setLoading(false);
+		}
+	};
+
+	return (
+		<div className="border-b border-[var(--border)] px-3 py-2">
+			<div className="flex items-center gap-2 mb-2">
+				<GitCommit className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+				<span className="text-xs font-medium text-[var(--foreground)]">Push</span>
+			</div>
+			<div className="flex items-center gap-2">
+				<Button
+					variant="secondary"
+					size="sm"
+					onClick={handlePush}
+					disabled={loading}
+					className="h-7 text-xs"
+				>
+					{loading ? (
+						<Loader2 className="h-3 w-3 animate-spin mr-1" />
+					) : (
+						<GitCommit className="h-3 w-3 mr-1" />
+					)}
+					{loading ? 'Pushing...' : 'Push'}
+				</Button>
+				{success && (
+					<span className="text-[10px] text-[var(--primary)]">Pushed</span>
+				)}
+			</div>
+			{error && (
+				<p className="mt-1 text-[10px] text-[var(--destructive)]">{error}</p>
+			)}
+		</div>
+	);
+}
+
 function PullRequestSection({
 	sessionId,
 	baseBranch,
@@ -478,11 +655,18 @@ function PullRequestSection({
 // GitPanel — main exported component
 // ---------------------------------------------------------------------------
 
-export function GitPanel({ sessionId, metadata }: GitPanelProps) {
+export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 	const [status, setStatus] = useState<GitStatus | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [initLoading, setInitLoading] = useState(false);
 	const [initError, setInitError] = useState<string | null>(null);
+	const [diffLoadingPath, setDiffLoadingPath] = useState<string | null>(null);
+	const [diffError, setDiffError] = useState<string | null>(null);
+	const [repoName, setRepoName] = useState('');
+	const [isPrivate, setIsPrivate] = useState(true);
+	const [creatingRepo, setCreatingRepo] = useState(false);
+	const [createError, setCreateError] = useState<string | null>(null);
+	const [createdRepoUrl, setCreatedRepoUrl] = useState<string | null>(null);
 
 	const fetchStatus = useCallback(async () => {
 		setLoading(true);
@@ -526,12 +710,72 @@ export function GitPanel({ sessionId, metadata }: GitPanelProps) {
 		}
 	}, [fetchStatus, sessionId]);
 
+	const handleCreateRepo = useCallback(async () => {
+		if (!repoName.trim()) return;
+		setCreatingRepo(true);
+		setCreateError(null);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/github/create-repo`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					name: repoName.trim(),
+					isPrivate,
+				}),
+			});
+			const data = await res.json();
+			if (!res.ok || !data.success) {
+				throw new Error(data.error || 'Failed to create repository');
+			}
+			if (typeof data.repoUrl === 'string' && data.repoUrl.trim()) {
+				setCreatedRepoUrl(data.repoUrl.trim());
+			}
+			await fetchStatus();
+		} catch (err) {
+			setCreateError(err instanceof Error ? err.message : 'Failed to create repository');
+		} finally {
+			setCreatingRepo(false);
+		}
+	}, [fetchStatus, isPrivate, repoName, sessionId]);
+
 	useEffect(() => {
 		fetchStatus();
 	}, [fetchStatus]);
 
+	useEffect(() => {
+		if (!status) return;
+		const shouldShow = status.hasRepo === false || status.remotes.length === 0;
+		if (shouldShow && !repoName) {
+			setRepoName('my-project');
+		}
+	}, [repoName, status]);
+
+	const handleOpenDiff = useCallback(async (filePath: string) => {
+		setDiffLoadingPath(filePath);
+		setDiffError(null);
+		try {
+			const res = await fetch(
+				`/api/sessions/${sessionId}/github/diff-file?path=${encodeURIComponent(filePath)}`,
+			);
+			const data = await res.json();
+			if (!res.ok) {
+				throw new Error(data.error || 'Failed to load diff');
+			}
+			onOpenDiff(filePath, data.oldContent || '', data.newContent || '');
+		} catch (err) {
+			setDiffError(err instanceof Error ? err.message : 'Failed to load diff');
+		} finally {
+			setDiffLoadingPath(null);
+		}
+	}, [onOpenDiff, sessionId]);
+
+	const showCreateRepo = Boolean(status && (status.hasRepo === false || status.remotes.length === 0));
+	const resolvedMetadata = createdRepoUrl
+		? { ...(metadata || {}), repoUrl: createdRepoUrl }
+		: metadata;
+
 	return (
-		<div className="bg-[var(--card)] flex flex-col max-h-[500px] overflow-auto">
+		<div className="bg-[var(--card)] flex h-full flex-col">
 			<StatusSection
 				status={status}
 				loading={loading}
@@ -539,22 +783,40 @@ export function GitPanel({ sessionId, metadata }: GitPanelProps) {
 				onInitRepo={handleInitRepo}
 				initLoading={initLoading}
 				initError={initError}
+				onOpenDiff={handleOpenDiff}
+				diffLoadingPath={diffLoadingPath}
+				diffError={diffError}
 			/>
-			<MetadataSection metadata={metadata} />
+			<CreateRepoSection
+				show={showCreateRepo}
+				repoName={repoName}
+				onRepoNameChange={setRepoName}
+				isPrivate={isPrivate}
+				onPrivateChange={setIsPrivate}
+				onCreate={handleCreateRepo}
+				creating={creatingRepo}
+				error={createError}
+			/>
+			<MetadataSection metadata={resolvedMetadata} />
 			<BranchSection sessionId={sessionId} onSuccess={fetchStatus} />
 			<CommitSection sessionId={sessionId} onSuccess={fetchStatus} />
+			<PushSection sessionId={sessionId} onSuccess={fetchStatus} />
 			<PullRequestSection sessionId={sessionId} baseBranch={status?.branch ?? null} />
 		</div>
 	);
 }
 
 /** Lightweight hook to fetch branch + dirty count for the header badge. */
-export function useGitStatus(sessionId: string | undefined) {
+export function useGitStatus(sessionId: string | undefined, enabled = true) {
 	const [branch, setBranch] = useState<string | null>(null);
 	const [changedCount, setChangedCount] = useState(0);
 
 	useEffect(() => {
-		if (!sessionId) return;
+		if (!sessionId || !enabled) {
+			setBranch(null);
+			setChangedCount(0);
+			return;
+		}
 		let cancelled = false;
 
 		const load = async () => {
@@ -577,7 +839,7 @@ export function useGitStatus(sessionId: string | undefined) {
 			cancelled = true;
 			clearInterval(interval);
 		};
-	}, [sessionId]);
+	}, [sessionId, enabled]);
 
 	return { branch, changedCount };
 }

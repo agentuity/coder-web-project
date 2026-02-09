@@ -63,6 +63,7 @@ import { Loader } from '../ai-elements/loader';
 import { useToast } from '../ui/toast';
 import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
+import { cn } from '../../lib/utils';
 
 interface ChatPageProps {
   sessionId: string;
@@ -87,6 +88,7 @@ interface ChatPageProps {
     flagged: boolean | null;
     metadata?: Record<string, unknown> | null;
   }) => void;
+  githubAvailable?: boolean;
 }
 
 type QueuedMessage = {
@@ -95,7 +97,7 @@ type QueuedMessage = {
 	command?: string;
 };
 
-export function ChatPage({ sessionId, session: initialSession, onForkedSession }: ChatPageProps) {
+export function ChatPage({ sessionId, session: initialSession, onForkedSession, githubAvailable = true }: ChatPageProps) {
   const [session, setSession] = useState(initialSession);
   const { toast } = useToast();
   const [statusStartedAt, setStatusStartedAt] = useState(() => Date.now());
@@ -261,6 +263,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 	const [shareUrl, setShareUrl] = useState<string | null>(null);
 	const [shareCopied, setShareCopied] = useState(false);
 	const [viewMode, setViewMode] = useState<'chat' | 'ide'>('chat');
+	const [sidebarTab, setSidebarTab] = useState<'files' | 'git'>('files');
 	const [sshCopied, setSshCopied] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
@@ -305,7 +308,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 		},
 		[archivedParts, getPartsForMessage, session.status],
 	);
-	const { branch: gitBranch, changedCount: gitChangedCount } = useGitStatus(activeSessionId);
+	const { branch: gitBranch, changedCount: gitChangedCount } = useGitStatus(activeSessionId, githubAvailable);
 
 	useEffect(() => {
 		if (!isEditingTitle) {
@@ -1199,35 +1202,20 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 						</PopoverContent>
 					</Popover>
 				)}
-				{/* Git popover — full-page git view deferred for now. */}
-				<Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-7 text-xs gap-1"
-              >
-                <GitBranch className="h-3.5 w-3.5" />
-                {gitBranch ? (
-                  <span className="font-mono max-w-[100px] truncate">{gitBranch}</span>
-                ) : (
-                  'Git'
-                )}
-                {gitChangedCount > 0 && (
-                  <Badge variant="destructive" className="text-[9px] h-4 min-w-[16px] px-1">
-                    {gitChangedCount}
-                  </Badge>
-                )}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent
-              align="end"
-              side="bottom"
-              className="w-80 max-h-[500px] overflow-auto p-0"
-            >
-						<GitPanel sessionId={sessionId} metadata={session.metadata ?? undefined} />
-					</PopoverContent>
-				</Popover>
+			{/* Git badge */}
+			{githubAvailable && gitBranch && (
+				<div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+					<GitBranch className="h-3 w-3" />
+					<span className="font-mono max-w-[120px] truncate text-[var(--foreground)]">
+						{gitBranch}
+					</span>
+					{gitChangedCount > 0 && (
+						<span className="text-[10px] rounded px-1 bg-[var(--muted)] text-[var(--primary)]">
+							{gitChangedCount}
+						</span>
+					)}
+				</div>
+			)}
 				{/* Todo toggle */}
 				{todos.length > 0 && (
 					<Button
@@ -1273,14 +1261,61 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 			<div className="flex flex-1 min-w-0 flex-col">
 				<div className="flex-1 min-w-0">
 					<IDELayout
-						sidebar={
-							<FileExplorer
-								sessionId={sessionId}
-								onOpenFile={openFile}
-								activeFilePath={activeFilePath}
-								recentFiles={recentFiles}
-							/>
-						}
+					sidebar={
+						<div className="flex h-full flex-col">
+							{githubAvailable && (
+								<div className="flex border-b border-[var(--border)] shrink-0">
+									<button
+										className={cn(
+											"flex-1 px-3 py-2 text-xs font-medium transition-colors",
+											sidebarTab === 'files'
+												? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
+												: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
+										)}
+										onClick={() => setSidebarTab('files')}
+										type="button"
+									>
+										Files
+									</button>
+									<button
+										className={cn(
+											"flex-1 px-3 py-2 text-xs font-medium transition-colors",
+											sidebarTab === 'git'
+												? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
+												: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
+										)}
+										onClick={() => setSidebarTab('git')}
+										type="button"
+									>
+										<span>Git</span>
+										{gitChangedCount > 0 && (
+											<span className="ml-1 rounded px-1 text-[10px] bg-[var(--muted)] text-[var(--primary)]">
+												{gitChangedCount}
+											</span>
+										)}
+									</button>
+								</div>
+							)}
+							<div className="flex-1 overflow-y-auto">
+								{githubAvailable && sidebarTab === 'git' ? (
+									<GitPanel
+										sessionId={sessionId}
+										metadata={session.metadata ?? undefined}
+										onOpenDiff={(path, oldContent, newContent) =>
+											openDiff(path, oldContent, newContent)
+										}
+									/>
+								) : (
+									<FileExplorer
+										sessionId={sessionId}
+										onOpenFile={openFile}
+										activeFilePath={activeFilePath}
+										recentFiles={recentFiles}
+									/>
+								)}
+							</div>
+						</div>
+					}
 						codePanel={
 							<CodePanel
 								sessionId={sessionId}

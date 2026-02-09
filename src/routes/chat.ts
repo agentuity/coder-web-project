@@ -16,10 +16,22 @@ const SANDBOX_HOME = '/home/agentuity';
 
 /** Ensure a sandbox file path is absolute (rooted at /home/agentuity). */
 function toAbsoluteSandboxPath(p: string): string {
-	if (p.startsWith(SANDBOX_HOME)) return p;
-	// Strip leading slash for joining
+	if (p.startsWith(SANDBOX_HOME)) {
+		// Even if it starts with SANDBOX_HOME, normalize to prevent /home/agentuity/../../../etc/passwd
+		const normalized = new URL(p, 'file:///').pathname;
+		if (!normalized.startsWith(SANDBOX_HOME)) {
+			throw new Error('Path traversal detected');
+		}
+		return normalized;
+	}
 	const rel = p.startsWith('/') ? p.slice(1) : p;
-	return `${SANDBOX_HOME}/${rel}`;
+	const joined = `${SANDBOX_HOME}/${rel}`;
+	// Use URL to normalize the path (resolves .., ., double slashes)
+	const normalized = new URL(joined, 'file:///').pathname;
+	if (!normalized.startsWith(SANDBOX_HOME)) {
+		throw new Error('Path traversal detected');
+	}
+	return normalized;
 }
 
 const api = createRouter();

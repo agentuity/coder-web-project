@@ -57,6 +57,7 @@ function AppContent() {
   const [isCreating, setIsCreating] = useState(false);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [githubAvailable, setGithubAvailable] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
       const stored = localStorage.getItem('agentuity-theme');
@@ -71,6 +72,14 @@ function AppContent() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     localStorage.setItem('agentuity-theme', theme);
   }, [theme]);
+
+  // Check if GitHub integration is available (GH_TOKEN configured server-side)
+  useEffect(() => {
+    fetch('/api/github/status')
+      .then(r => r.json())
+      .then((data: { available?: boolean }) => setGithubAvailable(data.available ?? false))
+      .catch(() => setGithubAvailable(false));
+  }, []);
 
   const handleToggleTheme = useCallback(() => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
@@ -246,6 +255,7 @@ function AppContent() {
         sessionId={activeSession.id}
         session={activeSession}
         onForkedSession={handleForkedSession}
+        githubAvailable={githubAvailable}
       />
     );
   } else if (currentPage === 'skills' && workspaceId) {
@@ -293,6 +303,7 @@ function AppContent() {
         onClose={() => setShowNewDialog(false)}
         onCreate={handleNewSession}
         isCreating={isCreating}
+        githubAvailable={githubAvailable}
       />
     </>
   );
