@@ -1,8 +1,11 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import type { ToolPart } from '../../types/opencode';
-import { FileDiff as PierreDiff } from '@pierre/diffs/react';
-import { parseDiffFromFile } from '@pierre/diffs';
+import { File as PierreFile, FileDiff as PierreDiff } from '@pierre/diffs/react';
+import { parseDiffFromFile, type DiffLineAnnotation, type SelectedLineRange } from '@pierre/diffs';
 import type { BundledLanguage } from 'shiki';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { getLangFromPath } from '../../lib/shiki';
 import {
 	Tool,
 	ToolContent,
@@ -13,7 +16,14 @@ import {
 import type { ToolState, ToolStatus } from '../ai-elements/tool';
 
 interface ToolCallCardProps {
-  part: ToolPart;
+	part: ToolPart;
+	onOpenDiff?: (filePath: string, oldString: string, newString: string) => void;
+	onOpenWrite?: (filePath: string, content: string) => void;
+	onOpenRead?: (filePath: string, content: string) => void;
+	onOpenFile?: (filePath: string) => void;
+	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
+	getDiffAnnotations?: (file: string) => DiffLineAnnotation<{ id: string; comment: string }>[];
+	onSendMessage?: (text: string) => void;
 }
 
 function getToolDisplayName(tool: string): string {
@@ -42,6 +52,12 @@ function isBashTool(input: Record<string, unknown>): input is Record<string, unk
   return typeof input.command === 'string';
 }
 
+function isWebFetchTool(input: Record<string, unknown>): input is Record<string, unknown> & {
+	url: string;
+} {
+	return typeof input.url === 'string';
+}
+
 function isWriteTool(input: Record<string, unknown>): input is Record<string, unknown> & {
   filePath: string;
   content: string;
@@ -64,20 +80,17 @@ function isReadTool(input: Record<string, unknown>): input is Record<string, unk
   );
 }
 
+function isAgentInvocation(input: Record<string, unknown>): input is Record<string, unknown> & {
+	subagent_type: string;
+	description?: string;
+	prompt?: string;
+} {
+	return typeof input.subagent_type === 'string';
+}
+
 // ---------------------------------------------------------------------------
 // Language detection helper for @pierre/diffs
 // ---------------------------------------------------------------------------
-
-function getLangFromPath(filePath: string): string | undefined {
-  const ext = filePath.split('.').pop()?.toLowerCase();
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-    json: 'json', md: 'markdown', css: 'css', html: 'html',
-    yml: 'yaml', yaml: 'yaml', sh: 'bash', py: 'python',
-    rs: 'rust', go: 'go', sql: 'sql', toml: 'toml',
-  };
-  return ext ? map[ext] : undefined;
-}
 
 // ---------------------------------------------------------------------------
 // Parse read tool output — strip <file> tags and line number prefixes
@@ -94,37 +107,8 @@ function parseFileOutput(output: string): string {
     .trim();
 }
 
-// ---------------------------------------------------------------------------
-// Lazy Shiki highlighter singleton (shared with FileExplorer)
-// ---------------------------------------------------------------------------
-
-let _readHighlighterPromise: Promise<any> | null = null;
-
-function getReadHighlighter() {
-  if (!_readHighlighterPromise) {
-    _readHighlighterPromise = import('shiki').then((shiki) =>
-      shiki.createHighlighter({
-        themes: ['github-dark', 'github-light'],
-        langs: [
-          'typescript', 'tsx', 'javascript', 'jsx', 'json', 'markdown',
-          'css', 'html', 'yaml', 'bash', 'python', 'rust', 'go', 'sql', 'toml', 'xml',
-        ],
-      }),
-    );
-  }
-  return _readHighlighterPromise;
-}
-
 function getLangForShiki(filePath: string): BundledLanguage | 'text' {
-  const ext = filePath.split('.').pop()?.toLowerCase() ?? '';
-  const map: Record<string, BundledLanguage | 'text'> = {
-    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-    json: 'json', md: 'markdown', css: 'css', html: 'html',
-    yml: 'yaml', yaml: 'yaml', sh: 'bash', bash: 'bash',
-    py: 'python', rs: 'rust', go: 'go', sql: 'sql',
-    toml: 'toml', xml: 'xml', svg: 'xml', txt: 'text',
-  };
-  return map[ext] || 'text';
+	return getLangFromPath(filePath) ?? 'text';
 }
 
 // ---------------------------------------------------------------------------
@@ -138,44 +122,124 @@ function shortenPath(filePath: string): string {
   return '…/' + parts.slice(-3).join('/');
 }
 
-function DiffView({ filePath, oldString, newString }: { filePath: string; oldString: string; newString: string }) {
-  const lang = getLangFromPath(filePath) as any;
-  const fileName = filePath.split('/').pop() || filePath;
+function getAgentBadge(agent: string) {
+	const normalized = agent.replace('Agentuity Coder ', '').trim();
+	const labels: Record<string, string> = {
+		Lead: 'Lead',
+		Scout: 'Scout',
+		Builder: 'Builder',
+		Architect: 'Architect',
+		Reviewer: 'Reviewer',
+		Memory: 'Memory',
+		Expert: 'Expert',
+		Runner: 'Runner',
+		Product: 'Product',
+	};
+	return labels[normalized] ?? normalized;
+}
 
-  const diffData = useMemo(() => {
-    try {
-      return parseDiffFromFile(
-        { name: fileName, contents: oldString, lang },
-        { name: fileName, contents: newString, lang },
-      );
-    } catch {
-      return null;
-    }
-  }, [fileName, oldString, newString, lang]);
+function AgentInvocationView({ input }: { input: { subagent_type: string; description?: string; prompt?: string } }) {
+	const agentLabel = getAgentBadge(input.subagent_type);
+	return (
+		<div className="px-3 py-2">
+			<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+				<span>🤖</span>
+				<Badge variant="secondary" className="text-[10px]">{agentLabel}</Badge>
+				<span className="truncate">{input.description ?? 'Agent task'}</span>
+			</div>
+			{input.prompt && (
+				<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-2 text-xs text-[var(--foreground)] whitespace-pre-wrap">
+					{input.prompt}
+				</div>
+			)}
+		</div>
+	);
+}
 
-  return (
-    <div className="px-3 py-2">
-      <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
-        <span>📝</span>
-        <span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
-      </div>
-      <div className="rounded-md border border-[var(--border)] overflow-hidden max-h-72 overflow-y-auto overflow-x-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
-        {diffData ? (
-          <PierreDiff
-            fileDiff={diffData}
-            options={{
-              theme: 'github-dark',
-              disableFileHeader: true,
-              diffStyle: 'unified',
-              diffIndicators: 'bars',
-            }}
-          />
-        ) : (
-          <div className="px-2 py-1 text-xs text-[var(--muted-foreground)]">Unable to render diff</div>
-        )}
-      </div>
-    </div>
-  );
+function DiffView({
+	filePath,
+	oldString,
+	newString,
+	onAddComment,
+	annotations,
+}: {
+	filePath: string;
+	oldString: string;
+	newString: string;
+	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
+	annotations?: DiffLineAnnotation<{ id: string; comment: string }>[];
+}) {
+	const lang = getLangFromPath(filePath) as any;
+	const fileName = filePath.split('/').pop() || filePath;
+	const [selectedRange, setSelectedRange] = useState<SelectedLineRange | null>(null);
+	const [commentText, setCommentText] = useState('');
+
+	const diffData = useMemo(() => {
+		try {
+			return parseDiffFromFile(
+				{ name: fileName, contents: oldString, lang },
+				{ name: fileName, contents: newString, lang },
+			);
+		} catch {
+			return null;
+		}
+	}, [fileName, oldString, newString, lang]);
+
+	const handleAddComment = () => {
+		if (!onAddComment || !selectedRange) return;
+		const trimmed = commentText.trim();
+		if (!trimmed) return;
+		onAddComment(filePath, selectedRange, trimmed, 'diff');
+		setCommentText('');
+		setSelectedRange(null);
+	};
+
+	return (
+		<div className="px-3 py-2">
+			<div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
+				<span>📝</span>
+				<span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
+			</div>
+			<div className="rounded-md border border-[var(--border)] overflow-hidden max-h-72 overflow-y-auto overflow-x-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
+				{diffData ? (
+					<PierreDiff
+						fileDiff={diffData}
+						selectedLines={selectedRange}
+						lineAnnotations={annotations}
+						renderAnnotation={(annotation) => (
+							<div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
+								{annotation.metadata?.comment ?? 'Comment'}
+							</div>
+						)}
+						options={{
+							theme: { dark: 'github-dark', light: 'github-light' },
+							themeType: 'system',
+							disableFileHeader: true,
+							diffStyle: 'unified',
+							diffIndicators: 'bars',
+							enableLineSelection: true,
+							onLineSelected: (range) => setSelectedRange(range),
+						}}
+					/>
+				) : (
+					<div className="px-2 py-1 text-xs text-[var(--muted-foreground)]">Unable to render diff</div>
+				)}
+			</div>
+			{onAddComment && selectedRange && (
+				<div className="mt-2 flex gap-2">
+					<input
+						value={commentText}
+						onChange={(event) => setCommentText(event.target.value)}
+						placeholder="Add a comment"
+						className="flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
+					/>
+					<Button size="sm" variant="secondary" className="h-7 text-xs" onClick={handleAddComment}>
+						Add
+					</Button>
+				</div>
+			)}
+		</div>
+	);
 }
 
 function BashView({ command, output }: { command: string; output?: string }) {
@@ -199,86 +263,128 @@ function BashView({ command, output }: { command: string; output?: string }) {
   );
 }
 
-function WriteView({ filePath, content, output }: { filePath: string; content: string; output?: string }) {
-  const lines = content.split('\n');
-  const preview = lines.slice(0, 20);
-  const truncated = lines.length > 20;
-  return (
-    <div className="px-3 py-2">
-      <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
-        <span>📄</span>
-        <span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
-        <span className="ml-auto text-[10px]">{lines.length} lines</span>
-      </div>
-      <div className="rounded-md border border-[var(--border)] overflow-hidden max-h-64 overflow-auto">
-		<pre className="text-[11px] leading-[1.6] font-mono m-0 px-2 py-1 text-green-400 bg-green-500/5">
-			{preview.map((line, i) => (
-				<div key={`${i}-${line}`} className="whitespace-pre-wrap break-all">
-					<span className="select-none opacity-40 mr-2 inline-block w-5 text-right">{i + 1}</span>
-					{line}
+function FileListView({ title, output }: { title: string; output?: string }) {
+	const items = output ? output.split('\n').filter(Boolean) : [];
+	return (
+		<div className="px-3 py-2">
+			<div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-2">{title}</div>
+			{items.length === 0 ? (
+				<div className="text-xs text-[var(--muted-foreground)]">No results</div>
+			) : (
+				<ul className="space-y-1 text-xs text-[var(--foreground)]">
+					{items.map((item) => (
+						<li key={item} className="font-mono truncate" title={item}>{item}</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+}
+
+function WebFetchView({ url, output }: { url: string; output?: string }) {
+	const preview = output ? output.slice(0, 400) : '';
+	return (
+		<div className="px-3 py-2">
+			<div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-2">WebFetch</div>
+			<div className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-1 text-xs font-mono text-[var(--foreground)] break-all">
+				{url}
+			</div>
+			{preview && (
+				<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-xs text-[var(--foreground)] whitespace-pre-wrap max-h-48 overflow-auto">
+					{preview}
+					{output && output.length > preview.length ? '…' : ''}
 				</div>
-			))}
-          {truncated && (
-            <div className="text-[var(--muted-foreground)] italic mt-1">… {lines.length - 20} more lines</div>
-          )}
-        </pre>
-      </div>
-      {output && (
-        <div className="mt-2">
-          <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">Output</div>
-          <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-32 overflow-auto">
-            {output}
-          </pre>
-        </div>
-      )}
-    </div>
-  );
+			)}
+		</div>
+	);
+}
+
+function WriteView({
+	filePath,
+	content,
+	output,
+	onAccept,
+	onReject,
+}: {
+	filePath: string;
+	content: string;
+	output?: string;
+	onAccept?: () => void;
+	onReject?: () => void;
+}) {
+	const lang = getLangForShiki(filePath);
+	const lines = content.split('\n');
+
+	return (
+		<div className="px-3 py-2">
+			<div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
+				<span>📄</span>
+				<span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
+				<span className="ml-auto text-[10px]">{lines.length} lines</span>
+			</div>
+			<div className="rounded-md border border-[var(--border)] overflow-hidden max-h-64 overflow-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
+				<PierreFile
+					file={{ name: filePath, contents: content, lang: lang as any }}
+					options={{
+						theme: { dark: 'github-dark', light: 'github-light' },
+						themeType: 'system',
+						disableFileHeader: true,
+						overflow: 'scroll',
+					}}
+				/>
+			</div>
+			{(onAccept || onReject) && (
+				<div className="mt-2 flex gap-2">
+					{onAccept && (
+						<Button size="sm" variant="secondary" className="h-7 text-xs" onClick={onAccept}>
+							Accept
+						</Button>
+					)}
+					{onReject && (
+						<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={onReject}>
+							Reject
+						</Button>
+					)}
+				</div>
+			)}
+			{output && (
+				<div className="mt-2">
+					<div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">Output</div>
+					<pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-32 overflow-auto">
+						{output}
+					</pre>
+				</div>
+			)}
+		</div>
+	);
 }
 
 function ReadView({ filePath, output }: { filePath: string; output?: string }) {
   const parsed = useMemo(() => (output ? parseFileOutput(output) : ''), [output]);
-  const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
-  const lang = getLangForShiki(filePath);
+	const lang = getLangForShiki(filePath);
 
-  useEffect(() => {
-    if (!parsed || lang === 'text') return;
-    let cancelled = false;
-    getReadHighlighter()
-      .then((highlighter) => {
-        if (cancelled) return;
-        const html = highlighter.codeToHtml(parsed, {
-          lang,
-          theme: 'github-dark',
-        });
-        setHighlightedHtml(html);
-      })
-      .catch(() => { /* fallback to plain text */ });
-    return () => { cancelled = true; };
-  }, [parsed, lang]);
+	const lines = parsed.split('\n');
 
-  const lines = parsed.split('\n');
-
-  return (
+	return (
     <div className="px-3 py-2">
       <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)]">
         <span>📖</span>
         <span className="font-mono truncate" title={filePath}>Read: {shortenPath(filePath)}</span>
         <span className="ml-auto text-[10px]">{lines.length} lines</span>
       </div>
-      {parsed && (
-        <div className="rounded-md border border-[var(--border)] overflow-hidden max-h-64 overflow-y-auto overflow-x-auto">
-          {highlightedHtml ? (
-            <div
-              className="file-viewer-shiki text-[11px] leading-[1.6] font-mono min-h-full [&_pre]:m-0 [&_pre]:p-2 [&_pre]:min-h-full [&_code]:!text-[11px] [&_.line]:before:content-[attr(data-line)] [&_.line]:before:text-[var(--muted-foreground)] [&_.line]:before:opacity-50 [&_.line]:before:text-right [&_.line]:before:inline-block [&_.line]:before:w-10 [&_.line]:before:pr-3 [&_.line]:before:select-none"
-              dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-            />
-          ) : (
-            <pre className="text-[11px] leading-[1.6] font-mono m-0 px-2 py-1 text-[var(--foreground)] bg-[var(--muted)]">
-              {parsed}
-            </pre>
-          )}
-        </div>
-      )}
+				{parsed && (
+					<div className="rounded-md border border-[var(--border)] overflow-hidden max-h-64 overflow-y-auto overflow-x-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
+						<PierreFile
+							file={{ name: filePath, contents: parsed, lang: lang as any }}
+							options={{
+								theme: { dark: 'github-dark', light: 'github-light' },
+								themeType: 'system',
+								disableFileHeader: true,
+								overflow: 'scroll',
+							}}
+						/>
+					</div>
+				)}
     </div>
   );
 }
@@ -312,7 +418,16 @@ function DefaultView({ input, output }: { input: Record<string, unknown>; output
 // Main component
 // ---------------------------------------------------------------------------
 
-export function ToolCallCard({ part }: ToolCallCardProps) {
+export function ToolCallCard({
+	part,
+	onOpenDiff,
+	onOpenWrite,
+	onOpenRead,
+	onOpenFile,
+	onAddComment,
+	getDiffAnnotations,
+	onSendMessage,
+}: ToolCallCardProps) {
 	const title = ('title' in part.state && part.state.title) ? part.state.title : getToolDisplayName(part.tool);
 	const duration = ('time' in part.state && part.state.time && 'end' in part.state.time)
 		? (((part.state.time as { start: number; end: number }).end - part.state.time.start) / 1000).toFixed(1)
@@ -327,32 +442,125 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
 			? 'call'
 			: 'result';
 	const toolStatus = part.state.status as ToolStatus;
+	const openedRef = useRef(new Set<string>());
+	const [showReject, setShowReject] = useState(false);
+	const [rejectReason, setRejectReason] = useState('');
+
+	useEffect(() => {
+		if (!input || openedRef.current.has(part.id)) return;
+		if (isEditTool(input)) {
+			onOpenDiff?.(input.filePath, input.oldString, input.newString);
+			openedRef.current.add(part.id);
+			return;
+		}
+		if (isWriteTool(input)) {
+			onOpenWrite?.(input.filePath, input.content);
+			openedRef.current.add(part.id);
+			return;
+		}
+		if (isReadTool(input) && output) {
+			const parsed = parseFileOutput(output);
+			onOpenRead?.(input.filePath, parsed);
+			openedRef.current.add(part.id);
+			return;
+		}
+		if (isReadTool(input)) {
+			onOpenFile?.(input.filePath);
+			openedRef.current.add(part.id);
+		}
+	}, [input, output, onOpenDiff, onOpenWrite, onOpenRead, onOpenFile, part.id]);
+
+	const handleAccept = (filePath: string) => {
+		onSendMessage?.(`I accept the changes to ${filePath}.`);
+	};
+
+	const handleReject = (filePath: string, reason?: string) => {
+		const trimmed = reason?.trim();
+		const message = trimmed
+			? `I reject the changes to ${filePath}, please try again because ${trimmed}.`
+			: `I reject the changes to ${filePath}, please try again.`;
+		onSendMessage?.(message);
+		setShowReject(false);
+		setRejectReason('');
+	};
 
 	// Determine which specialised view to use
 	function renderBody() {
 		if (isEditTool(input)) {
 			return (
 				<>
-          <DiffView filePath={input.filePath} oldString={input.oldString} newString={input.newString} />
-          {output && (
-            <div className="border-t border-[var(--border)] px-3 py-1">
-              <span className="font-mono text-[10px] text-green-500">{output}</span>
-            </div>
-          )}
-        </>
-      );
-    }
+					<DiffView
+						filePath={input.filePath}
+						oldString={input.oldString}
+						newString={input.newString}
+						onAddComment={onAddComment}
+						annotations={getDiffAnnotations?.(input.filePath)}
+					/>
+					<div className="flex items-center gap-2 px-3 pb-2">
+						<Button size="sm" variant="secondary" className="h-7 text-xs" onClick={() => handleAccept(input.filePath)}>
+							Accept
+						</Button>
+						<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowReject((prev) => !prev)}>
+							Reject
+						</Button>
+					</div>
+					{showReject && (
+						<div className="px-3 pb-2">
+							<input
+								value={rejectReason}
+								onChange={(event) => setRejectReason(event.target.value)}
+								placeholder="Optional reason"
+								className="w-full rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
+							/>
+							<div className="mt-2 flex gap-2">
+								<Button size="sm" variant="default" className="h-7 text-xs" onClick={() => handleReject(input.filePath, rejectReason)}>
+									Send rejection
+								</Button>
+								<Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setShowReject(false)}>
+									Cancel
+								</Button>
+							</div>
+						</div>
+					)}
+					{output && (
+						<div className="border-t border-[var(--border)] px-3 py-1">
+							<span className="font-mono text-[10px] text-green-500">{output}</span>
+						</div>
+					)}
+				</>
+			);
+		}
 
-    if (isBashTool(input)) {
-      return <BashView command={input.command} output={output} />;
-    }
+		if (isBashTool(input)) {
+			return <BashView command={input.command} output={output} />;
+		}
 
-    if (isWriteTool(input)) {
-      return <WriteView filePath={input.filePath} content={input.content} output={output} />;
-    }
+		if (isWriteTool(input)) {
+			return (
+				<WriteView
+					filePath={input.filePath}
+					content={input.content}
+					output={output}
+					onAccept={onSendMessage ? () => handleAccept(input.filePath) : undefined}
+					onReject={onSendMessage ? () => handleReject(input.filePath) : undefined}
+				/>
+			);
+		}
 
 		if (isReadTool(input)) {
 			return <ReadView filePath={input.filePath} output={output} />;
+		}
+
+		if (part.tool === 'glob' || part.tool === 'grep') {
+			return <FileListView title={part.tool.toUpperCase()} output={output} />;
+		}
+
+		if (part.tool === 'webfetch' && isWebFetchTool(input)) {
+			return <WebFetchView url={input.url} output={output} />;
+		}
+
+		if (part.tool === 'task' && isAgentInvocation(input)) {
+			return <AgentInvocationView input={input} />;
 		}
 
 		// Fallback: raw JSON (original behaviour)
@@ -366,13 +574,18 @@ export function ToolCallCard({ part }: ToolCallCardProps) {
 		);
 	}
 
+	const shouldOpen = isEditTool(input);
+	const agentTitle = part.tool === 'task' && isAgentInvocation(input)
+		? `Agent · ${getAgentBadge(input.subagent_type)}`
+		: title;
+
 	return (
-		<Tool defaultOpen={part.state.status === 'running' || part.state.status === 'pending'}>
+		<Tool defaultOpen={shouldOpen}>
 			<ToolHeader
 				meta={duration ? `${duration}s` : undefined}
 				state={toolState}
 				status={toolStatus}
-				title={title}
+				title={agentTitle}
 				type={`tool-${part.tool}`}
 			/>
 			<ToolContent className="border-t border-[var(--border)] bg-[var(--muted)]">

@@ -15,6 +15,8 @@ import { FilePartView } from '../chat/FilePartView';
 import { SubtaskView } from '../chat/SubtaskView';
 import { PermissionCard } from '../chat/PermissionCard';
 import { QuestionCard } from '../chat/QuestionCard';
+import { IDELayout } from '../ide/IDELayout';
+import { CodePanel } from '../ide/CodePanel';
 import {
 	Conversation,
 	ConversationContent,
@@ -39,6 +41,8 @@ import {
 import { Reasoning, ReasoningContent, ReasoningTrigger } from '../ai-elements/reasoning';
 import { Loader } from '../ai-elements/loader';
 import { useToast } from '../ui/toast';
+import { useFileTabs } from '../../hooks/useFileTabs';
+import { useCodeComments } from '../../hooks/useCodeComments';
 
 interface ChatPageProps {
   sessionId: string;
@@ -128,11 +132,33 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 	const [isSending, setIsSending] = useState(false);
   const [selectedCommand, setSelectedCommand] = useState('/agentuity-coder');
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
-  const [showTodos, setShowTodos] = useState(false);
-  const [showChanges, setShowChanges] = useState(false);
+	const [showTodos, setShowTodos] = useState(false);
+	const [showChanges, setShowChanges] = useState(false);
 	const [showTerminal, setShowTerminal] = useState(false);
 	const [terminalConnected, setTerminalConnected] = useState(false);
 	const [isForking, setIsForking] = useState(false);
+	const [viewMode, setViewMode] = useState<'chat' | 'ide'>('chat');
+	const {
+		tabs,
+		activeId,
+		activeTab,
+		setActiveId,
+		openFile,
+		openRead,
+		openWrite,
+		openDiff,
+		closeTab,
+		updateTab,
+	} = useFileTabs();
+	const {
+		commentCount,
+		addComment,
+		clearComments,
+		formatForPrompt,
+		getDiffAnnotations,
+		getFileComments,
+	} = useCodeComments();
+	const activeFilePath = activeTab?.filePath ?? null;
 	const isBusy = sessionStatus.type === 'busy';
 
   // Derive display label from selected command
@@ -148,18 +174,25 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 		const messageText = selectedCommand === '/agentuity-coder'
 			? text
 			: `${selectedCommand} ${text}`;
+		const commentsBlock = formatForPrompt();
+		const fullMessage = commentsBlock
+			? `${messageText}\n\n---\nCode Comments:\n${commentsBlock}`
+			: messageText;
 
-      const res = await fetch(`/api/sessions/${sessionId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          text: messageText,
-          model: selectedModel,
-        }),
-      });
-      if (!res.ok) {
-        throw new Error('Failed to send message');
-      }
+		const res = await fetch(`/api/sessions/${sessionId}/messages`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				text: fullMessage,
+				model: selectedModel,
+			}),
+		});
+		if (!res.ok) {
+			throw new Error('Failed to send message');
+		}
+		if (commentCount > 0) {
+			clearComments();
+		}
     } catch (err) {
       console.error('Failed to send message:', err);
       toast({ type: 'error', message: 'Failed to send message' });
@@ -250,8 +283,20 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 				);
 			case 'reasoning':
 				return renderReasoning(part, message);
-			case 'tool':
-				return <ToolCallCard key={part.id} part={part} />;
+		case 'tool':
+			return (
+				<ToolCallCard
+					key={part.id}
+					part={part}
+					onOpenDiff={openDiff}
+					onOpenWrite={openWrite}
+					onOpenRead={openRead}
+					onOpenFile={openFile}
+					onAddComment={addComment}
+					getDiffAnnotations={getDiffAnnotations}
+					onSendMessage={handleSend}
+				/>
+			);
 			case 'file':
 				return <FilePartView key={part.id} part={part} />;
 			case 'subtask':
@@ -310,6 +355,149 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 				return null;
 		}
 	};
+
+	const conversationView = (
+		<Conversation className="flex-1 min-w-0">
+			<ConversationContent>
+				{messages.length === 0 && !isBusy ? (
+					<ConversationEmptyState>
+						{!isConnected && error ? (
+							<div className="text-center">
+								<WifiOff className="mx-auto mb-3 h-8 w-8 text-red-500" />
+								<p className="text-sm font-medium text-[var(--foreground)]">
+									Connection failed
+								</p>
+								<p className="mb-3 mt-1 text-xs text-[var(--muted-foreground)]">
+									Unable to connect to the AI agent
+								</p>
+								<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
+									{isRetrying ? (
+										<>
+											<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+											Retrying...
+										</>
+									) : (
+										'Retry Connection'
+									)}
+								</Button>
+							</div>
+						) : (
+							<div className="text-center">
+								<p className="text-sm text-[var(--muted-foreground)]">
+									Start a conversation...
+								</p>
+								<p className="mt-1 text-xs text-[var(--muted-foreground)]">
+									Press Enter to send, Shift+Enter for newline
+								</p>
+							</div>
+						)}
+					</ConversationEmptyState>
+				) : (
+					messages.map((message) => {
+						const parts = getPartsForMessage(message.id);
+						const agent = 'agent' in message ? message.agent : undefined;
+						const errorInfo = 'error' in message ? message.error : undefined;
+
+						return (
+							<Message
+								from={message.role === 'user' ? 'user' : 'assistant'}
+								key={message.id}
+							>
+								<MessageContent>
+									{agent && (
+										<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+											{agent}
+										</div>
+									)}
+									{parts.map((part) => renderPart(part, message))}
+									{errorInfo && (
+										<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+											Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
+										</div>
+									)}
+								</MessageContent>
+								{message.role === 'assistant' && (
+									<MessageToolbar>
+										<MessageActions>
+											<MessageAction
+												label="Copy"
+												onClick={() => copyMessage(message)}
+												title="Copy"
+											>
+												<Copy className="h-3.5 w-3.5" />
+											</MessageAction>
+										</MessageActions>
+									</MessageToolbar>
+								)}
+							</Message>
+						);
+					})
+				)}
+
+				{pendingPermissions.map((perm) => (
+					<PermissionCard key={perm.id} request={perm} sessionId={sessionId} />
+				))}
+				{pendingQuestions.map((question) => (
+					<QuestionCard key={question.id} request={question} sessionId={sessionId} />
+				))}
+
+				{isStreaming && !hasStreamingContent && (
+					<Message from="assistant">
+						<MessageContent>
+							<Loader size={16} />
+						</MessageContent>
+					</Message>
+				)}
+			</ConversationContent>
+			<ConversationScrollButton />
+		</Conversation>
+	);
+
+	const inputArea = (
+		<div className="border-t border-[var(--border)] p-3">
+			<PromptInputProvider>
+				<PromptInput onSubmit={({ text }) => handleSend(text)}>
+					<div className="flex items-center gap-2 px-3 pt-2">
+						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
+						<div className="h-3 w-px bg-[var(--border)]" />
+						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
+					</div>
+					<PromptInputTextarea
+						value={inputText}
+						onChange={(event) => setInputText(event.target.value)}
+						placeholder="Message the agent..."
+						disabled={session.status !== 'active'}
+					/>
+					<PromptInputFooter>
+						<div className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+							<span>Enter to send · Shift+Enter for new line</span>
+							{commentCount > 0 && (
+								<Badge variant="secondary" className="text-[10px]">
+									{commentCount} comment{commentCount > 1 ? 's' : ''}
+								</Badge>
+							)}
+							{commentCount > 0 && (
+								<Button
+									variant="ghost"
+									size="sm"
+									className="h-6 text-[10px]"
+									type="button"
+									onClick={clearComments}
+								>
+									Clear
+								</Button>
+							)}
+						</div>
+						<PromptInputSubmit
+							disabled={submitDisabled}
+							status={isBusy ? 'streaming' : 'ready'}
+							onStop={handleAbort}
+						/>
+					</PromptInputFooter>
+				</PromptInput>
+			</PromptInputProvider>
+		</div>
+	);
 
   // Show loading state when session isn't ready
   if (session.status !== 'active') {
@@ -370,6 +558,25 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
           ) : (
             <WifiOff className="h-3.5 w-3.5 text-red-500" />
           )}
+          {/* View mode toggle */}
+          <div className="flex items-center rounded-md bg-[var(--muted)] p-0.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setViewMode('chat')}
+              className={`h-7 px-2 text-xs ${viewMode === 'chat' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+            >
+              Chat
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setViewMode('ide')}
+              className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+            >
+              IDE
+            </Button>
+          </div>
           {/* Terminal toggle */}
           <Button
             variant="ghost"
@@ -422,157 +629,66 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
         </div>
       </div>
 
-      {/* Body: messages + optional todo sidebar */}
-			<div className="flex flex-1 min-w-0 overflow-hidden">
-				<Conversation className="flex-1 min-w-0">
-					<ConversationContent>
-						{messages.length === 0 && !isBusy ? (
-							<ConversationEmptyState>
-								{!isConnected && error ? (
-									<div className="text-center">
-										<WifiOff className="mx-auto mb-3 h-8 w-8 text-red-500" />
-										<p className="text-sm font-medium text-[var(--foreground)]">
-											Connection failed
-										</p>
-										<p className="mb-3 mt-1 text-xs text-[var(--muted-foreground)]">
-											Unable to connect to the AI agent
-										</p>
-										<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
-											{isRetrying ? (
-												<>
-													<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-													Retrying...
-												</>
-											) : (
-												'Retry Connection'
-											)}
-										</Button>
-									</div>
-								) : (
-									<div className="text-center">
-										<p className="text-sm text-[var(--muted-foreground)]">
-											Start a conversation...
-										</p>
-										<p className="mt-1 text-xs text-[var(--muted-foreground)]">
-											Press Enter to send, Shift+Enter for newline
-										</p>
-									</div>
-								)}
-							</ConversationEmptyState>
-						) : (
-							messages.map((message) => {
-								const parts = getPartsForMessage(message.id);
-								const agent = 'agent' in message ? message.agent : undefined;
-								const errorInfo = 'error' in message ? message.error : undefined;
-
-								return (
-									<Message
-										from={message.role === 'user' ? 'user' : 'assistant'}
-										key={message.id}
-									>
-										<MessageContent>
-											{agent && (
-												<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-													{agent}
-												</div>
-											)}
-											{parts.map((part) => renderPart(part, message))}
-											{errorInfo && (
-												<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-													Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
-												</div>
-											)}
-										</MessageContent>
-										{message.role === 'assistant' && (
-											<MessageToolbar>
-												<MessageActions>
-													<MessageAction
-														label="Copy"
-														onClick={() => copyMessage(message)}
-														title="Copy"
-													>
-														<Copy className="h-3.5 w-3.5" />
-													</MessageAction>
-												</MessageActions>
-											</MessageToolbar>
-										)}
-									</Message>
-								);
-							})
-						)}
-
-						{pendingPermissions.map((perm) => (
-							<PermissionCard key={perm.id} request={perm} sessionId={sessionId} />
-						))}
-						{pendingQuestions.map((question) => (
-							<QuestionCard key={question.id} request={question} sessionId={sessionId} />
-						))}
-
-						{isStreaming && !hasStreamingContent && (
-							<Message from="assistant">
-								<MessageContent>
-									<Loader size={16} />
-								</MessageContent>
-							</Message>
-						)}
-					</ConversationContent>
-					<ConversationScrollButton />
-				</Conversation>
-
-        {/* Todo sidebar */}
-        {showTodos && todos.length > 0 && (
-          <div className="w-48 md:w-64 shrink-0">
-            <TodoPanel todos={todos} />
-          </div>
-        )}
-
-        {/* File changes sidebar */}
-        {showChanges && (
-          <div className="w-80 md:w-[480px] shrink-0 border-l border-[var(--border)]">
-            <FileExplorer sessionId={sessionId} />
-          </div>
-        )}
-      </div>
-
-      {/* Terminal full-screen overlay */}
-      {showTerminal && (
-        <TerminalOverlay
-          sessionId={sessionId}
-          onClose={() => setShowTerminal(false)}
-          onConnectionChange={setTerminalConnected}
-        />
-      )}
-
-		{/* Input area */}
-		<div className="border-t border-[var(--border)] p-3">
-			<PromptInputProvider>
-				<PromptInput
-					onSubmit={({ text }) => handleSend(text)}
-				>
-					<div className="flex items-center gap-2 px-3 pt-2">
-						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
-						<div className="h-3 w-px bg-[var(--border)]" />
-						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
-					</div>
-					<PromptInputTextarea
-						value={inputText}
-						onChange={(event) => setInputText(event.target.value)}
-						placeholder="Message the agent..."
-						disabled={session.status !== 'active'}
-					/>
-					<PromptInputFooter>
-						<div className="text-[10px] text-[var(--muted-foreground)]">
-							Enter to send · Shift+Enter for new line
+		{/* Body */}
+		{viewMode === 'ide' ? (
+			<div className="flex-1 min-w-0">
+				<IDELayout
+					sidebar={
+						<FileExplorer sessionId={sessionId} onOpenFile={openFile} activeFilePath={activeFilePath} />
+					}
+					codePanel={
+						<CodePanel
+							sessionId={sessionId}
+							tabs={tabs}
+							activeId={activeId}
+							onSelectTab={setActiveId}
+							onCloseTab={closeTab}
+							onUpdateTab={updateTab}
+							onAddComment={addComment}
+							getDiffAnnotations={getDiffAnnotations}
+							getFileComments={getFileComments}
+							onSendMessage={handleSend}
+						/>
+					}
+					chatPanel={
+						<div className="flex h-full min-w-0 flex-col">
+							{conversationView}
+							{inputArea}
 						</div>
-					<PromptInputSubmit
-						disabled={submitDisabled}
-						status={isBusy ? 'streaming' : 'ready'}
-						onStop={handleAbort}
-					/>
-					</PromptInputFooter>
-				</PromptInput>
-			</PromptInputProvider>
+					}
+				/>
+			</div>
+		) : (
+			<>
+				<div className="flex flex-1 min-w-0 overflow-hidden">
+					{conversationView}
+
+					{/* Todo sidebar */}
+					{showTodos && todos.length > 0 && (
+						<div className="w-48 md:w-64 shrink-0">
+							<TodoPanel todos={todos} />
+						</div>
+					)}
+
+					{/* File changes sidebar */}
+					{showChanges && (
+						<div className="w-80 md:w-[480px] shrink-0 border-l border-[var(--border)]">
+							<FileExplorer sessionId={sessionId} onOpenFile={openFile} activeFilePath={activeFilePath} />
+						</div>
+					)}
+				</div>
+				{inputArea}
+			</>
+		)}
+
+			{/* Terminal full-screen overlay */}
+			{showTerminal && (
+				<TerminalOverlay
+					sessionId={sessionId}
+					onClose={() => setShowTerminal(false)}
+					onConnectionChange={setTerminalConnected}
+				/>
+			)}
 		</div>
-    </div>
-  );
+	);
 }

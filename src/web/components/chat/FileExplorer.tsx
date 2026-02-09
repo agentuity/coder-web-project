@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { BundledLanguage } from 'shiki';
 import {
 	ChevronRight,
 	ChevronDown,
@@ -9,7 +8,6 @@ import {
 	Loader2,
 	RefreshCw,
 	AlertCircle,
-	X,
 	FolderTree,
 } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -27,71 +25,8 @@ interface FileEntry {
 
 interface FileExplorerProps {
 	sessionId: string;
-}
-
-// ---------------------------------------------------------------------------
-// Language detection for syntax highlighting
-// ---------------------------------------------------------------------------
-
-function getLangFromExt(ext: string): BundledLanguage | 'text' {
-	const map: Record<string, BundledLanguage | 'text'> = {
-		ts: 'typescript',
-		tsx: 'tsx',
-		js: 'javascript',
-		jsx: 'jsx',
-		json: 'json',
-		md: 'markdown',
-		css: 'css',
-		html: 'html',
-		yml: 'yaml',
-		yaml: 'yaml',
-		sh: 'bash',
-		bash: 'bash',
-		py: 'python',
-		rs: 'rust',
-		go: 'go',
-		sql: 'sql',
-		toml: 'toml',
-		xml: 'xml',
-		svg: 'xml',
-		txt: 'text',
-	};
-	return map[ext] || 'text';
-}
-
-// ---------------------------------------------------------------------------
-// Lazy Shiki highlighter singleton
-// ---------------------------------------------------------------------------
-
-let highlighterPromise: Promise<any> | null = null;
-
-function getHighlighter() {
-	if (!highlighterPromise) {
-		highlighterPromise = import('shiki').then((shiki) =>
-			shiki.createHighlighter({
-				themes: ['github-dark', 'github-light'],
-				langs: [
-					'typescript',
-					'tsx',
-					'javascript',
-					'jsx',
-					'json',
-					'markdown',
-					'css',
-					'html',
-					'yaml',
-					'bash',
-					'python',
-					'rust',
-					'go',
-					'sql',
-					'toml',
-					'xml',
-				],
-			}),
-		);
-	}
-	return highlighterPromise;
+	onOpenFile: (path: string) => void;
+	activeFilePath?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,151 +145,13 @@ function FileTreeNode({ entry, sessionId, depth, onFileSelect, selectedFile }: F
 }
 
 // ---------------------------------------------------------------------------
-// FileContentView — shows file content with syntax highlighting
-// ---------------------------------------------------------------------------
-
-interface FileContentViewProps {
-	path: string;
-	sessionId: string;
-	onClose: () => void;
-}
-
-function FileContentView({ path, sessionId, onClose }: FileContentViewProps) {
-	const [content, setContent] = useState<string | null>(null);
-	const [highlightedHtml, setHighlightedHtml] = useState<string | null>(null);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-
-	useEffect(() => {
-		let cancelled = false;
-		setLoading(true);
-		setError(null);
-		setHighlightedHtml(null);
-
-		(async () => {
-			try {
-				const res = await fetch(
-					`/api/sessions/${sessionId}/files/content?path=${encodeURIComponent(path)}`,
-				);
-				if (!res.ok) throw new Error(`HTTP ${res.status}`);
-				const data = await res.json();
-				const text = data.content || '';
-				if (cancelled) return;
-				setContent(text);
-
-				// Highlight with Shiki
-				try {
-					const fName = path.split('/').pop() || '';
-					const fExt = fName.split('.').pop() || '';
-					const fLang = getLangFromExt(fExt);
-
-					if (fLang !== 'text') {
-						const highlighter = await getHighlighter();
-						if (cancelled) return;
-						const html = highlighter.codeToHtml(text, {
-							lang: fLang as BundledLanguage,
-							themes: {
-								dark: 'github-dark',
-								light: 'github-light',
-							},
-							defaultColor: false,
-						});
-						if (!cancelled) setHighlightedHtml(html);
-					}
-				} catch {
-					// Fallback to plain text — don't set error, just skip highlighting
-				}
-			} catch {
-				if (!cancelled) setError('Failed to load file content');
-			} finally {
-				if (!cancelled) setLoading(false);
-			}
-		})();
-
-		return () => {
-			cancelled = true;
-		};
-	}, [path, sessionId]);
-
-	const fileName = path.split('/').pop() || path;
-	const ext = fileName.split('.').pop() || '';
-	const lang = getLangFromExt(ext);
-	const lines = content?.split('\n') || [];
-
-	// Shorten path for display — strip leading slash for relative display
-	const shortPath = path.replace(/^\//, '');
-
-	return (
-		<div className="flex flex-col h-full border-t border-[var(--border)]">
-			{/* File header */}
-			<div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[var(--muted)]">
-				<FileText className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />
-				<span className="text-xs font-mono text-[var(--foreground)] truncate" title={path}>
-					{shortPath}
-				</span>
-				{lang !== 'text' && (
-					<span className="text-[10px] text-[var(--muted-foreground)] ml-1">{lang}</span>
-				)}
-				<Button
-					variant="ghost"
-					size="sm"
-					onClick={onClose}
-					className="h-5 w-5 p-0 ml-auto"
-					title="Close"
-				>
-					<X className="h-3 w-3" />
-				</Button>
-			</div>
-
-			{/* Content */}
-			<div className="flex-1 overflow-auto">
-				{loading && (
-					<div className="flex items-center justify-center py-8">
-						<Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
-					</div>
-				)}
-				{error && (
-					<div className="flex items-center gap-2 px-3 py-4 text-xs text-red-500">
-						<AlertCircle className="h-3.5 w-3.5 shrink-0" />
-						{error}
-					</div>
-				)}
-				{!loading && !error && content !== null && (
-					highlightedHtml ? (
-						<div
-							className="file-viewer-shiki text-[11px] leading-[1.6] font-mono min-h-full [&_pre]:m-0 [&_pre]:p-2 [&_pre]:min-h-full [&_code]:!text-[11px] [&_.line]:before:content-[attr(data-line)] [&_.line]:before:text-[var(--muted-foreground)] [&_.line]:before:opacity-50 [&_.line]:before:text-right [&_.line]:before:inline-block [&_.line]:before:w-10 [&_.line]:before:pr-3 [&_.line]:before:select-none"
-							dangerouslySetInnerHTML={{ __html: highlightedHtml }}
-						/>
-					) : (
-						<pre className="text-[11px] leading-[1.6] font-mono m-0 px-0 py-1 bg-[var(--muted)] min-h-full">
-							{lines.map((line, i) => (
-								<div key={`L${i + 1}`} className="flex hover:bg-white/5">
-									<span className="select-none text-[var(--muted-foreground)] opacity-50 text-right inline-block w-10 pr-3 shrink-0">
-										{i + 1}
-									</span>
-									<span className="text-[var(--foreground)] whitespace-pre-wrap break-all flex-1 pr-2">
-										{line}
-									</span>
-								</div>
-							))}
-						</pre>
-					)
-				)}
-			</div>
-		</div>
-	);
-}
-
-// ---------------------------------------------------------------------------
 // FileExplorer — main container
 // ---------------------------------------------------------------------------
 
-export function FileExplorer({ sessionId }: FileExplorerProps) {
+export function FileExplorer({ sessionId, onOpenFile, activeFilePath }: FileExplorerProps) {
 	const [entries, setEntries] = useState<FileEntry[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-	const [selectedFile, setSelectedFile] = useState<string | null>(null);
-
 	const fetchRoot = useCallback(async () => {
 		setLoading(true);
 		setError(null);
@@ -396,7 +193,7 @@ export function FileExplorer({ sessionId }: FileExplorerProps) {
 			</div>
 
 			{/* Tree view */}
-			<div className={`overflow-auto p-1 ${selectedFile ? 'h-48 shrink-0' : 'flex-1'}`}>
+			<div className="overflow-auto p-1 flex-1">
 				{/* Loading */}
 				{loading && entries.length === 0 && (
 					<div className="flex items-center justify-center py-8">
@@ -426,23 +223,11 @@ export function FileExplorer({ sessionId }: FileExplorerProps) {
 						entry={entry}
 						sessionId={sessionId}
 						depth={0}
-						onFileSelect={setSelectedFile}
-						selectedFile={selectedFile}
+						onFileSelect={onOpenFile}
+						selectedFile={activeFilePath ?? null}
 					/>
 				))}
 			</div>
-
-			{/* File content viewer */}
-			{selectedFile && (
-				<div className="flex-1 min-h-0">
-					<FileContentView
-						key={selectedFile}
-						path={selectedFile}
-						sessionId={sessionId}
-						onClose={() => setSelectedFile(null)}
-					/>
-				</div>
-			)}
 		</div>
 	);
 }

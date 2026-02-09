@@ -20,7 +20,7 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
 	<Collapsible
-		className={cn('not-prose mb-4 w-full rounded-md border', className)}
+		className={cn('not-prose mb-4 w-full rounded-md border bg-[var(--card)]', className)}
 		{...props}
 	/>
 );
@@ -89,12 +89,12 @@ export const ToolHeader = ({
 	...props
 }: ToolHeaderProps) => (
 	<CollapsibleTrigger
-		className={cn('flex w-full items-center justify-between gap-4 p-3', className)}
+		className={cn('group flex w-full items-center justify-between gap-3 px-3 py-2 text-left', className)}
 		{...props}
 	>
 		<div className="flex items-center gap-2">
 			<WrenchIcon className="h-4 w-4 text-[var(--muted-foreground)]" />
-			<span className="text-sm font-medium text-[var(--foreground)]">
+			<span className="text-xs font-medium text-[var(--foreground)]">
 				{title ?? type.split('-').slice(1).join('-')}
 			</span>
 			{getStatusBadge(status, state)}
