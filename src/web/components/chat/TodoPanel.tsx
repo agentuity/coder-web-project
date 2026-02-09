@@ -1,5 +1,10 @@
-import { CheckCircle2, Circle, Loader2, XCircle, ListTodo } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Circle, Loader2, XCircle, ListTodo } from 'lucide-react';
 import { Badge } from '../ui/badge';
+import {
+	Collapsible,
+	CollapsibleContent,
+	CollapsibleTrigger,
+} from '../ui/collapsible';
 import type { Todo } from '../../types/opencode';
 
 interface TodoPanelProps {
@@ -45,26 +50,33 @@ export function TodoPanel({ todos }: TodoPanelProps) {
 					{completed}/{total}
 				</span>
 			</div>
-			<div className="p-2 space-y-1 overflow-auto">
+			<div className="p-2 space-y-2 overflow-auto">
 				{todos.map((todo) => (
-					<div
+					<Collapsible
 						key={todo.id}
-						className="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-[var(--accent)] transition-colors"
+						defaultOpen={todo.status === 'in_progress'}
+						className="rounded-md border border-[var(--border)] bg-[var(--background)]"
 					>
-						{getStatusIcon(todo.status)}
-						<div className="flex-1 min-w-0">
-							<div className={`text-xs leading-tight ${
+						<CollapsibleTrigger className="flex w-full items-center gap-2 px-2 py-2 text-left hover:bg-[var(--accent)]">
+							{getStatusIcon(todo.status)}
+							<div className={`flex-1 text-xs leading-tight ${
 								todo.status === 'completed' ? 'text-[var(--muted-foreground)] line-through' : 'text-[var(--foreground)]'
 							}`}>
 								{todo.content}
 							</div>
-						</div>
-						{todo.priority === 'high' && (
-							<Badge variant={getPriorityColor(todo.priority) as any} className="text-[8px] px-1 py-0 shrink-0">
-								{todo.priority}
-							</Badge>
-						)}
-					</div>
+							<ChevronDown className="h-3 w-3 text-[var(--muted-foreground)] transition-transform group-data-[state=open]:rotate-180" />
+						</CollapsibleTrigger>
+						<CollapsibleContent className="border-t border-[var(--border)] px-2 py-2">
+							<div className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+								<span>Status: {todo.status.replace('_', ' ')}</span>
+								{todo.priority && (
+									<Badge variant={getPriorityColor(todo.priority) as any} className="text-[8px] px-1 py-0">
+										{todo.priority}
+									</Badge>
+								)}
+							</div>
+						</CollapsibleContent>
+					</Collapsible>
 				))}
 			</div>
 		</div>

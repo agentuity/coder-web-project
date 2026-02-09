@@ -1,5 +1,8 @@
+import { useState } from 'react';
+import type { ReactNode } from 'react';
 import { Streamdown } from 'streamdown';
 import { createCodePlugin } from '@streamdown/code';
+import { CheckIcon, CopyIcon } from 'lucide-react';
 import type { TextPart } from '../../types/opencode';
 
 interface TextPartViewProps {
@@ -10,6 +13,16 @@ interface TextPartViewProps {
 const codePlugin = createCodePlugin({
   themes: ['github-dark', 'github-light'],
 });
+
+function extractText(node: ReactNode): string {
+  if (node === null || node === undefined) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractText).join('');
+  if (typeof node === 'object' && 'props' in node) {
+    return extractText((node as { props?: { children?: React.ReactNode } }).props?.children);
+  }
+  return '';
+}
 
 const components = {
   h1: ({ children, ...props }: React.ComponentPropsWithoutRef<'h1'>) => (
@@ -42,11 +55,38 @@ const components = {
       </code>
     );
   },
-  pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
-    <pre className="my-2 overflow-x-auto rounded-lg bg-[var(--muted)] p-3 text-xs leading-relaxed font-mono" {...props}>
-      {children}
-    </pre>
-  ),
+  pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => {
+    const [copied, setCopied] = useState(false);
+
+    const handleCopy = async () => {
+      const text = extractText(children).trim();
+      if (!text || typeof window === 'undefined' || !navigator?.clipboard?.writeText) return;
+      try {
+        await navigator.clipboard.writeText(text);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch {
+        // Ignore copy errors
+      }
+    };
+
+    return (
+      <div className="relative group my-2">
+        <pre className="overflow-x-auto rounded-lg bg-[var(--muted)] p-3 text-xs leading-relaxed font-mono" {...props}>
+          {children}
+        </pre>
+        <button
+          type="button"
+          onClick={handleCopy}
+          className="absolute top-2 right-2 inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--foreground)]"
+          title={copied ? 'Copied' : 'Copy code'}
+        >
+          {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+          <span className="sr-only">{copied ? 'Copied' : 'Copy code'}</span>
+        </button>
+      </div>
+    );
+  },
   ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
     <ul className="text-sm list-disc ml-4 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ul>
   ),

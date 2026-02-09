@@ -99,7 +99,10 @@ export const CodeBlockCopyButton = ({
 
 	return (
 		<Button
-			className={cn('h-7 w-7', className)}
+			className={cn(
+				'h-7 w-7 opacity-0 transition-opacity group-hover:opacity-100',
+				className
+			)}
 			onClick={copyToClipboard}
 			size="icon"
 			variant="ghost"

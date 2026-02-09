@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Copy, FileCode, GitFork, ListTodo, Loader2, Terminal as TerminalIcon, Wifi, WifiOff } from 'lucide-react';
+import {
+	Copy,
+	FileCode,
+	GitFork,
+	ListOrdered,
+	ListTodo,
+	Loader2,
+	Paperclip,
+	Terminal as TerminalIcon,
+	Wifi,
+	WifiOff,
+} from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
@@ -15,6 +26,8 @@ import { FilePartView } from '../chat/FilePartView';
 import { SubtaskView } from '../chat/SubtaskView';
 import { PermissionCard } from '../chat/PermissionCard';
 import { QuestionCard } from '../chat/QuestionCard';
+import { ContextIndicator } from '../chat/ContextIndicator';
+import { SourcesView, type SourceItem } from '../chat/SourcesView';
 import { IDELayout } from '../ide/IDELayout';
 import { CodePanel } from '../ide/CodePanel';
 import {
@@ -255,6 +268,86 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 		[getPartsForMessage]
 	);
 
+	const sessionUsage = useMemo(() => {
+		const totals = {
+			tokens: {
+				input: 0,
+				output: 0,
+				reasoning: 0,
+				cache: { read: 0, write: 0 },
+			},
+			cost: 0,
+			modelIDs: new Set<string>(),
+			providerIDs: new Set<string>(),
+		};
+
+		for (const message of messages) {
+			if (message.role !== 'assistant') continue;
+			totals.cost += message.cost ?? 0;
+			totals.tokens.input += message.tokens?.input ?? 0;
+			totals.tokens.output += message.tokens?.output ?? 0;
+			totals.tokens.reasoning += message.tokens?.reasoning ?? 0;
+			totals.tokens.cache.read += message.tokens?.cache?.read ?? 0;
+			totals.tokens.cache.write += message.tokens?.cache?.write ?? 0;
+			if (message.modelID) totals.modelIDs.add(message.modelID);
+			if (message.providerID) totals.providerIDs.add(message.providerID);
+		}
+
+		const totalTokens =
+			totals.tokens.input +
+			totals.tokens.output +
+			totals.tokens.reasoning +
+			totals.tokens.cache.read +
+			totals.tokens.cache.write;
+
+		return {
+			...totals,
+			totalTokens,
+			modelID: totals.modelIDs.size === 1 ? Array.from(totals.modelIDs)[0] : null,
+			providerID: totals.providerIDs.size === 1 ? Array.from(totals.providerIDs)[0] : null,
+		};
+	}, [messages]);
+
+	const queuedCount = useMemo(() => {
+		const lastTime = lastAssistantMessage?.time.created ?? 0;
+		return messages.filter((message) => message.role === 'user' && message.time.created > lastTime).length;
+	}, [messages, lastAssistantMessage]);
+
+	const getSourcesForMessage = useCallback((parts: Part[]): SourceItem[] => {
+		const sources: SourceItem[] = [];
+		const seen = new Set<string>();
+
+		const addSource = (item: SourceItem) => {
+			const key = `${item.type}:${item.label}`;
+			if (seen.has(key)) return;
+			seen.add(key);
+			sources.push(item);
+		};
+
+		for (const part of parts) {
+			if (part.type !== 'tool') continue;
+			const input = part.state.input ?? {};
+			const output = 'output' in part.state ? part.state.output : undefined;
+
+			if (typeof (input as { filePath?: unknown }).filePath === 'string') {
+				addSource({ type: 'file', label: (input as { filePath: string }).filePath });
+			}
+
+			if ((part.tool === 'glob' || part.tool === 'grep') && output) {
+				for (const filePath of output.split('\n').map((line) => line.trim()).filter(Boolean)) {
+					addSource({ type: 'file', label: filePath });
+				}
+			}
+
+			if (part.tool === 'webfetch' && typeof (input as { url?: unknown }).url === 'string') {
+				const url = (input as { url: string }).url;
+				addSource({ type: 'url', label: url, href: url });
+			}
+		}
+
+		return sources;
+	}, []);
+
 	const renderReasoning = (part: ReasoningPart, message: ChatMessage) => {
 		const duration = part.time.end
 			? Math.max(1, Math.ceil((part.time.end - part.time.start) / 1000))
@@ -394,9 +487,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 					</ConversationEmptyState>
 				) : (
 					messages.map((message) => {
-						const parts = getPartsForMessage(message.id);
-						const agent = 'agent' in message ? message.agent : undefined;
-						const errorInfo = 'error' in message ? message.error : undefined;
+					const parts = getPartsForMessage(message.id);
+					const agent = 'agent' in message ? message.agent : undefined;
+					const errorInfo = 'error' in message ? message.error : undefined;
+					const sources = message.role === 'assistant' ? getSourcesForMessage(parts) : [];
 
 						return (
 							<Message
@@ -409,26 +503,35 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 											{agent}
 										</div>
 									)}
-									{parts.map((part) => renderPart(part, message))}
-									{errorInfo && (
-										<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-											Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
-										</div>
-									)}
-								</MessageContent>
-								{message.role === 'assistant' && (
-									<MessageToolbar>
-										<MessageActions>
-											<MessageAction
-												label="Copy"
-												onClick={() => copyMessage(message)}
-												title="Copy"
-											>
-												<Copy className="h-3.5 w-3.5" />
-											</MessageAction>
-										</MessageActions>
-									</MessageToolbar>
+								{parts.map((part) => renderPart(part, message))}
+								{errorInfo && (
+									<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+										Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
+									</div>
 								)}
+								{sources.length > 0 && <SourcesView sources={sources} />}
+							</MessageContent>
+							{message.role === 'assistant' && (
+								<MessageToolbar>
+									<ContextIndicator
+										tokens={message.tokens}
+										cost={message.cost}
+										modelID={message.modelID}
+										providerID={message.providerID}
+										label="Message"
+										compact
+									/>
+									<MessageActions>
+										<MessageAction
+											label="Copy"
+											onClick={() => copyMessage(message)}
+											title="Copy"
+										>
+											<Copy className="h-3.5 w-3.5" />
+										</MessageAction>
+									</MessageActions>
+								</MessageToolbar>
+							)}
 							</Message>
 						);
 					})
@@ -457,11 +560,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 		<div className="border-t border-[var(--border)] p-3">
 			<PromptInputProvider>
 				<PromptInput onSubmit={({ text }) => handleSend(text)}>
-					<div className="flex items-center gap-2 px-3 pt-2">
-						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
-						<div className="h-3 w-px bg-[var(--border)]" />
-						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
-					</div>
 					<PromptInputTextarea
 						value={inputText}
 						onChange={(event) => setInputText(event.target.value)}
@@ -469,7 +567,20 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 						disabled={session.status !== 'active'}
 					/>
 					<PromptInputFooter>
-						<div className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+						<div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+							<button
+								type="button"
+								className="inline-flex items-center gap-1 rounded-md border border-dashed border-[var(--border)] px-2 py-1 text-[10px] text-[var(--muted-foreground)]"
+								title="Attach files (coming soon)"
+							>
+								<Paperclip className="h-3 w-3" />
+								Attach
+							</button>
+							<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
+							<ModelSelector value={selectedModel} onChange={setSelectedModel} />
+							<Badge variant="secondary" className="text-[10px]">
+								{commandLabel} · {selectedModel}
+							</Badge>
 							<span>Enter to send · Shift+Enter for new line</span>
 							{commentCount > 0 && (
 								<Badge variant="secondary" className="text-[10px]">
@@ -536,15 +647,30 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
               )}
             </Button>
           )}
-          <Badge variant="secondary" className="text-[10px]">
-            {commandLabel}
-          </Badge>
-          {isBusy && (
-            <Badge variant="default" className="text-[10px] gap-1">
-              <Loader2 className="h-2.5 w-2.5 animate-spin" />
-              Working
-            </Badge>
-          )}
+				<Badge variant="secondary" className="text-[10px]">
+					{commandLabel}
+				</Badge>
+				{sessionUsage.totalTokens > 0 && (
+					<ContextIndicator
+						tokens={sessionUsage.tokens}
+						cost={sessionUsage.cost}
+						modelID={sessionUsage.modelID}
+						providerID={sessionUsage.providerID}
+						label="Session"
+					/>
+				)}
+				{isBusy && (
+					<Badge variant="default" className="text-[10px] gap-1">
+						<Loader2 className="h-2.5 w-2.5 animate-spin" />
+						Working
+					</Badge>
+				)}
+				{isBusy && queuedCount > 1 && (
+					<Badge variant="secondary" className="text-[10px] gap-1">
+						<ListOrdered className="h-2.5 w-2.5" />
+						Queue {queuedCount}
+					</Badge>
+				)}
           {sessionStatus.type === 'retry' && (
             <Badge variant="destructive" className="text-[10px]">
               Retrying ({sessionStatus.attempt})

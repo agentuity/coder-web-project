@@ -8,6 +8,7 @@ import {
 	CollapsibleTrigger,
 } from '../ui/collapsible';
 import { cn } from '../../lib/utils';
+import { Badge } from '../ui/badge';
 import { Shimmer } from './shimmer';
 
 type ReasoningContextValue = {
@@ -90,7 +91,7 @@ const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
 	if (duration === undefined) {
 		return <span>Thought</span>;
 	}
-	return <span>{duration}s</span>;
+	return <span>Thought</span>;
 };
 
 export const ReasoningTrigger = memo(
@@ -114,6 +115,11 @@ export const ReasoningTrigger = memo(
 					<>
 						<BrainIcon className="h-3 w-3" />
 						{getThinkingMessage(isStreaming, duration)}
+						{duration !== undefined && !isStreaming && (
+							<Badge variant="secondary" className="ml-1 text-[9px] px-1 py-0">
+								{duration}s
+							</Badge>
+						)}
 						<ChevronDownIcon
 							className={cn(
 								'h-2.5 w-2.5 transition-transform',
@@ -134,19 +140,31 @@ export type ReasoningContentProps = ComponentProps<
 };
 
 export const ReasoningContent = memo(
-	({ className, children, ...props }: ReasoningContentProps) => (
-		<CollapsibleContent
-			className={cn(
-				'mt-1.5 text-[11px] leading-relaxed text-[var(--muted-foreground)]',
-				className
-			)}
-			{...props}
-		>
-			<div className="max-h-48 overflow-y-auto rounded-md border border-[var(--border)]/50 bg-[var(--muted)]/30 p-2.5 text-[11px]">
-				<Streamdown>{children}</Streamdown>
-			</div>
-		</CollapsibleContent>
-	)
+	({ className, children, ...props }: ReasoningContentProps) => {
+		const { isStreaming } = useReasoning();
+		const trimmed = children?.trim();
+		return (
+			<CollapsibleContent
+				className={cn(
+					'mt-1.5 text-[11px] leading-relaxed text-[var(--muted-foreground)]',
+					className
+				)}
+				{...props}
+			>
+				<div className="max-h-48 overflow-y-auto rounded-md border border-[var(--border)]/50 bg-[var(--muted)]/30 p-2.5 text-[11px]">
+					{isStreaming && !trimmed ? (
+						<div className="space-y-2">
+							<Shimmer className="block h-2 w-2/3 rounded bg-[var(--muted)]">&nbsp;</Shimmer>
+							<Shimmer className="block h-2 w-5/6 rounded bg-[var(--muted)]">&nbsp;</Shimmer>
+							<Shimmer className="block h-2 w-1/2 rounded bg-[var(--muted)]">&nbsp;</Shimmer>
+						</div>
+					) : (
+						<Streamdown>{children}</Streamdown>
+					)}
+				</div>
+			</CollapsibleContent>
+		);
+	}
 );
 
 Reasoning.displayName = 'Reasoning';

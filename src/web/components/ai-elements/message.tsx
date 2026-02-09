@@ -101,7 +101,10 @@ export const MessageToolbar = ({
 	...props
 }: MessageToolbarProps) => (
 	<div
-		className={cn('mt-4 flex w-full items-center justify-between gap-4', className)}
+		className={cn(
+			'mt-4 flex w-full items-center justify-between gap-4 opacity-0 transition-opacity group-hover:opacity-100',
+			className
+		)}
 		{...props}
 	>
 		{children}
