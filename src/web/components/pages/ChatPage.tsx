@@ -31,7 +31,7 @@ import { SubtaskView } from '../chat/SubtaskView';
 import { PermissionCard } from '../chat/PermissionCard';
 import { QuestionCard } from '../chat/QuestionCard';
 import { ContextIndicator } from '../chat/ContextIndicator';
-import { SourcesView, type SourceItem } from '../chat/SourcesView';
+import type { SourceItem } from '../chat/SourcesView';
 import { IDELayout } from '../ide/IDELayout';
 import { CodePanel } from '../ide/CodePanel';
 import {
@@ -265,6 +265,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [viewMode, setViewMode] = useState<'chat' | 'ide'>('chat');
 	const [sidebarTab, setSidebarTab] = useState<'files' | 'git'>('files');
 	const [sshCopied, setSshCopied] = useState(false);
+	const [sandboxCopied, setSandboxCopied] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const {
@@ -273,8 +274,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		activeTab,
 		setActiveId,
 		openFile,
-		openRead,
-		openWrite,
 		openDiff,
 		closeTab,
 		updateTab,
@@ -295,6 +294,23 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		processedToolPartsRef.current = new Set();
 		setRecentFiles([]);
 	}, [sessionId]);
+
+	const handleOpenRecentDiff = useCallback(async (filePath: string) => {
+		try {
+			const res = await fetch(
+				`/api/sessions/${sessionId}/github/diff-file?path=${encodeURIComponent(filePath)}`
+			);
+			if (!res.ok) throw new Error('Failed to load diff');
+			const data = await res.json();
+			if (data.oldContent !== undefined && data.newContent !== undefined) {
+				openDiff(filePath, data.oldContent, data.newContent);
+				return;
+			}
+		} catch {
+			// fallback below
+		}
+		openFile(filePath);
+	}, [openDiff, openFile, sessionId]);
 	const activeFilePath = activeTab?.filePath ?? null;
 	const isBusy = sessionStatus.type === 'busy';
 	const displayMessages = session.status === 'terminated' ? archivedMessages : messages;
@@ -458,6 +474,17 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		}
 	}, [sshCommand, toast]);
 
+	const handleCopySandboxId = useCallback(async () => {
+		if (!session.sandboxId) return;
+		try {
+			await navigator.clipboard.writeText(session.sandboxId);
+			setSandboxCopied(true);
+			setTimeout(() => setSandboxCopied(false), 2000);
+		} catch {
+			toast({ type: 'error', message: 'Failed to copy sandbox ID' });
+		}
+	}, [session.sandboxId, toast]);
+
   // Abort
   const handleAbort = async () => {
     try {
@@ -535,7 +562,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 	const queuedCount = messageQueue.length;
 
-	const getSourcesForMessage = useCallback((parts: Part[]): SourceItem[] => {
+	const getSourcesForToolPart = useCallback((part: ToolPart): SourceItem[] => {
 		const sources: SourceItem[] = [];
 		const seen = new Set<string>();
 
@@ -546,25 +573,22 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			sources.push(item);
 		};
 
-		for (const part of parts) {
-			if (part.type !== 'tool') continue;
-			const input = part.state.input ?? {};
-			const output = 'output' in part.state ? part.state.output : undefined;
+		const input = part.state.input ?? {};
+		const output = 'output' in part.state ? part.state.output : undefined;
 
-			if (typeof (input as { filePath?: unknown }).filePath === 'string') {
-				addSource({ type: 'file', label: (input as { filePath: string }).filePath });
-			}
+		if (typeof (input as { filePath?: unknown }).filePath === 'string') {
+			addSource({ type: 'file', label: (input as { filePath: string }).filePath });
+		}
 
-			if ((part.tool === 'glob' || part.tool === 'grep') && output) {
-				for (const filePath of output.split('\n').map((line) => line.trim()).filter(Boolean)) {
-					addSource({ type: 'file', label: filePath });
-				}
+		if ((part.tool === 'glob' || part.tool === 'grep') && output) {
+			for (const filePath of output.split('\n').map((line) => line.trim()).filter(Boolean)) {
+				addSource({ type: 'file', label: filePath });
 			}
+		}
 
-			if (part.tool === 'webfetch' && typeof (input as { url?: unknown }).url === 'string') {
-				const url = (input as { url: string }).url;
-				addSource({ type: 'url', label: url, href: url });
-			}
+		if (part.tool === 'webfetch' && typeof (input as { url?: unknown }).url === 'string') {
+			const url = (input as { url: string }).url;
+			addSource({ type: 'url', label: url, href: url });
 		}
 
 		return sources;
@@ -723,13 +747,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<ToolCallCard
 					key={part.id}
 					part={part}
-					onOpenDiff={openDiff}
-					onOpenWrite={openWrite}
-					onOpenRead={openRead}
-					onOpenFile={openFile}
 					onAddComment={addComment}
 					getDiffAnnotations={getDiffAnnotations}
 					getFileComments={getFileComments}
+					sources={message.role === 'assistant' ? getSourcesForToolPart(part) : []}
 				/>
 			);
 			case 'file':
@@ -869,7 +890,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					const parts = getDisplayParts(message.id);
 					const agent = 'agent' in message ? message.agent : undefined;
 					const errorInfo = 'error' in message ? message.error : undefined;
-					const sources = message.role === 'assistant' ? getSourcesForMessage(parts) : [];
 
 					return (
 						<Message
@@ -901,7 +921,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 										Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
 									</div>
 								)}
-								{sources.length > 0 && <SourcesView sources={sources} />}
 							</MessageContent>
 							{message.role === 'assistant' && (
 								<MessageToolbar>
@@ -1154,12 +1173,26 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									{session.status === 'terminated' ? 'Terminated' : 'Active'}
 								</span>
 							</div>
-							<div>
-								<p className="text-xs text-[var(--muted-foreground)] mb-1">Sandbox ID</p>
-								<code className="text-xs bg-[var(--muted)] px-2 py-1 rounded block">
+						<div>
+							<p className="text-xs text-[var(--muted-foreground)] mb-1">Sandbox ID</p>
+							<div className="flex items-center gap-2">
+								<code className="text-xs bg-[var(--muted)] px-2 py-1 rounded flex-1 block truncate">
 									{session.sandboxId}
 								</code>
+								<button
+									type="button"
+									onClick={handleCopySandboxId}
+									className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+									title="Copy sandbox ID"
+								>
+									{sandboxCopied ? (
+										<Check className="h-3.5 w-3.5 text-green-500" />
+									) : (
+										<Copy className="h-3.5 w-3.5" />
+									)}
+								</button>
 							</div>
+						</div>
 							<div>
 								<p className="text-xs text-[var(--muted-foreground)] mb-1">SSH Command</p>
 								<div className="flex items-center gap-2">
@@ -1258,8 +1291,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 		{/* Body */}
 		{viewMode === 'ide' ? (
-			<div className="flex flex-1 min-w-0 flex-col">
-				<div className="flex-1 min-w-0">
+			<div className="flex flex-1 min-w-0 flex-col overflow-hidden">
+				<div className="flex-1 min-w-0 overflow-hidden">
 					<IDELayout
 					sidebar={
 						<div className="flex h-full flex-col">
@@ -1306,13 +1339,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 										}
 									/>
 								) : (
-									<FileExplorer
-										sessionId={sessionId}
-										onOpenFile={openFile}
-										activeFilePath={activeFilePath}
-										recentFiles={recentFiles}
-									/>
-								)}
+								<FileExplorer
+									sessionId={sessionId}
+									onOpenFile={openFile}
+									onOpenDiff={handleOpenRecentDiff}
+									activeFilePath={activeFilePath}
+									recentFiles={recentFiles}
+								/>
+							)}
 							</div>
 						</div>
 					}

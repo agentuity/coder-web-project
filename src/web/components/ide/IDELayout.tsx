@@ -34,14 +34,14 @@ export function IDELayout({ sidebar, codePanel, chatPanel }: IDELayoutProps) {
 	}, [isDragging]);
 
 	return (
-		<div ref={containerRef} className="flex h-full min-w-0 bg-[var(--background)]">
-			<div className="w-60 shrink-0 border-r border-[var(--border)] bg-[var(--card)]">
+		<div ref={containerRef} className="flex h-full min-w-0 bg-[var(--background)] overflow-hidden">
+			<div className="w-60 shrink-0 border-r border-[var(--border)] bg-[var(--card)] overflow-hidden flex flex-col">
 				{sidebar}
 			</div>
-			<div className="flex min-w-0 flex-1">
+			<div className="flex min-w-0 flex-1 overflow-hidden">
 				{chatPanel ? (
 					<>
-						<div style={{ width: codeWidth }} className="min-w-[320px] border-r border-[var(--border)]">
+						<div style={{ width: codeWidth }} className="min-w-[320px] border-r border-[var(--border)] overflow-hidden flex flex-col">
 							{codePanel}
 						</div>
 						<button
@@ -50,12 +50,12 @@ export function IDELayout({ sidebar, codePanel, chatPanel }: IDELayoutProps) {
 							onMouseDown={() => setIsDragging(true)}
 							aria-label="Resize panels"
 						/>
-						<div className="flex min-w-0 flex-1 flex-col">
+						<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 							{chatPanel}
 						</div>
 					</>
 				) : (
-					<div className="flex min-w-0 flex-1 flex-col">
+					<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 						{codePanel}
 					</div>
 				)}

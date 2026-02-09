@@ -1,4 +1,5 @@
 import { FileText, Link2 } from 'lucide-react';
+import { cn } from '../../lib/utils';
 
 export type SourceItem = {
   type: 'file' | 'url';
@@ -8,14 +9,15 @@ export type SourceItem = {
 
 interface SourcesViewProps {
   sources: SourceItem[];
+  className?: string;
 }
 
-export function SourcesView({ sources }: SourcesViewProps) {
+export function SourcesView({ sources, className }: SourcesViewProps) {
   if (!sources.length) return null;
 
   return (
-    <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)]/40 p-2">
-      <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
+    <div className={cn('space-y-1 px-3 py-2', className)}>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-[var(--muted-foreground)]">
         Sources
       </div>
       <ul className="space-y-1 text-xs">

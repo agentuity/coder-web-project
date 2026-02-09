@@ -33,11 +33,12 @@ interface GitChange {
 interface FileExplorerProps {
 	sessionId: string;
 	onOpenFile: (path: string) => void;
+	onOpenDiff?: (path: string) => void;
 	activeFilePath?: string | null;
 	recentFiles?: string[];
 }
 
-export function FileExplorer({ sessionId, onOpenFile, activeFilePath, recentFiles = [] }: FileExplorerProps) {
+export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath, recentFiles = [] }: FileExplorerProps) {
 	const [nodes, setNodes] = useState<FileTreeNode[]>([]);
 	const [entryCount, setEntryCount] = useState(0);
 	const [loading, setLoading] = useState(true);
@@ -197,13 +198,13 @@ export function FileExplorer({ sessionId, onOpenFile, activeFilePath, recentFile
 							<ChevronDown className="h-3 w-3" />
 						</CollapsibleTrigger>
 						<CollapsibleContent className="border-t border-[var(--border)] px-2 py-1.5 space-y-1">
-							{recentFiles.map((file) => (
-								<button
-									key={file}
-									onClick={() => onOpenFile(file)}
-									className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--accent)]"
-									type="button"
-								>
+						{recentFiles.map((file) => (
+							<button
+								key={file}
+								onClick={() => (onOpenDiff ?? onOpenFile)(file)}
+								className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--accent)]"
+								type="button"
+							>
 									<FileEdit className="h-3 w-3 text-yellow-500" />
 									<span className="truncate" title={file}>{file.split('/').pop()}</span>
 								</button>

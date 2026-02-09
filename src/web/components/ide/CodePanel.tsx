@@ -185,163 +185,167 @@ export function CodePanel({
 	}, [activeTab, handleSave, isEditing]);
 
 	return (
-		<div className="flex h-full min-h-0 flex-col">
-			<FileTabs
-				tabs={tabs}
-				activeId={activeId}
-				onSelect={onSelectTab}
-				onClose={onCloseTab}
-			/>
-			{!activeTab && (
-				<div className="flex flex-1 items-center justify-center text-xs text-[var(--muted-foreground)]">
-					Select a file or diff to view
-				</div>
-			)}
-			{activeTab && activeTab.kind === 'diff' && (
-				<div className="flex min-h-0 flex-1 flex-col">
-					<div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
-						<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-							<span className="font-mono truncate" title={activeTab.filePath}>{activeTab.filePath}</span>
-							<Badge variant="secondary" className="text-[10px]">Diff</Badge>
+		<div className="flex h-full min-h-0 flex-col overflow-hidden">
+			<div className="shrink-0">
+				<FileTabs
+					tabs={tabs}
+					activeId={activeId}
+					onSelect={onSelectTab}
+					onClose={onCloseTab}
+				/>
+			</div>
+			<div className="flex-1 min-h-0 overflow-hidden">
+				{!activeTab && (
+					<div className="flex h-full items-center justify-center text-xs text-[var(--muted-foreground)]">
+						Select a file or diff to view
+					</div>
+				)}
+				{activeTab && activeTab.kind === 'diff' && (
+					<div className="flex h-full min-h-0 flex-col">
+						<div className="flex shrink-0 items-center justify-between border-b border-[var(--border)] px-3 py-2">
+							<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+								<span className="font-mono truncate" title={activeTab.filePath}>{activeTab.filePath}</span>
+								<Badge variant="secondary" className="text-[10px]">Diff</Badge>
+							</div>
 						</div>
-				</div>
-				<div className="flex-1 overflow-auto">
-						{diffData ? (
-							<div className="px-3 py-2">
-								<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
-									<PierreDiff
-										fileDiff={diffData}
-										selectedLines={selectedRange}
-										lineAnnotations={getDiffAnnotations(activeTab.filePath)}
-										renderAnnotation={(annotation) => (
-											<div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
-												{annotation.metadata?.comment ?? 'Comment'}
-											</div>
-										)}
-										options={{
-											theme: { dark: 'github-dark', light: 'github-light' },
-											themeType: 'system',
-											disableFileHeader: true,
-											diffStyle: 'unified',
-											diffIndicators: 'bars',
-											enableLineSelection: true,
-											onLineSelected: (range) => setSelectedRange(range),
-										}}
-									/>
+						<div className="flex-1 min-h-0 overflow-y-auto">
+							{diffData ? (
+								<div className="px-3 py-2">
+									<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
+										<PierreDiff
+											fileDiff={diffData}
+											selectedLines={selectedRange}
+											lineAnnotations={getDiffAnnotations(activeTab.filePath)}
+											renderAnnotation={(annotation) => (
+												<div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
+													{annotation.metadata?.comment ?? 'Comment'}
+												</div>
+											)}
+											options={{
+												theme: { dark: 'github-dark', light: 'github-light' },
+												themeType: 'system',
+												disableFileHeader: true,
+												diffStyle: 'unified',
+												diffIndicators: 'bars',
+												enableLineSelection: true,
+												onLineSelected: (range) => setSelectedRange(range),
+											}}
+										/>
+									</div>
 								</div>
-							</div>
-						) : (
-							<div className="px-3 py-4 text-xs text-[var(--muted-foreground)]">
-								Unable to render diff
-							</div>
-						)}
-					</div>
-				</div>
-			)}
-			{activeTab && activeTab.kind !== 'diff' && (
-				<div className="flex min-h-0 flex-1 flex-col">
-				<div className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-					<div className="flex items-center gap-2 min-w-0">
-						<span className="font-mono truncate" title={activeTab.filePath}>{activeTab.filePath}</span>
-						{activeTab.kind === 'write' && (
-							<Badge variant="secondary" className="text-[10px]">Generated</Badge>
-						)}
-						{activeTab.kind === 'read' && (
-							<Badge variant="secondary" className="text-[10px]">Read</Badge>
-						)}
-						{isModified && (
-							<Badge variant="outline" className="text-[10px]">Modified</Badge>
-						)}
-					</div>
-					<div className="flex items-center gap-2">
-						<Button
-							variant="ghost"
-							size="sm"
-							onClick={() => setIsEditing((prev) => !prev)}
-							disabled={!canEdit}
-							className="h-7 text-xs"
-							title={isEditing ? 'View mode' : 'Edit file'}
-						>
-							<PencilLine className="h-3 w-3 mr-1" />
-							{isEditing ? 'View' : 'Edit'}
-						</Button>
-						<Button
-							variant="secondary"
-							size="sm"
-							onClick={handleSave}
-							disabled={!canEdit || !isModified || isSaving}
-							className="h-7 text-xs"
-							title="Save (Ctrl+S)"
-						>
-							{isSaving ? (
-								<Loader2 className="h-3 w-3 mr-1 animate-spin" />
 							) : (
-								<Save className="h-3 w-3 mr-1" />
+								<div className="px-3 py-4 text-xs text-[var(--muted-foreground)]">
+									Unable to render diff
+								</div>
 							)}
-							Save
-						</Button>
+						</div>
 					</div>
-				</div>
-					<div className="flex-1 overflow-auto">
-						{loading && (
-							<div className="flex items-center justify-center py-8">
-								<AlertCircle className="h-4 w-4 animate-pulse text-[var(--muted-foreground)]" />
+				)}
+				{activeTab && activeTab.kind !== 'diff' && (
+					<div className="flex h-full min-h-0 flex-col">
+						<div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+							<div className="flex items-center gap-2 min-w-0">
+								<span className="font-mono truncate" title={activeTab.filePath}>{activeTab.filePath}</span>
+								{activeTab.kind === 'write' && (
+									<Badge variant="secondary" className="text-[10px]">Generated</Badge>
+								)}
+								{activeTab.kind === 'read' && (
+									<Badge variant="secondary" className="text-[10px]">Read</Badge>
+								)}
+								{isModified && (
+									<Badge variant="outline" className="text-[10px]">Modified</Badge>
+								)}
 							</div>
-						)}
-						{error && (
-							<div className="flex items-center gap-2 px-3 py-4 text-xs text-red-500">
-								<AlertCircle className="h-3.5 w-3.5 shrink-0" />
-								{error}
+							<div className="flex items-center gap-2">
+								<Button
+									variant="ghost"
+									size="sm"
+									onClick={() => setIsEditing((prev) => !prev)}
+									disabled={!canEdit}
+									className="h-7 text-xs"
+									title={isEditing ? 'View mode' : 'Edit file'}
+								>
+									<PencilLine className="h-3 w-3 mr-1" />
+									{isEditing ? 'View' : 'Edit'}
+								</Button>
+								<Button
+									variant="secondary"
+									size="sm"
+									onClick={handleSave}
+									disabled={!canEdit || !isModified || isSaving}
+									className="h-7 text-xs"
+									title="Save (Ctrl+S)"
+								>
+									{isSaving ? (
+										<Loader2 className="h-3 w-3 mr-1 animate-spin" />
+									) : (
+										<Save className="h-3 w-3 mr-1" />
+									)}
+									Save
+								</Button>
 							</div>
-						)}
-						{saveError && !error && (
-							<div className="flex items-center gap-2 px-3 py-2 text-xs text-red-500">
-								<AlertCircle className="h-3.5 w-3.5 shrink-0" />
-								{saveError}
-							</div>
-						)}
-						{!loading && !error && isEditing && (
-							<div className="px-3 py-2">
-								<textarea
-									value={editContent}
-									onChange={(event) => setEditContent(event.target.value)}
-									className="w-full min-h-[400px] resize-none rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-mono text-[11px] leading-[1.6] text-[var(--foreground)]"
-									spellCheck={false}
-								/>
-							</div>
-						)}
-						{!loading && !error && !isEditing && activeTab.content !== undefined && (
-							<div className="px-3 py-2">
-								<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
-									<PierreFile
-										file={{
-											name: activeTab.filePath,
-											contents: activeTab.content ?? '',
-											lang: getLangFromPath(activeTab.filePath) as any,
-										}}
-										selectedLines={selectedRange}
-										lineAnnotations={fileAnnotations}
-										renderAnnotation={(annotation) => (
-											<div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
-												{annotation.metadata?.comment ?? 'Comment'}
-											</div>
-										)}
-										options={{
-											theme: { dark: 'github-dark', light: 'github-light' },
-											themeType: 'system',
-											disableFileHeader: true,
-											enableLineSelection: true,
-											onLineSelected: (range) => setSelectedRange(range),
-										}}
+						</div>
+						<div className="flex-1 min-h-0 overflow-y-auto">
+							{loading && (
+								<div className="flex items-center justify-center py-8">
+									<AlertCircle className="h-4 w-4 animate-pulse text-[var(--muted-foreground)]" />
+								</div>
+							)}
+							{error && (
+								<div className="flex items-center gap-2 px-3 py-4 text-xs text-red-500">
+									<AlertCircle className="h-3.5 w-3.5 shrink-0" />
+									{error}
+								</div>
+							)}
+							{saveError && !error && (
+								<div className="flex items-center gap-2 px-3 py-2 text-xs text-red-500">
+									<AlertCircle className="h-3.5 w-3.5 shrink-0" />
+									{saveError}
+								</div>
+							)}
+							{!loading && !error && isEditing && (
+								<div className="px-3 py-2">
+									<textarea
+										value={editContent}
+										onChange={(event) => setEditContent(event.target.value)}
+										className="w-full min-h-[400px] resize-none rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-mono text-[11px] leading-[1.6] text-[var(--foreground)]"
+										spellCheck={false}
 									/>
 								</div>
-							</div>
-						)}
+							)}
+							{!loading && !error && !isEditing && activeTab.content !== undefined && (
+								<div className="px-3 py-2">
+									<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
+										<PierreFile
+											file={{
+												name: activeTab.filePath,
+												contents: activeTab.content ?? '',
+												lang: getLangFromPath(activeTab.filePath) as any,
+											}}
+											selectedLines={selectedRange}
+											lineAnnotations={fileAnnotations}
+											renderAnnotation={(annotation) => (
+												<div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
+													{annotation.metadata?.comment ?? 'Comment'}
+												</div>
+											)}
+											options={{
+												theme: { dark: 'github-dark', light: 'github-light' },
+												themeType: 'system',
+												disableFileHeader: true,
+												enableLineSelection: true,
+												onLineSelected: (range) => setSelectedRange(range),
+											}}
+										/>
+									</div>
+								</div>
+							)}
+						</div>
 					</div>
-				</div>
-			)}
+				)}
+			</div>
 			{activeTab && selectedRange && (
-				<div className="border-t border-[var(--border)] bg-[var(--muted)] px-3 py-2">
+				<div className="shrink-0 border-t border-[var(--border)] bg-[var(--muted)] px-3 py-2">
 					<div className="flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
 						<span>
 							Selected lines {getNormalizedRange(selectedRange).start}

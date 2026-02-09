@@ -20,7 +20,12 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
 	<Collapsible
-		className={cn('not-prose mb-1 w-full rounded-md border bg-[var(--card)]', className)}
+		className={cn(
+			'not-prose mb-1 w-full rounded-md border border-[var(--border)] bg-[var(--card)] transition-all duration-200',
+			'data-[state=closed]:border-transparent data-[state=closed]:bg-transparent data-[state=closed]:opacity-70',
+			'data-[state=closed]:hover:border-[var(--border)] data-[state=closed]:hover:bg-[var(--muted)]/30',
+			className
+		)}
 		{...props}
 	/>
 );
@@ -89,12 +94,16 @@ export const ToolHeader = ({
 	...props
 }: ToolHeaderProps) => (
 	<CollapsibleTrigger
-		className={cn('group flex w-full items-center justify-between gap-3 px-3 py-2 text-left', className)}
+		className={cn(
+			'group flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors',
+			'data-[state=closed]:py-1.5 data-[state=closed]:text-[var(--muted-foreground)]',
+			className
+		)}
 		{...props}
 	>
 		<div className="flex items-center gap-2">
 			<WrenchIcon className="h-4 w-4 text-[var(--muted-foreground)]" />
-			<span className="text-xs font-medium text-[var(--foreground)]">
+			<span className="text-xs font-medium text-[var(--foreground)] group-data-[state=closed]:text-[var(--muted-foreground)]">
 				{title ?? type.split('-').slice(1).join('-')}
 			</span>
 			{getStatusBadge(status, state)}

@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState } from 'react';
 import type { ToolPart } from '../../types/opencode';
 import { FileDiff as PierreDiff } from '@pierre/diffs/react';
 import { parseDiffFromFile, type DiffLineAnnotation, type SelectedLineRange } from '@pierre/diffs';
@@ -18,16 +18,14 @@ import {
 	ToolOutput,
 } from '../ai-elements/tool';
 import type { ToolState, ToolStatus } from '../ai-elements/tool';
+import { SourcesView, type SourceItem } from './SourcesView';
 
 interface ToolCallCardProps {
 	part: ToolPart;
-	onOpenDiff?: (filePath: string, oldString: string, newString: string) => void;
-	onOpenWrite?: (filePath: string, content: string) => void;
-	onOpenRead?: (filePath: string, content: string) => void;
-	onOpenFile?: (filePath: string) => void;
 	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
 	getDiffAnnotations?: (file: string) => DiffLineAnnotation<{ id: string; comment: string }>[];
 	getFileComments?: (file: string) => CodeComment[];
+	sources?: SourceItem[];
 }
 
 function getToolDisplayName(tool: string): string {
@@ -536,13 +534,10 @@ function DefaultView({ input, output }: { input: Record<string, unknown>; output
 
 export function ToolCallCard({
 	part,
-	onOpenDiff,
-	onOpenWrite,
-	onOpenRead,
-	onOpenFile,
 	onAddComment,
 	getDiffAnnotations,
 	getFileComments,
+	sources = [],
 }: ToolCallCardProps) {
 	const title = ('title' in part.state && part.state.title) ? part.state.title : getToolDisplayName(part.tool);
 	const duration = ('time' in part.state && part.state.time && 'end' in part.state.time)
@@ -558,31 +553,6 @@ export function ToolCallCard({
 			? 'call'
 			: 'result';
 	const toolStatus = part.state.status as ToolStatus;
-	const openedRef = useRef(new Set<string>());
-
-	useEffect(() => {
-		if (!input || openedRef.current.has(part.id)) return;
-		if (isEditTool(input)) {
-			onOpenDiff?.(input.filePath, input.oldString, input.newString);
-			openedRef.current.add(part.id);
-			return;
-		}
-		if (isWriteTool(input)) {
-			onOpenWrite?.(input.filePath, input.content);
-			openedRef.current.add(part.id);
-			return;
-		}
-		if (isReadTool(input) && output) {
-			const parsed = parseFileOutput(output);
-			onOpenRead?.(input.filePath, parsed);
-			openedRef.current.add(part.id);
-			return;
-		}
-		if (isReadTool(input)) {
-			onOpenFile?.(input.filePath);
-			openedRef.current.add(part.id);
-		}
-	}, [input, output, onOpenDiff, onOpenWrite, onOpenRead, onOpenFile, part.id]);
 
 	// Determine which specialised view to use
 	function renderBody() {
@@ -698,6 +668,11 @@ export function ToolCallCard({
 						<pre className="whitespace-pre-wrap font-mono text-xs text-red-400">
 							{part.state.error}
 						</pre>
+					</div>
+				)}
+				{sources.length > 0 && (
+					<div className="border-t border-[var(--border)]">
+						<SourcesView sources={sources} />
 					</div>
 				)}
 			</ToolContent>
