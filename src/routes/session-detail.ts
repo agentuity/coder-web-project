@@ -212,4 +212,84 @@ api.delete('/:id', async (c) => {
 	return c.json({ success: true });
 });
 
+// POST /api/sessions/:id/share — create a public share URL via durable stream
+api.post('/:id/share', async (c) => {
+	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+
+	// Fetch messages from OpenCode if sandbox is active
+	let messages: unknown[] = [];
+	if (session.sandboxId && session.sandboxUrl && session.opencodeSessionId) {
+		try {
+			const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+			const result = await client.session.messages({ path: { id: session.opencodeSessionId } });
+			messages = (result as any)?.data || [];
+		} catch {
+			// Sandbox may be down
+		}
+	}
+
+	if (messages.length === 0) {
+		return c.json({ error: 'No messages to share' }, 400);
+	}
+
+	// Check for sensitive data patterns before sharing publicly
+	const sensitivePatterns = [
+		/\bapi[_-]?key\b/i,
+		/\bpassword\b/i,
+		/\bsecret\b/i,
+		/\btoken\b/i,
+		/\bcredentials?\b/i,
+		/\bbearer\b/i,
+		/sk-[a-zA-Z0-9]{20,}/, // OpenAI-style keys
+		/\bAIza[a-zA-Z0-9_-]{35}\b/, // Google API keys
+	];
+	const messagesStr = JSON.stringify(messages);
+	const hasSensitive = sensitivePatterns.some((p) => p.test(messagesStr));
+
+	if (hasSensitive) {
+		return c.json(
+			{
+				error:
+					'Session may contain sensitive data (API keys, tokens, passwords). Please review before sharing.',
+			},
+			400,
+		);
+	}
+
+	try {
+		const streamService = c.var.stream;
+		const shareData = {
+			session: {
+				id: session.id,
+				title: session.title || 'Untitled Session',
+				agent: session.agent,
+				model: session.model,
+				createdAt: session.createdAt,
+			},
+			messages,
+			sharedAt: new Date().toISOString(),
+		};
+
+		const stream = await streamService.create('shared-sessions', {
+			contentType: 'application/json',
+			compress: true,
+			ttl: 2592000, // 30 days
+			metadata: {
+				title: session.title || 'Shared Session',
+				sessionId: session.id,
+				createdAt: new Date().toISOString(),
+			},
+		});
+
+		await stream.write(shareData);
+		await stream.close();
+
+		return c.json({ url: stream.url, id: stream.id });
+	} catch (error) {
+		c.var.logger.error('Failed to create share stream', { error });
+		return c.json({ error: 'Failed to create share link' }, 500);
+	}
+});
+
 export default api;

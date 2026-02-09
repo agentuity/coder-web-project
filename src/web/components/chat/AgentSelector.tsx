@@ -49,7 +49,7 @@ export function CommandPicker({ value, onChange }: CommandPickerProps) {
         <ChevronDown className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
       </button>
       {open && (
-        <div className="absolute z-30 mt-2 w-56 rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg">
+        <div className="absolute bottom-full z-50 mb-2 w-56 rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg">
           {COMMANDS.map((cmd) => (
             <button
               key={cmd.value}

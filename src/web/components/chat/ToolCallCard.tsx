@@ -1,12 +1,14 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import type { ToolPart } from '../../types/opencode';
-import { File as PierreFile, FileDiff as PierreDiff } from '@pierre/diffs/react';
+import { FileDiff as PierreDiff } from '@pierre/diffs/react';
 import { parseDiffFromFile, type DiffLineAnnotation, type SelectedLineRange } from '@pierre/diffs';
-import type { BundledLanguage } from 'shiki';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
+import { CheckCircle2, Circle, Loader2 } from 'lucide-react';
 import { getLangFromPath } from '../../lib/shiki';
 import { parseFileOutput } from '../../lib/file-output';
+import { CodeWithComments } from './CodeWithComments';
+import type { CodeComment } from '../../hooks/useCodeComments';
 import {
 	Tool,
 	ToolContent,
@@ -24,6 +26,7 @@ interface ToolCallCardProps {
 	onOpenFile?: (filePath: string) => void;
 	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
 	getDiffAnnotations?: (file: string) => DiffLineAnnotation<{ id: string; comment: string }>[];
+	getFileComments?: (file: string) => CodeComment[];
 	onSendMessage?: (text: string) => void;
 }
 
@@ -97,9 +100,7 @@ function isAgentInvocation(input: Record<string, unknown>): input is Record<stri
 // Parse read tool output — strip <file> tags and line number prefixes
 // ---------------------------------------------------------------------------
 
-function getLangForShiki(filePath: string): BundledLanguage | 'text' {
-	return getLangFromPath(filePath) ?? 'text';
-}
+
 
 // ---------------------------------------------------------------------------
 // Specialised sub-views
@@ -295,14 +296,17 @@ function WriteView({
 	output,
 	onAccept,
 	onReject,
+	onAddComment,
+	comments,
 }: {
 	filePath: string;
 	content: string;
 	output?: string;
 	onAccept?: () => void;
 	onReject?: () => void;
+	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
+	comments?: CodeComment[];
 }) {
-	const lang = getLangForShiki(filePath);
 	const lines = content.split('\n');
 
 	return (
@@ -312,17 +316,12 @@ function WriteView({
 				<span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
 				<span className="ml-auto text-[10px]">{lines.length} lines</span>
 			</div>
-			<div className="rounded-md border border-[var(--border)] overflow-hidden max-h-64 overflow-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
-				<PierreFile
-					file={{ name: filePath, contents: content, lang: lang as any }}
-					options={{
-						theme: { dark: 'github-dark', light: 'github-light' },
-						themeType: 'system',
-						disableFileHeader: true,
-						overflow: 'scroll',
-					}}
-				/>
-			</div>
+			<CodeWithComments
+				code={content}
+				filePath={filePath}
+				onAddComment={onAddComment}
+				comments={comments}
+			/>
 			{(onAccept || onReject) && (
 				<div className="mt-2 flex gap-2">
 					{onAccept && (
@@ -349,9 +348,18 @@ function WriteView({
 	);
 }
 
-function ReadView({ filePath, output }: { filePath: string; output?: string }) {
+function ReadView({
+	filePath,
+	output,
+	onAddComment,
+	comments,
+}: {
+	filePath: string;
+	output?: string;
+	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
+	comments?: CodeComment[];
+}) {
   const parsed = useMemo(() => (output ? parseFileOutput(output) : ''), [output]);
-	const lang = getLangForShiki(filePath);
 
 	const lines = parsed.split('\n');
 
@@ -363,18 +371,68 @@ function ReadView({ filePath, output }: { filePath: string; output?: string }) {
         <span className="ml-auto text-[10px]">{lines.length} lines</span>
       </div>
 				{parsed && (
-					<div className="rounded-md border border-[var(--border)] overflow-hidden max-h-64 overflow-y-auto overflow-x-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
-						<PierreFile
-							file={{ name: filePath, contents: parsed, lang: lang as any }}
-							options={{
-								theme: { dark: 'github-dark', light: 'github-light' },
-								themeType: 'system',
-								disableFileHeader: true,
-								overflow: 'scroll',
-							}}
-						/>
-					</div>
+					<CodeWithComments
+						code={parsed}
+						filePath={filePath}
+						onAddComment={onAddComment}
+						comments={comments}
+					/>
 				)}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Todo tool view
+// ---------------------------------------------------------------------------
+
+function TodoView({ input, output }: { input?: string; output?: string }) {
+  const data = useMemo(() => {
+    try {
+      const raw = input || output || '{}';
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      return parsed;
+    } catch {
+      return {};
+    }
+  }, [input, output]);
+
+  const todos: Array<{ id?: string; content?: string; status?: string; priority?: string }> =
+    data.todos || (Array.isArray(data) ? data : []);
+
+  if (todos.length === 0) {
+    return (
+      <div className="px-3 py-2 text-xs text-[var(--muted-foreground)]">
+        No todo items
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 py-2 space-y-1">
+      {todos.map((todo, idx) => (
+        <div key={todo.id ?? idx} className="flex items-center gap-2 text-xs">
+          {todo.status === 'completed' ? (
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
+          ) : todo.status === 'in_progress' ? (
+            <Loader2 className="h-3.5 w-3.5 text-blue-500 shrink-0 animate-spin" />
+          ) : (
+            <Circle className="h-3.5 w-3.5 text-[var(--muted-foreground)] shrink-0" />
+          )}
+          <span
+            className={
+              todo.status === 'completed'
+                ? 'line-through text-[var(--muted-foreground)]'
+                : 'text-[var(--foreground)]'
+            }
+          >
+            {todo.content}
+          </span>
+          {todo.priority === 'high' && (
+            <span className="text-[10px] font-medium text-red-500">HIGH</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -416,6 +474,7 @@ export function ToolCallCard({
 	onOpenFile,
 	onAddComment,
 	getDiffAnnotations,
+	getFileComments,
 	onSendMessage,
 }: ToolCallCardProps) {
 	const title = ('title' in part.state && part.state.title) ? part.state.title : getToolDisplayName(part.tool);
@@ -533,12 +592,21 @@ export function ToolCallCard({
 					output={output}
 					onAccept={onSendMessage ? () => handleAccept(input.filePath) : undefined}
 					onReject={onSendMessage ? () => handleReject(input.filePath) : undefined}
+					onAddComment={onAddComment}
+					comments={getFileComments?.(input.filePath)}
 				/>
 			);
 		}
 
 		if (isReadTool(input)) {
-			return <ReadView filePath={input.filePath} output={output} />;
+			return (
+				<ReadView
+					filePath={input.filePath}
+					output={output}
+					onAddComment={onAddComment}
+					comments={getFileComments?.(input.filePath)}
+				/>
+			);
 		}
 
 		if (part.tool === 'glob' || part.tool === 'grep') {
@@ -551,6 +619,11 @@ export function ToolCallCard({
 
 		if (part.tool === 'task' && isAgentInvocation(input)) {
 			return <AgentInvocationView input={input} />;
+		}
+
+		// Todo tool — render styled checklist instead of raw JSON
+		if (part.tool === 'todowrite' || part.tool === 'TodoWrite' || part.tool === 'todo_write') {
+			return <TodoView input={JSON.stringify(input)} output={output} />;
 		}
 
 		// Fallback: raw JSON (original behaviour)

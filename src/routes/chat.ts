@@ -9,7 +9,7 @@ import { db } from '../db';
 import { chatSessions } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import { getOpencodeClient } from '../opencode';
-import { sandboxListFiles, sandboxReadFile } from '@agentuity/server';
+import { sandboxListFiles, sandboxReadFile, sandboxExecute } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
 
 const api = createRouter();
@@ -280,6 +280,7 @@ api.post('/:id/questions/:reqId', async (c) => {
 
 // ---------------------------------------------------------------------------
 // GET /api/sessions/:id/files — list files in sandbox directory
+// Uses sandboxExecute with `find` for reliable, deduplicated file listing.
 // ---------------------------------------------------------------------------
 api.get('/:id/files', async (c) => {
 	const [session] = await db
@@ -289,35 +290,92 @@ api.get('/:id/files', async (c) => {
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
 
-	const path = c.req.query('path') || '/';
+	const rawPath = c.req.query('path') || '/';
+	const dirPath = rawPath === '/' ? '/home/agentuity' : rawPath;
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
-		const result = await sandboxListFiles(apiClient, {
+
+		const execution = await sandboxExecute(apiClient, {
 			sandboxId: session.sandboxId,
-			path: path === '/' ? undefined : path,
+			options: {
+				command: [
+					'find',
+					dirPath,
+					'-maxdepth',
+					'1',
+					'-not',
+					'-name',
+					'.',
+					'-printf',
+					'%y %s %p\\n',
+				],
+				timeout: '10s',
+			},
 		});
 
-		// Transform FileInfo[] into the shape the frontend expects.
-		// f.path from the SDK is relative to the listed directory.
-		// Normalise to absolute paths, avoiding double-slash or duplicate segments.
-		const seen = new Set<string>();
-		const entries = result.files
-			.map((f) => {
-				const name = f.path.split('/').pop() || f.path;
-				// Build absolute path: parent + relative name
-				const abs = normalizeSandboxPath(path, f.path);
-				return {
-					name,
-					path: abs,
-					type: f.isDir ? ('directory' as const) : ('file' as const),
-					size: f.size,
-				};
+		if (execution.status !== 'completed' || !execution.stdoutStreamUrl) {
+			// Fall back to sandboxListFiles if execute fails
+			const result = await sandboxListFiles(apiClient, {
+				sandboxId: session.sandboxId,
+				path: dirPath === '/home/agentuity' ? undefined : dirPath,
+			});
+			const seen = new Set<string>();
+			const entries = result.files
+				.map((f) => {
+					const name = f.path.split('/').pop() || f.path;
+					const abs = normalizeSandboxPath(rawPath, f.path);
+					return {
+						name,
+						path: abs,
+						type: f.isDir ? ('directory' as const) : ('file' as const),
+						size: f.size,
+					};
+				})
+				.filter((e) => {
+					if (seen.has(e.path)) return false;
+					seen.add(e.path);
+					return true;
+				})
+				.sort((a, b) => {
+					if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+					return a.name.localeCompare(b.name);
+				});
+			return c.json({ path: rawPath, entries });
+		}
+
+		// Fetch stdout content from the stream URL
+		const stdoutResp = await fetch(execution.stdoutStreamUrl);
+		const stdout = await stdoutResp.text();
+
+		// Directories to filter at root level for cleanliness
+		const rootFilterSet = new Set(['.git', 'node_modules', '.cache']);
+		const isRoot = dirPath === '/home/agentuity';
+
+		const entries = stdout
+			.split('\n')
+			.filter((line) => line.trim() !== '')
+			.map((line) => {
+				// Format: "d 4096 /path/to/dir" or "f 1234 /path/to/file"
+				const match = line.match(/^(\w)\s+(\d+)\s+(.+)$/);
+				if (!match) return null;
+
+				const typeChar = match[1]!;
+				const sizeStr = match[2]!;
+				const fullPath = match[3]!;
+				// Skip the directory itself (find includes the base path)
+				if (fullPath === dirPath) return null;
+
+				const name = fullPath.split('/').pop() || fullPath;
+				const type = typeChar === 'd' ? ('directory' as const) : ('file' as const);
+				const size = parseInt(sizeStr, 10);
+
+				return { name, path: fullPath, type, size };
 			})
-			.filter((e) => {
-				// Deduplicate by path
-				if (seen.has(e.path)) return false;
-				seen.add(e.path);
+			.filter((e): e is NonNullable<typeof e> => {
+				if (!e) return false;
+				// Filter noisy directories at root level
+				if (isRoot && rootFilterSet.has(e.name)) return false;
 				return true;
 			})
 			.sort((a, b) => {
@@ -325,7 +383,7 @@ api.get('/:id/files', async (c) => {
 				return a.name.localeCompare(b.name);
 			});
 
-		return c.json({ path, entries });
+		return c.json({ path: rawPath, entries });
 	} catch (error) {
 		return c.json({ error: 'Failed to list files', details: String(error) }, 500);
 	}

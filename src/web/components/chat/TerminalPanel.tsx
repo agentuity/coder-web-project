@@ -3,7 +3,7 @@
  * with WebSocket connection through the proxy endpoint.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Minimize2, X, Terminal as TerminalIcon } from 'lucide-react';
+import { Clipboard, Check, Minimize2, X, Terminal as TerminalIcon } from 'lucide-react';
 import { Button } from '../ui/button';
 
 interface TerminalOverlayProps {
@@ -47,6 +47,16 @@ export function TerminalOverlay({ sessionId, onClose, onConnectionChange }: Term
 	const resizeCleanupRef = useRef<(() => void) | null>(null);
 	const initRef = useRef(false);
 	const [status, setStatus] = useState<TerminalStatus>('connecting');
+	const [copied, setCopied] = useState(false);
+
+	const sshCommand = `agentuity cloud ssh ${sessionId}`;
+	const handleCopyCommand = useCallback(() => {
+		if (navigator?.clipboard?.writeText) {
+			void navigator.clipboard.writeText(sshCommand);
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		}
+	}, [sshCommand]);
 
 	// Performance: reuse TextEncoder, batch writes
 	const writeBufferRef = useRef<Uint8Array[]>([]);
@@ -255,16 +265,28 @@ export function TerminalOverlay({ sessionId, onClose, onConnectionChange }: Term
 			<div className="flex items-center gap-2 h-10 border-b border-zinc-800 bg-zinc-900 px-3">
 				<TerminalIcon className="h-4 w-4 text-zinc-400" />
 				<div className={`h-2 w-2 rounded-full ${getStatusColor(status)}`} />
-				<span className="text-xs text-zinc-300">
-					{status === 'connected'
-						? 'Terminal — Connected'
-						: status === 'connecting'
-							? 'Terminal — Connecting...'
-							: status === 'error'
-								? 'Terminal — Error'
-								: 'Terminal — Disconnected'}
-				</span>
-				<div className="flex-1" />
+			<span className="text-xs text-zinc-300">
+				{status === 'connected'
+					? 'Terminal — Connected'
+					: status === 'connecting'
+						? 'Terminal — Connecting...'
+						: status === 'error'
+							? 'Terminal — Error'
+							: 'Terminal — Disconnected'}
+			</span>
+			<div className="mx-3 flex items-center gap-1.5 rounded bg-zinc-800 px-2 py-0.5 text-[11px] font-mono text-zinc-400">
+				<span className="select-none text-zinc-500">$</span>
+				<code className="select-all">{sshCommand}</code>
+				<button
+					type="button"
+					onClick={handleCopyCommand}
+					className="ml-1 text-zinc-500 hover:text-zinc-200 transition-colors"
+					title="Copy command"
+				>
+					{copied ? <Check className="h-3 w-3 text-green-400" /> : <Clipboard className="h-3 w-3" />}
+				</button>
+			</div>
+			<div className="flex-1" />
 				<Button
 					variant="ghost"
 					size="sm"

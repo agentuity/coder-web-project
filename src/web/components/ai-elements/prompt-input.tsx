@@ -50,9 +50,9 @@ export const PromptInput = ({
 			onSubmit={handleSubmit}
 			{...props}
 		>
-			<div className="overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
-				{children}
-			</div>
+		<div className="rounded-xl border border-[var(--border)] bg-[var(--background)] shadow-sm">
+			{children}
+		</div>
 		</form>
 	);
 };

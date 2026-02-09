@@ -130,8 +130,6 @@ export function Sidebar({
         </div>
       </ScrollArea>
       
-      <Separator />
-      
       <div className="p-2 space-y-1">
         <button
           type="button"

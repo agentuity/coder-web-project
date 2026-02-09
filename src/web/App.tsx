@@ -10,8 +10,21 @@ import { ChatPage } from './components/pages/ChatPage';
 import { SkillsPage } from './components/pages/SkillsPage';
 import { SourcesPage } from './components/pages/SourcesPage';
 import { SettingsPage } from './components/pages/SettingsPage';
+import { SharedSessionPage } from './components/pages/SharedSessionPage';
 import { useAPI } from '@agentuity/react';
 import { ToastProvider, useToast } from './components/ui/toast';
+
+/**
+ * Detect if the current URL is a shared session route.
+ * Returns the stream URL if on /shared/:streamId, otherwise null.
+ */
+function getSharedStreamUrl(): string | null {
+  const match = window.location.pathname.match(/^\/shared\/(.+)$/);
+  if (match) {
+    return `/api/shared/${match[1]}`;
+  }
+  return null;
+}
 
 interface Session {
   id: string;
@@ -259,6 +272,19 @@ function AppContent() {
 }
 
 export function App() {
+  const sharedStreamUrl = getSharedStreamUrl();
+
+  // Shared session pages are public and don't need the full app shell
+  if (sharedStreamUrl) {
+    return (
+      <ToastProvider>
+        <ErrorBoundary>
+          <SharedSessionPage streamUrl={sharedStreamUrl} />
+        </ErrorBoundary>
+      </ToastProvider>
+    );
+  }
+
   return (
     <ToastProvider>
       <AppContent />

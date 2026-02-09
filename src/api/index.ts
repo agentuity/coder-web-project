@@ -11,6 +11,8 @@ import chatRoutes from '../routes/chat';
 import terminalRoutes from '../routes/terminal';
 import skillRoutes from '../routes/skills';
 import sourceRoutes from '../routes/sources';
+import sharedRoutes from '../routes/shared';
+import githubRoutes from '../routes/github';
 
 const api = createRouter();
 
@@ -25,6 +27,9 @@ api.get('/auth-methods', (c) => {
     email: !hasGoogle,
   });
 });
+
+// Shared session routes (public — no authentication required)
+api.route('/shared', sharedRoutes);
 
 // All other routes require authentication
 api.use('/*', authMiddleware);
@@ -50,6 +55,9 @@ api.route('/sessions', chatRoutes);
 
 // Terminal WebSocket route (nested under sessions)
 api.route('/sessions', terminalRoutes);
+
+// GitHub integration routes (nested under sessions)
+api.route('/sessions', githubRoutes);
 
 // Skills routes (nested under workspaces + standalone)
 api.route('/workspaces/:wid/skills', skillRoutes);

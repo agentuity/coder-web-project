@@ -20,7 +20,7 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
 	<Collapsible
-		className={cn('not-prose mb-4 w-full rounded-md border bg-[var(--card)]', className)}
+		className={cn('not-prose mb-1 w-full rounded-md border bg-[var(--card)]', className)}
 		{...props}
 	/>
 );

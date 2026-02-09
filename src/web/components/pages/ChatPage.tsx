@@ -1,24 +1,30 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+	Check,
 	Copy,
 	FileCode,
+	GitBranch,
 	GitFork,
+	Link,
 	ListOrdered,
 	ListTodo,
 	Loader2,
 	Paperclip,
+	Share2,
 	Terminal as TerminalIcon,
 	Wifi,
 	WifiOff,
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
 import { TodoPanel } from '../chat/TodoPanel';
 import { FileExplorer } from '../chat/FileExplorer';
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
 import { TerminalOverlay } from '../chat/TerminalPanel';
+import { GitPanel, useGitStatus } from '../chat/GitPanel';
 import type { Message as ChatMessage, Part, ReasoningPart } from '../../types/opencode';
 import { TextPartView } from '../chat/TextPartView';
 import { ToolCallCard } from '../chat/ToolCallCard';
@@ -150,6 +156,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 	const [showTerminal, setShowTerminal] = useState(false);
 	const [terminalConnected, setTerminalConnected] = useState(false);
 	const [isForking, setIsForking] = useState(false);
+	const [isSharing, setIsSharing] = useState(false);
+	const [shareUrl, setShareUrl] = useState<string | null>(null);
 	const [viewMode, setViewMode] = useState<'chat' | 'ide'>('chat');
 	const {
 		tabs,
@@ -173,6 +181,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 	} = useCodeComments();
 	const activeFilePath = activeTab?.filePath ?? null;
 	const isBusy = sessionStatus.type === 'busy';
+	const { branch: gitBranch, changedCount: gitChangedCount } = useGitStatus(activeSessionId);
 
   // Derive display label from selected command
   const commandLabel = selectedCommand.replace(/^\//, '');
@@ -229,6 +238,36 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
       toast({ type: 'error', message: 'Failed to fork session' });
     } finally {
       setIsForking(false);
+    }
+  };
+
+  const handleShare = async () => {
+    if (isSharing) return;
+    setIsSharing(true);
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/share`, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Failed to share session');
+      }
+      const { url } = await res.json();
+      setShareUrl(url);
+      toast({ type: 'success', message: 'Share link created!' });
+    } catch (error) {
+      console.error('Failed to share session:', error);
+      toast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to share session' });
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleCopyShareUrl = async () => {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      toast({ type: 'success', message: 'Link copied to clipboard!' });
+    } catch {
+      toast({ type: 'error', message: 'Failed to copy link' });
     }
   };
 
@@ -387,6 +426,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 					onOpenFile={openFile}
 					onAddComment={addComment}
 					getDiffAnnotations={getDiffAnnotations}
+					getFileComments={getFileComments}
 					onSendMessage={handleSend}
 				/>
 			);
@@ -557,7 +597,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 	);
 
 	const inputArea = (
-		<div className="border-t border-[var(--border)] p-3">
+		<div className="relative z-40 border-t border-[var(--border)] p-3">
 			<PromptInputProvider>
 				<PromptInput onSubmit={({ text }) => handleSend(text)}>
 					<PromptInputTextarea
@@ -576,12 +616,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 								<Paperclip className="h-3 w-3" />
 								Attach
 							</button>
-							<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
-							<ModelSelector value={selectedModel} onChange={setSelectedModel} />
-							<Badge variant="secondary" className="text-[10px]">
-								{commandLabel} · {selectedModel}
-							</Badge>
-							<span>Enter to send · Shift+Enter for new line</span>
+						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
+						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
+						<span>Enter to send · Shift+Enter for new line</span>
 							{commentCount > 0 && (
 								<Badge variant="secondary" className="text-[10px]">
 									{commentCount} comment{commentCount > 1 ? 's' : ''}
@@ -646,6 +683,44 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
                 <GitFork className="h-3.5 w-3.5" />
               )}
             </Button>
+          )}
+          {session.status === 'active' && !shareUrl && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleShare}
+              className="h-7 w-7 p-0"
+              title="Share session"
+              disabled={isSharing}
+            >
+              {isSharing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Share2 className="h-3.5 w-3.5" />
+              )}
+            </Button>
+          )}
+          {shareUrl && (
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleCopyShareUrl}
+                className="h-7 gap-1 px-2 text-[10px] text-[var(--primary)]"
+                title="Copy share link"
+              >
+                <Link className="h-3 w-3" />
+                Copy Link
+              </Button>
+              <a
+                href={shareUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[10px] text-[var(--primary)] hover:underline"
+              >
+                Open
+              </a>
+            </div>
           )}
 				<Badge variant="secondary" className="text-[10px]">
 					{commandLabel}
@@ -713,19 +788,55 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
             <TerminalIcon className={`h-3.5 w-3.5 ${terminalConnected ? 'text-green-500' : ''}`} />
             Terminal
           </Button>
-          {/* Changes toggle */}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setShowChanges(!showChanges);
-              if (!showChanges) setShowTodos(false);
-            }}
-            className="h-7 text-xs gap-1"
-          >
-            <FileCode className="h-3.5 w-3.5" />
-            Files
-          </Button>
+          {/* Git popover */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+              >
+                <GitBranch className="h-3.5 w-3.5" />
+                {gitBranch ? (
+                  <span className="font-mono max-w-[100px] truncate">{gitBranch}</span>
+                ) : (
+                  'Git'
+                )}
+                {gitChangedCount > 0 && (
+                  <Badge variant="destructive" className="text-[9px] h-4 min-w-[16px] px-1">
+                    {gitChangedCount}
+                  </Badge>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              side="bottom"
+              className="w-80 max-h-[500px] overflow-auto p-0"
+            >
+              <GitPanel sessionId={sessionId} />
+            </PopoverContent>
+          </Popover>
+          {/* Files popover */}
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs gap-1"
+              >
+                <FileCode className="h-3.5 w-3.5" />
+                Files
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="end"
+              side="bottom"
+              className="w-80 max-h-[400px] overflow-auto p-0"
+            >
+              <FileExplorer sessionId={sessionId} onOpenFile={openFile} activeFilePath={activeFilePath} />
+            </PopoverContent>
+          </Popover>
           {/* Todo toggle */}
           {todos.length > 0 && (
             <Button
@@ -733,7 +844,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
               size="sm"
               onClick={() => {
                 setShowTodos(!showTodos);
-                if (!showTodos) setShowChanges(false);
               }}
               className="h-7 text-xs gap-1"
             >
@@ -757,32 +867,55 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 
 		{/* Body */}
 		{viewMode === 'ide' ? (
-			<div className="flex-1 min-w-0">
-				<IDELayout
-					sidebar={
-						<FileExplorer sessionId={sessionId} onOpenFile={openFile} activeFilePath={activeFilePath} />
-					}
-					codePanel={
-						<CodePanel
-							sessionId={sessionId}
-							tabs={tabs}
-							activeId={activeId}
-							onSelectTab={setActiveId}
-							onCloseTab={closeTab}
-							onUpdateTab={updateTab}
-							onAddComment={addComment}
-							getDiffAnnotations={getDiffAnnotations}
-							getFileComments={getFileComments}
-							onSendMessage={handleSend}
-						/>
-					}
-					chatPanel={
-						<div className="flex h-full min-w-0 flex-col">
-							{conversationView}
-							{inputArea}
-						</div>
-					}
-				/>
+			<div className="flex flex-1 min-w-0 flex-col">
+				<div className="flex-1 min-w-0">
+					<IDELayout
+						sidebar={
+							<FileExplorer sessionId={sessionId} onOpenFile={openFile} activeFilePath={activeFilePath} />
+						}
+						codePanel={
+							<CodePanel
+								sessionId={sessionId}
+								tabs={tabs}
+								activeId={activeId}
+								onSelectTab={setActiveId}
+								onCloseTab={closeTab}
+								onUpdateTab={updateTab}
+								onAddComment={addComment}
+								getDiffAnnotations={getDiffAnnotations}
+								getFileComments={getFileComments}
+								onSendMessage={handleSend}
+							/>
+						}
+					/>
+				</div>
+				{/* Minimal input bar for IDE mode */}
+				<div className="relative z-40 border-t border-[var(--border)] px-3 py-2">
+					<PromptInputProvider>
+						<PromptInput onSubmit={({ text }) => handleSend(text)}>
+							<div className="flex items-center gap-2">
+								<div className="flex-1 min-w-0">
+									<PromptInputTextarea
+										value={inputText}
+										onChange={(event) => setInputText(event.target.value)}
+										placeholder="Message the agent..."
+										disabled={session.status !== 'active'}
+									/>
+								</div>
+								{commentCount > 0 && (
+									<Badge variant="secondary" className="text-[10px] shrink-0">
+										{commentCount} comment{commentCount > 1 ? 's' : ''}
+									</Badge>
+								)}
+								<PromptInputSubmit
+									disabled={submitDisabled}
+									status={isBusy ? 'streaming' : 'ready'}
+									onStop={handleAbort}
+								/>
+							</div>
+						</PromptInput>
+					</PromptInputProvider>
+				</div>
 			</div>
 		) : (
 			<>
@@ -793,13 +926,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession }
 					{showTodos && todos.length > 0 && (
 						<div className="w-48 md:w-64 shrink-0">
 							<TodoPanel todos={todos} />
-						</div>
-					)}
-
-					{/* File changes sidebar */}
-					{showChanges && (
-						<div className="w-80 md:w-[480px] shrink-0 border-l border-[var(--border)]">
-							<FileExplorer sessionId={sessionId} onOpenFile={openFile} activeFilePath={activeFilePath} />
 						</div>
 					)}
 				</div>

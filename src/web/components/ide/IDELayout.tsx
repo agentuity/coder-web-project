@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 interface IDELayoutProps {
 	sidebar: React.ReactNode;
 	codePanel: React.ReactNode;
-	chatPanel: React.ReactNode;
+	chatPanel?: React.ReactNode;
 }
 
 export function IDELayout({ sidebar, codePanel, chatPanel }: IDELayoutProps) {
@@ -39,18 +39,26 @@ export function IDELayout({ sidebar, codePanel, chatPanel }: IDELayoutProps) {
 				{sidebar}
 			</div>
 			<div className="flex min-w-0 flex-1">
-				<div style={{ width: codeWidth }} className="min-w-[320px] border-r border-[var(--border)]">
-					{codePanel}
-				</div>
-				<button
-					type="button"
-					className="w-1 cursor-col-resize bg-[var(--border)] hover:bg-[var(--primary)]"
-					onMouseDown={() => setIsDragging(true)}
-					aria-label="Resize panels"
-				/>
-				<div className="flex min-w-0 flex-1 flex-col">
-					{chatPanel}
-				</div>
+				{chatPanel ? (
+					<>
+						<div style={{ width: codeWidth }} className="min-w-[320px] border-r border-[var(--border)]">
+							{codePanel}
+						</div>
+						<button
+							type="button"
+							className="w-1 cursor-col-resize bg-[var(--border)] hover:bg-[var(--primary)]"
+							onMouseDown={() => setIsDragging(true)}
+							aria-label="Resize panels"
+						/>
+						<div className="flex min-w-0 flex-1 flex-col">
+							{chatPanel}
+						</div>
+					</>
+				) : (
+					<div className="flex min-w-0 flex-1 flex-col">
+						{codePanel}
+					</div>
+				)}
 			</div>
 		</div>
 	);
