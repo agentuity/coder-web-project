@@ -6,6 +6,7 @@ import type { BundledLanguage } from 'shiki';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { getLangFromPath } from '../../lib/shiki';
+import { parseFileOutput } from '../../lib/file-output';
 import {
 	Tool,
 	ToolContent,
@@ -95,17 +96,6 @@ function isAgentInvocation(input: Record<string, unknown>): input is Record<stri
 // ---------------------------------------------------------------------------
 // Parse read tool output — strip <file> tags and line number prefixes
 // ---------------------------------------------------------------------------
-
-function parseFileOutput(output: string): string {
-  return output
-    .replace(/^<file>\n?/, '')                  // Remove opening <file> tag
-    .replace(/\n?\(End of file[^\)]*\)$/, '')   // Remove "(End of file - total N lines)"
-    .replace(/\n?<\/file>$/, '')                // Remove closing </file> tag
-    .split('\n')
-    .map(line => line.replace(/^\d{5}\| ?/, ''))  // Remove "00001| " line number prefix
-    .join('\n')
-    .trim();
-}
 
 function getLangForShiki(filePath: string): BundledLanguage | 'text' {
 	return getLangFromPath(filePath) ?? 'text';

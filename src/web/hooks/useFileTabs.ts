@@ -13,8 +13,35 @@ export type FileTab = {
 	readonly?: boolean;
 };
 
-function getFileName(path: string) {
+export function getFileName(path: string) {
 	return path.split('/').pop() || path;
+}
+
+export function upsertTab(tabs: FileTab[], tab: FileTab): FileTab[] {
+	const existingIndex = tabs.findIndex((item) => item.id === tab.id);
+	if (existingIndex === -1) {
+		return [...tabs, tab];
+	}
+	const updated = [...tabs];
+	updated[existingIndex] = { ...updated[existingIndex], ...tab };
+	return updated;
+}
+
+export function updateTabState(tabs: FileTab[], id: string, updates: Partial<FileTab>): FileTab[] {
+	return tabs.map((tab) => (tab.id === id ? { ...tab, ...updates } : tab));
+}
+
+export function closeTabState(
+	tabs: FileTab[],
+	activeId: string | null,
+	id: string,
+): { tabs: FileTab[]; activeId: string | null } {
+	const idx = tabs.findIndex((tab) => tab.id === id);
+	if (idx === -1) return { tabs, activeId };
+	const nextTabs = tabs.filter((tab) => tab.id !== id);
+	if (activeId !== id) return { tabs: nextTabs, activeId };
+	const nextActive = nextTabs[idx - 1] ?? nextTabs[idx] ?? null;
+	return { tabs: nextTabs, activeId: nextActive?.id ?? null };
 }
 
 export function useFileTabs() {
@@ -22,15 +49,7 @@ export function useFileTabs() {
 	const [activeId, setActiveId] = useState<string | null>(null);
 
 	const openTab = useCallback((tab: FileTab) => {
-		setTabs((prev) => {
-			const existingIndex = prev.findIndex((item) => item.id === tab.id);
-			if (existingIndex === -1) {
-				return [...prev, tab];
-			}
-			const updated = [...prev];
-			updated[existingIndex] = { ...updated[existingIndex], ...tab };
-			return updated;
-		});
+		setTabs((prev) => upsertTab(prev, tab));
 		setActiveId(tab.id);
 	}, []);
 
@@ -78,21 +97,16 @@ export function useFileTabs() {
 
 	const closeTab = useCallback((id: string) => {
 		setTabs((prev) => {
-			const idx = prev.findIndex((tab) => tab.id === id);
-			if (idx === -1) return prev;
-			const nextTabs = prev.filter((tab) => tab.id !== id);
-			if (activeId === id) {
-				const nextActive = nextTabs[idx - 1] ?? nextTabs[idx] ?? null;
-				setActiveId(nextActive?.id ?? null);
+			const nextState = closeTabState(prev, activeId, id);
+			if (nextState.activeId !== activeId) {
+				setActiveId(nextState.activeId);
 			}
-			return nextTabs;
+			return nextState.tabs;
 		});
 	}, [activeId]);
 
 	const updateTab = useCallback((id: string, updates: Partial<FileTab>) => {
-		setTabs((prev) =>
-			prev.map((tab) => (tab.id === id ? { ...tab, ...updates } : tab)),
-		);
+		setTabs((prev) => updateTabState(prev, id, updates));
 	}, []);
 
 	const activeTab = useMemo(

@@ -9,14 +9,14 @@ export type CodeComment = {
 	origin: 'diff' | 'file';
 };
 
-function createId() {
+export function createId() {
 	if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
 		return crypto.randomUUID();
 	}
 	return `comment-${Math.random().toString(36).slice(2)}`;
 }
 
-function normalizeRange(range: SelectedLineRange): SelectedLineRange {
+export function normalizeRange(range: SelectedLineRange): SelectedLineRange {
 	if (range.start <= range.end) return range;
 	return {
 		start: range.end,
@@ -26,7 +26,7 @@ function normalizeRange(range: SelectedLineRange): SelectedLineRange {
 	};
 }
 
-function formatRange(selection: SelectedLineRange) {
+export function formatRange(selection: SelectedLineRange) {
 	const normalized = normalizeRange(selection);
 	if (normalized.start === normalized.end) {
 		return `${normalized.start}`;
@@ -34,15 +34,78 @@ function formatRange(selection: SelectedLineRange) {
 	return `${normalized.start}-${normalized.end}`;
 }
 
+export function createComment(params: {
+	file: string;
+	selection: SelectedLineRange;
+	comment: string;
+	origin: 'diff' | 'file';
+	id?: string;
+}): CodeComment {
+	return {
+		id: params.id ?? createId(),
+		file: params.file,
+		selection: normalizeRange(params.selection),
+		comment: params.comment,
+		origin: params.origin,
+	};
+}
+
+export function addCommentState(comments: CodeComment[], comment: CodeComment): CodeComment[] {
+	return [...comments, comment];
+}
+
+export function getDiffAnnotationsForComments(
+	comments: CodeComment[],
+	file: string,
+): DiffLineAnnotation<{ id: string; comment: string }>[] {
+	const annotations: DiffLineAnnotation<{ id: string; comment: string }>[] = [];
+	for (const comment of comments) {
+		if (comment.file !== file || comment.origin !== 'diff') continue;
+		const { start, end, side } = comment.selection;
+		const annotationSide = side ?? 'additions';
+		for (let line = start; line <= end; line += 1) {
+			annotations.push({
+				side: annotationSide,
+				lineNumber: line,
+				metadata: { id: comment.id, comment: comment.comment },
+			});
+		}
+	}
+	return annotations;
+}
+
+export function getFileCommentsFor(comments: CodeComment[], file: string): CodeComment[] {
+	return comments.filter((comment) => comment.file === file);
+}
+
+export function formatCommentsForPrompt(comments: CodeComment[]): string {
+	if (comments.length === 0) return '';
+	return comments
+		.map((comment) => `${comment.file}:${formatRange(comment.selection)}: "${comment.comment}"`)
+		.join('\n');
+}
+
+export function buildPendingSummary(comments: CodeComment[]): Array<{
+	id: string;
+	file: string;
+	range: string;
+	comment: string;
+}> | null {
+	if (comments.length === 0) return null;
+	return comments.map((comment) => ({
+		id: comment.id,
+		file: comment.file,
+		range: formatRange(comment.selection),
+		comment: comment.comment,
+	}));
+}
+
 export function useCodeComments() {
 	const [comments, setComments] = useState<CodeComment[]>([]);
 
 	const addComment = useCallback(
 		(file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => {
-			setComments((prev) => [
-				...prev,
-				{ id: createId(), file, selection: normalizeRange(selection), comment, origin },
-			]);
+			setComments((prev) => addCommentState(prev, createComment({ file, selection, comment, origin })));
 		},
 		[],
 	);
@@ -53,44 +116,22 @@ export function useCodeComments() {
 
 	const getDiffAnnotations = useCallback(
 		(file: string): DiffLineAnnotation<{ id: string; comment: string }>[] => {
-			const annotations: DiffLineAnnotation<{ id: string; comment: string }>[] = [];
-			for (const comment of comments) {
-				if (comment.file !== file || comment.origin !== 'diff') continue;
-				const { start, end, side } = comment.selection;
-				const annotationSide = side ?? 'additions';
-				for (let line = start; line <= end; line += 1) {
-					annotations.push({
-						side: annotationSide,
-						lineNumber: line,
-						metadata: { id: comment.id, comment: comment.comment },
-					});
-				}
-			}
-			return annotations;
+			return getDiffAnnotationsForComments(comments, file);
 		},
 		[comments],
 	);
 
 	const getFileComments = useCallback(
-		(file: string) => comments.filter((comment) => comment.file === file),
+		(file: string) => getFileCommentsFor(comments, file),
 		[comments],
 	);
 
 	const formatForPrompt = useCallback(() => {
-		if (comments.length === 0) return '';
-		return comments
-			.map((comment) => `${comment.file}:${formatRange(comment.selection)}: "${comment.comment}"`)
-			.join('\n');
+		return formatCommentsForPrompt(comments);
 	}, [comments]);
 
 	const pendingSummary = useMemo(() => {
-		if (comments.length === 0) return null;
-		return comments.map((comment) => ({
-			id: comment.id,
-			file: comment.file,
-			range: formatRange(comment.selection),
-			comment: comment.comment,
-		}));
+		return buildPendingSummary(comments);
 	}, [comments]);
 
 	return {

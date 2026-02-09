@@ -10,6 +10,7 @@ import { chatSessions } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile } from '@agentuity/server';
+import { normalizeSandboxPath } from '../lib/path-utils';
 
 const api = createRouter();
 
@@ -305,10 +306,7 @@ api.get('/:id/files', async (c) => {
 			.map((f) => {
 				const name = f.path.split('/').pop() || f.path;
 				// Build absolute path: parent + relative name
-				const abs =
-					path === '/'
-						? `/${f.path}`
-						: `${path.replace(/\/+$/, '')}/${f.path.replace(/^\/+/, '')}`;
+				const abs = normalizeSandboxPath(path, f.path);
 				return {
 					name,
 					path: abs,
