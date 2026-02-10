@@ -9,6 +9,7 @@ import { db } from '../db';
 import { chatSessions } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import { sandboxExecute } from '@agentuity/server';
+import { parseMetadata } from '../lib/parse-metadata';
 
 const api = createRouter();
 
@@ -58,7 +59,13 @@ async function execInSandbox(
 		stderr = await res.text();
 	}
 
-	return { stdout, stderr, exitCode: execution.exitCode ?? -1 };
+	// sandboxExecute often returns status:"queued" with null exitCode even when
+	// the command completed successfully and stdout/stderr are available.
+	// If we have a real numeric exitCode, trust it. Otherwise, assume success (0)
+	// since the sandbox did execute and return streams.
+	const exitCode = typeof execution.exitCode === 'number' ? execution.exitCode : 0;
+
+	return { stdout, stderr, exitCode };
 }
 
 /** Ensure a sandbox file path is absolute (rooted at /home/agentuity). */
@@ -91,7 +98,7 @@ function toRepoRelativePath(rawPath: string, projectDir: string) {
 }
 
 function getProjectDir(session: typeof chatSessions.$inferSelect) {
-	const metadata = (session.metadata || {}) as Record<string, unknown>;
+	const metadata = parseMetadata(session);
 	const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
 	if (!repoUrl) return PROJECT_DIR;
 	const repoName = repoUrl.split('/').pop()?.replace('.git', '');
@@ -167,7 +174,7 @@ api.get('/:id/github/status', async (c) => {
 		const { stdout, stderr, exitCode } = await execInSandbox(
 			apiClient,
 			session.sandboxId!,
-			'git status --porcelain 2>/dev/null; echo "---SEPARATOR---"; git branch --show-current 2>/dev/null; echo "---SEPARATOR---"; git remote -v 2>/dev/null',
+			'git status --porcelain -uall 2>/dev/null; echo "---SEPARATOR---"; git branch --show-current 2>/dev/null; echo "---SEPARATOR---"; git remote -v 2>/dev/null',
 			projectDir,
 		);
 
@@ -239,13 +246,13 @@ api.get('/:id/github/log', async (c) => {
 			projectDir,
 		);
 
-	if (exitCode !== 0) {
-		const errMsg = stderr.trim();
-		if (errMsg.includes('does not have any commits') || errMsg.includes('bad default revision')) {
-			return c.json([] as GitLogEntry[]);
+		if (exitCode !== 0) {
+			const errMsg = stderr.trim();
+			if (errMsg.includes('does not have any commits') || errMsg.includes('bad default revision')) {
+				return c.json([] as GitLogEntry[]);
+			}
+			return c.json({ error: errMsg || 'Failed to load git log' }, 500);
 		}
-		return c.json({ error: errMsg || 'Failed to load git log' }, 500);
-	}
 
 		const entries: GitLogEntry[] = stdout
 			.split('\n')
@@ -312,11 +319,11 @@ api.post('/:id/github/init', async (c) => {
 				`git remote add origin '${safeRemote}'`,
 				projectDir,
 			);
-			const metadata = (session.metadata || {}) as Record<string, unknown>;
-			await db
-				.update(chatSessions)
-				.set({ metadata: { ...metadata, repoUrl: remoteUrl } })
-				.where(eq(chatSessions.id, session.id));
+		const metadata = parseMetadata(session);
+		await db
+			.update(chatSessions)
+			.set({ metadata: { ...metadata, repoUrl: remoteUrl } })
+			.where(eq(chatSessions.id, session.id));
 		}
 
 		return c.json({ success: true });
@@ -444,7 +451,7 @@ api.post('/:id/github/create-repo', async (c) => {
 		const repoUrl = urlMatch ? urlMatch[0].replace(/\.git$/, '') : undefined;
 
 		if (repoUrl) {
-			const metadata = (session.metadata || {}) as Record<string, unknown>;
+			const metadata = parseMetadata(session);
 			await db
 				.update(chatSessions)
 				.set({ metadata: { ...metadata, repoUrl } })
@@ -489,14 +496,17 @@ api.post('/:id/github/branch', async (c) => {
 			projectDir,
 		);
 
-		if (exitCode !== 0) {
+		// git checkout -b writes success message to stderr (e.g., "Switched to a new branch 'test'")
+		const stderrMsg = stderr.trim();
+		const isGitSuccess = stderrMsg.startsWith('Switched to');
+		if (exitCode !== 0 && !isGitSuccess) {
 			return c.json({
 				success: false,
-				error: stderr.trim() || 'Failed to create branch',
+				error: stderrMsg || 'Failed to create branch',
 			}, 400);
 		}
 
-		const metadata = (session.metadata || {}) as Record<string, unknown>;
+		const metadata = parseMetadata(session);
 		await db
 			.update(chatSessions)
 			.set({ metadata: { ...metadata, branch: branchName } })
@@ -505,6 +515,58 @@ api.post('/:id/github/branch', async (c) => {
 		return c.json({ branch: branchName, success: true });
 	} catch (error) {
 		return c.json({ error: 'Failed to create branch', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/github/checkout — create and switch to a new branch from a commit
+// ---------------------------------------------------------------------------
+api.post('/:id/github/checkout', async (c) => {
+	const result = await getSession(c.req.param('id')!);
+	if ('error' in result) return c.json({ error: result.error }, result.status);
+	const { session } = result;
+
+	const body = await c.req.json<{ name: string; startPoint?: string }>();
+	if (!body.name || !body.name.trim()) {
+		return c.json({ error: 'Branch name is required' }, 400);
+	}
+
+	const branchName = body.name.trim().replace(/[^a-zA-Z0-9._\-/]/g, '-');
+	const startPoint = body.startPoint?.trim().replace(/[^a-zA-Z0-9._\-/]/g, '') || '';
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const projectDir = getProjectDir(session);
+
+		const cmd = startPoint
+			? `git checkout -b '${branchName}' '${startPoint}'`
+			: `git checkout -b '${branchName}'`;
+
+		const { stdout, stderr, exitCode } = await execInSandbox(
+			apiClient,
+			session.sandboxId!,
+			cmd,
+			projectDir,
+		);
+
+		const stderrMsg = stderr.trim();
+		const isGitSuccess = stderrMsg.startsWith('Switched to');
+		if (exitCode !== 0 && !isGitSuccess) {
+			return c.json({
+				success: false,
+				error: stderrMsg || 'Failed to create branch',
+			}, 400);
+		}
+
+		const metadata = parseMetadata(session);
+		await db
+			.update(chatSessions)
+			.set({ metadata: { ...metadata, branch: branchName } })
+			.where(eq(chatSessions.id, session.id));
+
+		return c.json({ branch: branchName, success: true });
+	} catch (error) {
+		return c.json({ error: 'Failed to checkout branch', details: String(error) }, 500);
 	}
 });
 
@@ -576,7 +638,7 @@ api.post('/:id/github/commit', async (c) => {
 		const hashMatch = stdout.match(/\[[\w/.-]+ ([a-f0-9]+)\]/);
 		const hash = hashMatch ? hashMatch[1] : null;
 
-		const metadata = (session.metadata || {}) as Record<string, unknown>;
+		const metadata = parseMetadata(session);
 		await db
 			.update(chatSessions)
 			.set({
@@ -671,7 +733,7 @@ api.post('/:id/github/pr', async (c) => {
 		const numberMatch = prUrl.match(/\/pull\/(\d+)/);
 		const prNumber = numberMatch ? parseInt(numberMatch[1]!, 10) : null;
 
-		const metadata = (session.metadata || {}) as Record<string, unknown>;
+		const metadata = parseMetadata(session);
 		await db
 			.update(chatSessions)
 			.set({
@@ -824,7 +886,7 @@ api.get('/:id/github/diff-file', async (c) => {
 			const newResult = await execInSandbox(
 				apiClient,
 				session.sandboxId!,
-				`cat '${safeAbsolutePath}' 2>/dev/null`,
+				`cat '${safeRepoPath}' 2>/dev/null`,
 				projectDir,
 			);
 			if (newResult.exitCode === 0) {
@@ -844,7 +906,7 @@ api.get('/:id/github/diff-file', async (c) => {
 			const newResult = await execInSandbox(
 				apiClient,
 				session.sandboxId!,
-				`cat '${safeAbsolutePath}' 2>/dev/null`,
+				`cat '${safeRepoPath}' 2>/dev/null`,
 				projectDir,
 			);
 			if (newResult.exitCode === 0) {

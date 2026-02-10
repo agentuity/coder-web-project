@@ -46,7 +46,7 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 
 	const [installingSkills, setInstallingSkills] = useState<Record<string, boolean>>({});
 	const [removingSkills, setRemovingSkills] = useState<Record<string, boolean>>({});
-	const [operationInProgress, setOperationInProgress] = useState(false);
+	const [operationsInProgress, setOperationsInProgress] = useState<Set<string>>(new Set());
 
 	// Fetch skills
 	const fetchSkills = useCallback(async () => {
@@ -119,6 +119,13 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 		return () => clearTimeout(timeout);
 	}, [fetchRegistry, registryQuery]);
 
+	// Cleanup AbortController on unmount
+	useEffect(() => {
+		return () => {
+			abortControllerRef.current?.abort();
+		};
+	}, []);
+
 	// Create/Update
 	const handleSave = async () => {
 		if (!formData.name.trim() || !formData.content.trim()) return;
@@ -149,19 +156,35 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 
 	// Toggle enabled
 	const handleToggle = async (skill: Skill) => {
-		await fetch(`/api/skills/${skill.id}`, {
-			method: 'PATCH',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ enabled: !skill.enabled }),
-		});
-		fetchSkills();
+		try {
+			const res = await fetch(`/api/skills/${skill.id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ enabled: !skill.enabled }),
+			});
+			if (!res.ok) {
+				const errBody = await res.json().catch(() => null);
+				throw new Error(errBody?.error || 'Failed to toggle skill');
+			}
+			fetchSkills();
+		} catch (err: any) {
+			setRegistryError(err?.message || 'Failed to toggle skill.');
+		}
 	};
 
 	// Delete
 	const handleDelete = async (id: string) => {
 		if (!confirm('Delete this skill?')) return;
-		await fetch(`/api/skills/${id}`, { method: 'DELETE' });
-		fetchSkills();
+		try {
+			const res = await fetch(`/api/skills/${id}`, { method: 'DELETE' });
+			if (!res.ok) {
+				const errBody = await res.json().catch(() => null);
+				throw new Error(errBody?.error || 'Failed to delete skill');
+			}
+			fetchSkills();
+		} catch (err: any) {
+			setRegistryError(err?.message || 'Failed to delete skill.');
+		}
 	};
 
 	// Start editing
@@ -193,11 +216,11 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 	}, [registrySkillsFromDb]);
 
 	const handleInstall = async (skill: RegistrySkill) => {
-		if (operationInProgress) return;
 		const repo = skill.repo?.trim();
 		if (!repo) return;
 		const installKey = `${repo}@${skill.name}`;
-		setOperationInProgress(true);
+		if (operationsInProgress.has(installKey)) return;
+		setOperationsInProgress((prev) => new Set(prev).add(installKey));
 		setInstallingSkills((prev) => ({ ...prev, [installKey]: true }));
 		try {
 			const res = await fetch(`/api/workspaces/${workspaceId}/skills`, {
@@ -219,14 +242,18 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 			setRegistryError(err?.message || 'Failed to install skill.');
 		} finally {
 			setInstallingSkills((prev) => ({ ...prev, [installKey]: false }));
-			setOperationInProgress(false);
+			setOperationsInProgress((prev) => {
+				const next = new Set(prev);
+				next.delete(installKey);
+				return next;
+			});
 		}
 	};
 
 	const handleRemove = async (skillId: string) => {
-		if (operationInProgress) return;
+		if (operationsInProgress.has(skillId)) return;
 		if (!confirm('Remove this skill from the workspace?')) return;
-		setOperationInProgress(true);
+		setOperationsInProgress((prev) => new Set(prev).add(skillId));
 		setRemovingSkills((prev) => ({ ...prev, [skillId]: true }));
 		try {
 			const res = await fetch(`/api/skills/${skillId}`, { method: 'DELETE' });
@@ -239,7 +266,11 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 			setRegistryError(err?.message || 'Failed to remove skill.');
 		} finally {
 			setRemovingSkills((prev) => ({ ...prev, [skillId]: false }));
-			setOperationInProgress(false);
+			setOperationsInProgress((prev) => {
+				const next = new Set(prev);
+				next.delete(skillId);
+				return next;
+			});
 		}
 	};
 
@@ -412,7 +443,7 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 											size="icon"
 											className="h-7 w-7 text-red-500"
 											onClick={() => skill.type === 'registry' ? handleRemove(skill.id) : handleDelete(skill.id)}
-											disabled={removingSkills[skill.id] || operationInProgress}
+											disabled={removingSkills[skill.id] || operationsInProgress.has(skill.id)}
 											title="Remove"
 										>
 											<Trash2 className="h-3.5 w-3.5" />
@@ -507,7 +538,7 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 														variant="ghost"
 														size="sm"
 														onClick={() => handleRemove(installedSkill.id)}
-														disabled={removingSkills[installedSkill.id] || operationInProgress}
+														disabled={removingSkills[installedSkill.id] || operationsInProgress.has(installedSkill.id)}
 													>
 														{removingSkills[installedSkill.id] ? 'Removing...' : 'Remove'}
 													</Button>
@@ -515,7 +546,7 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 													<Button
 														size="sm"
 														onClick={() => handleInstall(skill)}
-														disabled={!fullRef || installingSkills[installKey] || operationInProgress}
+														disabled={!fullRef || installingSkills[installKey] || operationsInProgress.has(installKey)}
 													>
 														{installingSkills[installKey] ? 'Installing...' : 'Install'}
 													</Button>

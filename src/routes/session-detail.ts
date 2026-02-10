@@ -21,6 +21,7 @@ import {
 	SANDBOX_STATUS_TTL_MS,
 } from '../lib/sandbox-health';
 import { decrypt } from '../lib/encryption';
+import { parseMetadata } from '../lib/parse-metadata';
 
 const api = createRouter();
 
@@ -158,7 +159,7 @@ api.post('/:id/fork', async (c) => {
 		.filter((s) => s.type === 'registry' && s.repo)
 		.map((s) => ({ repo: s.repo as string, skillName: s.name }));
 
-	const metadata = (sourceSession.metadata || {}) as Record<string, unknown>;
+	const metadata = parseMetadata(sourceSession);
 	const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
 	const branch = typeof metadata.branch === 'string' ? metadata.branch : undefined;
 	const baseTitle = sourceSession.title || 'Untitled Session';

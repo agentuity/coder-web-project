@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -87,50 +86,41 @@ export function GitHubSettings() {
 	};
 
 	return (
-		<Card>
-			<CardHeader>
-				<CardTitle className="text-lg">GitHub</CardTitle>
-				<CardDescription>
-					Connect your GitHub account by adding a personal access token. This token is encrypted and used
-					for repository access in your coding sessions.
-				</CardDescription>
-			</CardHeader>
-			<CardContent className="space-y-4">
-				{loading ? (
-					<div className="text-sm text-[var(--muted-foreground)]">Loading GitHub settings...</div>
-				) : status.configured ? (
-					<div className="space-y-3">
-						<div className="flex flex-wrap items-center gap-2">
-							<Badge variant="secondary">Connected</Badge>
-							{status.username && (
-								<span className="text-sm text-[var(--foreground)]">@{status.username}</span>
-							)}
-							{status.maskedToken && (
-								<span className="text-xs text-[var(--muted-foreground)]">{status.maskedToken}</span>
-							)}
-						</div>
-						<Button variant="destructive" size="sm" onClick={handleDisconnect} disabled={saving}>
-							{saving ? 'Disconnecting...' : 'Disconnect'}
-						</Button>
+		<div className="space-y-4">
+			{loading ? (
+				<div className="text-sm text-[var(--muted-foreground)]">Loading GitHub settings...</div>
+			) : status.configured ? (
+				<div className="space-y-3">
+					<div className="flex flex-wrap items-center gap-2">
+						<Badge variant="secondary">Connected</Badge>
+						{status.username && (
+							<span className="text-sm text-[var(--foreground)]">@{status.username}</span>
+						)}
+						{status.maskedToken && (
+							<span className="text-xs text-[var(--muted-foreground)]">{status.maskedToken}</span>
+						)}
 					</div>
-				) : (
-					<div className="space-y-3">
-						<Input
-							type="password"
-							placeholder="ghp_••••••••••••••••"
-							value={token}
-							onChange={(e) => setToken(e.target.value)}
-						/>
-						<Button size="sm" onClick={handleConnect} disabled={saving || !token.trim()}>
-							{saving ? 'Connecting...' : 'Connect'}
-						</Button>
-					</div>
-				)}
-				{error && <div className="text-sm text-red-500">{error}</div>}
-				<p className="text-xs text-[var(--muted-foreground)]">
-					Create a fine-grained token at github.com/settings/tokens with repository access permissions.
-				</p>
-			</CardContent>
-		</Card>
+					<Button variant="destructive" size="sm" onClick={handleDisconnect} disabled={saving}>
+						{saving ? 'Disconnecting...' : 'Disconnect'}
+					</Button>
+				</div>
+			) : (
+				<div className="space-y-3">
+					<Input
+						type="password"
+						placeholder="ghp_••••••••••••••••"
+						value={token}
+						onChange={(e) => setToken(e.target.value)}
+					/>
+					<Button size="sm" onClick={handleConnect} disabled={saving || !token.trim()}>
+						{saving ? 'Connecting...' : 'Connect'}
+					</Button>
+				</div>
+			)}
+			{error && <div className="text-sm text-red-500">{error}</div>}
+			<p className="text-xs text-[var(--muted-foreground)]">
+				Create a fine-grained token at github.com/settings/tokens with repository access permissions.
+			</p>
+		</div>
 	);
 }

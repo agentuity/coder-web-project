@@ -33,6 +33,7 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 	// Form state
 	const [name, setName] = useState('');
 	const [description, setDescription] = useState('');
+	const [settingsError, setSettingsError] = useState<string | null>(null);
 
 	// Fetch all workspaces
 	const fetchAllWorkspaces = useCallback(async () => {
@@ -67,8 +68,9 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 	const handleSave = async () => {
 		setSaving(true);
 		setSaved(false);
+		setSettingsError(null);
 		try {
-			await fetch(`/api/workspaces/${workspaceId}`, {
+			const res = await fetch(`/api/workspaces/${workspaceId}`, {
 				method: 'PATCH',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({
@@ -76,11 +78,15 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 					description: description || undefined,
 				}),
 			});
+			if (!res.ok) {
+				const errBody = await res.json().catch(() => null);
+				throw new Error(errBody?.error || 'Failed to save settings');
+			}
 			setSaved(true);
 			fetchAllWorkspaces();
 			setTimeout(() => setSaved(false), 2000);
-		} catch {
-			/* ignore */
+		} catch (err: any) {
+			setSettingsError(err?.message || 'Failed to save settings.');
 		}
 		setSaving(false);
 	};
@@ -88,30 +94,40 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 	const handleCreateWorkspace = async () => {
 		if (!newWorkspaceName.trim()) return;
 		setCreating(true);
+		setSettingsError(null);
 		try {
 			const res = await fetch('/api/workspaces', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ name: newWorkspaceName.trim() }),
 			});
+			if (!res.ok) {
+				const errBody = await res.json().catch(() => null);
+				throw new Error(errBody?.error || 'Failed to create workspace');
+			}
 			const created = await res.json();
 			setNewWorkspaceName('');
 			await fetchAllWorkspaces();
 			onWorkspaceChange?.(created.id);
-		} catch {
-			/* ignore */
+		} catch (err: any) {
+			setSettingsError(err?.message || 'Failed to create workspace.');
 		}
 		setCreating(false);
 	};
 
 	const handleDeleteWorkspace = async (id: string) => {
 		setDeleting(true);
+		setSettingsError(null);
 		try {
-			await fetch(`/api/workspaces/${id}`, { method: 'DELETE' });
+			const res = await fetch(`/api/workspaces/${id}`, { method: 'DELETE' });
+			if (!res.ok) {
+				const errBody = await res.json().catch(() => null);
+				throw new Error(errBody?.error || 'Failed to delete workspace');
+			}
 			setConfirmDeleteId(null);
 			await fetchAllWorkspaces();
-		} catch {
-			/* ignore */
+		} catch (err: any) {
+			window.alert(err?.message || 'Failed to delete workspace.');
 		}
 		setDeleting(false);
 	};
@@ -295,6 +311,12 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 				</Button>
 				{saved && <span className="text-xs text-green-500">Settings saved</span>}
 			</div>
+
+			{settingsError && (
+				<div className="mt-3 rounded-md border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-500">
+					{settingsError}
+				</div>
+			)}
 
 			{/* GitHub */}
 			<Card className="p-4 mt-8 mb-6">

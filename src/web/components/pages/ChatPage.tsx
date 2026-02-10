@@ -439,7 +439,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		},
 		[archivedParts, getPartsForMessage, session.status],
 	);
-	const { branch: gitBranch, changedCount: gitChangedCount } = useGitStatus(activeSessionId, githubAvailable);
+	const { branch: gitBranch, changedCount: gitChangedCount, refresh: refreshGitStatus } = useGitStatus(activeSessionId, githubAvailable);
 
 	useEffect(() => {
 		if (!isEditingTitle) {
@@ -1473,13 +1473,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						)}
 						<div className="flex-1 overflow-y-auto">
 							{githubAvailable && sidebarTab === 'git' ? (
-								<GitPanel
-									sessionId={sessionId}
-									metadata={session.metadata ?? undefined}
-									onOpenDiff={(path, oldContent, newContent) =>
-										openDiff(path, oldContent, newContent)
-									}
-								/>
+							<GitPanel
+								sessionId={sessionId}
+								metadata={session.metadata ?? undefined}
+								onOpenDiff={(path, oldContent, newContent) =>
+									openDiff(path, oldContent, newContent)
+								}
+								onBranchChange={refreshGitStatus}
+							/>
 							) : (
 					<FileExplorer
 						sessionId={sessionId}

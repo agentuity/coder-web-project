@@ -32,11 +32,14 @@ const sessionThreadProvider: ThreadIDProvider = {
 };
 
 const { server, logger } = await createApp({
-	setup: async () => {
-		const threadProvider = getThreadProvider();
-		threadProvider.setThreadIDProvider(sessionThreadProvider);
-	},
 	shutdown: async (_state) => {},
 });
+
+// Set custom thread ID provider AFTER app initialization
+// (getThreadProvider() requires createApp to complete first)
+const threadProvider = getThreadProvider();
+if (threadProvider) {
+	threadProvider.setThreadIDProvider(sessionThreadProvider);
+}
 
 logger.debug('Running %s', server.url);

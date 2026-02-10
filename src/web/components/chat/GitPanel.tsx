@@ -2,15 +2,22 @@ import { useCallback, useEffect, useState } from 'react';
 import {
 	AlertCircle,
 	Check,
+	ChevronRight,
+	File,
+	Folder,
+	FolderOpen,
 	GitBranch,
 	GitCommit,
+	History,
 	Loader2,
 	RefreshCw,
+	X,
 } from 'lucide-react';
 import { GitLog, type GitLogEntry } from '@tomplum/react-git-log';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Badge } from '../ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog';
 import { cn } from '../../lib/utils';
 
 // ---------------------------------------------------------------------------
@@ -45,6 +52,382 @@ interface GitPanelProps {
 	sessionId: string;
 	metadata?: GitMetadata;
 	onOpenDiff: (filePath: string, oldContent: string, newContent: string) => void;
+	onBranchChange?: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Changes tree helpers
+// ---------------------------------------------------------------------------
+
+interface ChangeEntry {
+	status: string;
+	path: string;
+}
+
+interface ChangesTreeNode {
+	name: string;
+	fullPath: string;
+	type: 'file' | 'directory';
+	status?: string;
+	children?: ChangesTreeNode[];
+}
+
+function buildChangesTree(changes: ChangeEntry[]): ChangesTreeNode[] {
+	const root: ChangesTreeNode[] = [];
+
+	for (const change of changes) {
+		const parts = change.path.split('/');
+		let current = root;
+
+		for (let i = 0; i < parts.length; i++) {
+			const part = parts[i] as string;
+			const isFile = i === parts.length - 1;
+			const fullPath = parts.slice(0, i + 1).join('/');
+
+			if (isFile) {
+				current.push({
+					name: part,
+					fullPath: change.path,
+					type: 'file',
+					status: change.status,
+				});
+			} else {
+				let existing = current.find(
+					(n) => n.type === 'directory' && n.name === part,
+				);
+				if (!existing) {
+					existing = {
+						name: part,
+						fullPath: fullPath,
+						type: 'directory',
+						children: [],
+					};
+					current.push(existing);
+				}
+				current = existing.children!;
+			}
+		}
+	}
+
+	// Sort: directories first, then alphabetically
+	const sortNodes = (nodes: ChangesTreeNode[]) => {
+		nodes.sort((a, b) => {
+			if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+			return a.name.localeCompare(b.name);
+		});
+		for (const n of nodes) {
+			if (n.children) sortNodes(n.children);
+		}
+	};
+	sortNodes(root);
+	return root;
+}
+
+function ChangesTreeItem({
+	node,
+	depth,
+	onOpenDiff,
+	diffLoadingPath,
+	getStatusClass,
+}: {
+	node: ChangesTreeNode;
+	depth: number;
+	onOpenDiff: (filePath: string) => void;
+	diffLoadingPath: string | null;
+	getStatusClass: (status: string) => string;
+}) {
+	const [expanded, setExpanded] = useState(depth < 1);
+
+	if (node.type === 'directory') {
+		return (
+			<div>
+				<button
+					type="button"
+					className="flex w-full items-center gap-1 rounded px-1 py-0.5 hover:bg-[var(--accent)]"
+					style={{ paddingLeft: `${depth * 12 + 4}px` }}
+					onClick={() => setExpanded(!expanded)}
+				>
+					<ChevronRight
+						className={`h-3 w-3 transition-transform ${expanded ? 'rotate-90' : ''}`}
+					/>
+					{expanded ? (
+						<FolderOpen className="h-3.5 w-3.5 text-[var(--primary)]" />
+					) : (
+						<Folder className="h-3.5 w-3.5 text-[var(--primary)]" />
+					)}
+					<span className="text-[10px] font-mono text-[var(--muted-foreground)]">
+						{node.name}
+					</span>
+				</button>
+				{expanded &&
+					node.children?.map((child) => (
+						<ChangesTreeItem
+							key={child.fullPath}
+							node={child}
+							depth={depth + 1}
+							onOpenDiff={onOpenDiff}
+							diffLoadingPath={diffLoadingPath}
+							getStatusClass={getStatusClass}
+						/>
+					))}
+			</div>
+		);
+	}
+
+	return (
+		<button
+			type="button"
+			className="flex w-full items-center gap-1 rounded px-1 py-0.5 hover:bg-[var(--accent)] cursor-pointer"
+			style={{ paddingLeft: `${depth * 12 + 16}px` }}
+			onClick={() => onOpenDiff(node.fullPath)}
+			disabled={diffLoadingPath === node.fullPath}
+		>
+			<span
+				className={`w-4 text-center text-[10px] font-semibold ${getStatusClass(node.status || 'M')}`}
+			>
+				{node.status || 'M'}
+			</span>
+			<File className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+			<span className="truncate text-[10px] font-mono text-[var(--muted-foreground)]" title={node.fullPath}>
+				{node.name}
+			</span>
+			{diffLoadingPath === node.fullPath && (
+				<Loader2 className="h-3 w-3 animate-spin text-[var(--muted-foreground)]" />
+			)}
+		</button>
+	);
+}
+
+// ---------------------------------------------------------------------------
+// Git History Modal
+// ---------------------------------------------------------------------------
+
+function GitHistoryModal({
+	open,
+	onOpenChange,
+	entries,
+	loading,
+	error,
+	currentBranch,
+	repoUrl,
+	sessionId,
+	onBranchCreated,
+}: {
+	open: boolean;
+	onOpenChange: (open: boolean) => void;
+	entries: GitLogEntry[];
+	loading: boolean;
+	error: string | null;
+	currentBranch: string;
+	repoUrl?: string;
+	sessionId: string;
+	onBranchCreated: () => void;
+}) {
+	const isDark =
+		typeof document !== 'undefined'
+			? document.documentElement.classList.contains('dark')
+			: false;
+
+	const [selectedCommit, setSelectedCommit] = useState<any>(null);
+	const [checkoutName, setCheckoutName] = useState('');
+	const [checkoutLoading, setCheckoutLoading] = useState(false);
+	const [checkoutError, setCheckoutError] = useState<string | null>(null);
+	const [checkoutSuccess, setCheckoutSuccess] = useState(false);
+
+	const resolvedEntries = entries.map((entry) => ({
+		...entry,
+		branch: entry.branch || currentBranch,
+	}));
+
+	const handleCheckout = async () => {
+		if (!checkoutName.trim() || !selectedCommit?.hash) return;
+		setCheckoutLoading(true);
+		setCheckoutError(null);
+		setCheckoutSuccess(false);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/github/checkout`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					name: checkoutName.trim(),
+					startPoint: selectedCommit.hash,
+				}),
+			});
+			const data = await res.json();
+			if (!res.ok || !data.success) {
+				throw new Error(data.error || 'Failed to create branch');
+			}
+			setCheckoutSuccess(true);
+			setCheckoutName('');
+			setSelectedCommit(null);
+			onBranchCreated();
+			// Close the modal after a brief success flash so the user sees the branch change in the sidebar
+			setTimeout(() => {
+				setCheckoutSuccess(false);
+				onOpenChange(false);
+			}, 800);
+		} catch (err) {
+			setCheckoutError(err instanceof Error ? err.message : 'Failed to create branch');
+		} finally {
+			setCheckoutLoading(false);
+		}
+	};
+
+	return (
+		<Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent className="max-w-5xl h-[80vh] flex flex-col">
+				<DialogHeader>
+					<div className="flex items-center gap-3">
+						<DialogTitle>Commit History</DialogTitle>
+						<Badge variant="secondary" className="text-[10px] font-mono">
+							{currentBranch}
+						</Badge>
+						{resolvedEntries.length > 0 && (
+							<Badge variant="outline" className="text-[10px]">
+								{resolvedEntries.length} commit{resolvedEntries.length !== 1 ? 's' : ''}
+							</Badge>
+						)}
+					</div>
+				</DialogHeader>
+				<div className="overflow-auto flex-1 rounded border border-[var(--border)] bg-[var(--background)]">
+					{loading && resolvedEntries.length === 0 && (
+						<div className="flex items-center justify-center py-12">
+							<Loader2 className="h-5 w-5 animate-spin text-[var(--muted-foreground)]" />
+						</div>
+					)}
+					{error && (
+						<div className="flex items-center justify-center gap-2 py-12">
+							<AlertCircle className="h-4 w-4 text-[var(--destructive)]" />
+							<span className="text-xs text-[var(--destructive)]">{error}</span>
+						</div>
+					)}
+					{!loading && !error && resolvedEntries.length === 0 && (
+						<div className="flex items-center justify-center py-12">
+							<span className="text-xs text-[var(--muted-foreground)]">No commits yet.</span>
+						</div>
+					)}
+					{resolvedEntries.length > 0 && (
+						<GitLog
+							entries={resolvedEntries}
+							currentBranch={currentBranch}
+							theme={isDark ? 'dark' : 'light'}
+							showHeaders={false}
+							rowSpacing={0}
+							defaultGraphWidth={180}
+							classes={{ containerClass: 'text-xs' }}
+							onSelectCommit={(commit) => {
+								setSelectedCommit(commit ?? null);
+								setCheckoutName('');
+								setCheckoutError(null);
+								setCheckoutSuccess(false);
+							}}
+							enableSelectedCommitStyling
+							enablePreviewedCommitStyling
+							urls={repoUrl ? ({ commit }) => ({
+								commit: `${repoUrl.replace('.git', '')}/commit/${commit.hash}`,
+								branch: `${repoUrl.replace('.git', '')}/tree/${commit.branch}`,
+							}) : undefined}
+						>
+							<GitLog.GraphHTMLGrid
+								nodeSize={12}
+								showCommitNodeTooltips
+								enableResize
+							/>
+							<GitLog.Table
+								className="text-xs"
+								timestampFormat="YYYY-MM-DD"
+							/>
+						</GitLog>
+					)}
+				</div>
+				{selectedCommit && (
+					<div className="shrink-0 border-t border-[var(--border)] px-4 py-3 space-y-2">
+						<div className="flex items-center justify-between">
+							<div className="flex items-center gap-2">
+								<GitCommit className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+								<span className="font-mono text-xs text-[var(--primary)]">{selectedCommit.hash}</span>
+								{repoUrl && (
+									<a
+										href={`${repoUrl.replace('.git', '')}/commit/${selectedCommit.hash}`}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="text-[10px] text-[var(--primary)] hover:underline"
+									>
+										View on GitHub
+									</a>
+								)}
+							</div>
+							<Button
+								variant="ghost"
+								size="sm"
+								className="h-6 text-[10px]"
+								onClick={() => setSelectedCommit(null)}
+							>
+								<X className="h-3 w-3" />
+							</Button>
+						</div>
+						<p className="text-xs text-[var(--foreground)]">{selectedCommit.message}</p>
+						<div className="flex items-center gap-4 text-[10px] text-[var(--muted-foreground)]">
+							{selectedCommit.author?.name && (
+								<span>{selectedCommit.author.name}</span>
+							)}
+							{selectedCommit.committerDate && (
+								<span>{selectedCommit.committerDate}</span>
+							)}
+							{selectedCommit.parents?.length > 0 && (
+								<span>Parents: {selectedCommit.parents.map((p: string) => p.slice(0, 7)).join(', ')}</span>
+							)}
+						</div>
+						{selectedCommit.branch && (
+							<div className="flex items-center gap-1.5">
+								<Badge variant="secondary" className="text-[10px] font-mono">
+									{selectedCommit.branch}
+								</Badge>
+								{repoUrl && (
+									<a
+										href={`${repoUrl.replace('.git', '')}/tree/${selectedCommit.branch}`}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="text-[10px] text-[var(--primary)] hover:underline"
+									>
+										View branch
+									</a>
+								)}
+							</div>
+						)}
+						<div className="flex items-center gap-1.5 pt-1 border-t border-[var(--border)]">
+							<GitBranch className="h-3 w-3 text-[var(--muted-foreground)] shrink-0" />
+							<Input
+								value={checkoutName}
+								onChange={(e) => setCheckoutName(e.target.value)}
+								placeholder="new-branch-name"
+								className="h-7 text-xs flex-1"
+								onKeyDown={(e) => e.key === 'Enter' && handleCheckout()}
+							/>
+							<Button
+								variant="secondary"
+								size="sm"
+								onClick={handleCheckout}
+								disabled={checkoutLoading || !checkoutName.trim()}
+								className="h-7 text-xs shrink-0"
+							>
+								{checkoutLoading ? (
+									<Loader2 className="h-3 w-3 animate-spin" />
+								) : checkoutSuccess ? (
+									<Check className="h-3 w-3" />
+								) : (
+									'Branch from here'
+								)}
+							</Button>
+						</div>
+						{checkoutError && (
+							<p className="text-[10px] text-[var(--destructive)]">{checkoutError}</p>
+						)}
+					</div>
+				)}
+			</DialogContent>
+		</Dialog>
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -164,29 +547,20 @@ function StatusSection({
 							</Badge>
 						)}
 					</div>
-					{status.isDirty && changes.length > 0 && (
-						<div className="rounded border border-[var(--border)] bg-[var(--muted)] p-1.5">
-							{changes.map((change) => (
-								<button
-									key={`${change.status}-${change.path}`}
-									className="flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[10px] font-mono text-[var(--muted-foreground)] hover:bg-[var(--accent)] cursor-pointer"
-									onClick={() => onOpenDiff(change.path)}
-									type="button"
-									disabled={diffLoadingPath === change.path}
-								>
-									<span className={`w-4 text-center text-[10px] font-semibold ${getStatusClass(change.status || 'M')}`}>
-										{change.status || 'M'}
-									</span>
-									<span className="truncate" title={change.path}>
-										{change.path}
-									</span>
-									{diffLoadingPath === change.path && (
-										<Loader2 className="h-3 w-3 animate-spin text-[var(--muted-foreground)]" />
-									)}
-								</button>
-							))}
-						</div>
-					)}
+				{status.isDirty && changes.length > 0 && (
+					<div className="rounded border border-[var(--border)] bg-[var(--muted)] p-1.5">
+						{buildChangesTree(changes).map((node) => (
+							<ChangesTreeItem
+								key={node.fullPath}
+								node={node}
+								depth={0}
+								onOpenDiff={onOpenDiff}
+								diffLoadingPath={diffLoadingPath}
+								getStatusClass={getStatusClass}
+							/>
+						))}
+					</div>
+				)}
 					{diffError && (
 						<p className="text-[10px] text-[var(--destructive)]">{diffError}</p>
 					)}
@@ -393,73 +767,36 @@ function BranchSection({
 	);
 }
 
-function HistorySection({
+function HistoryButton({
 	entries,
 	loading,
-	error,
-	currentBranch,
+	onOpen,
 }: {
 	entries: GitLogEntry[];
 	loading: boolean;
-	error: string | null;
-	currentBranch: string;
+	onOpen: () => void;
 }) {
-	const isDark = typeof document !== 'undefined'
-		? document.documentElement.classList.contains('dark')
-		: false;
-
-	if (loading && entries.length === 0) {
-		return (
-			<div className="border-b border-[var(--border)] px-3 py-2">
-				<div className="flex items-center gap-2">
-					<GitCommit className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
-					<span className="text-xs font-medium text-[var(--foreground)]">History</span>
-				</div>
-				<div className="mt-2 flex items-center justify-center py-4">
-					<Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
-				</div>
-			</div>
-		);
-	}
-
-	const resolvedEntries = entries.map((entry) => ({
-		...entry,
-		branch: entry.branch || currentBranch,
-	}));
-
 	return (
-		<div className="border-b border-[var(--border)] px-3 py-2">
-			<div className="flex items-center gap-2">
-				<GitCommit className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+		<div className="border-b border-[var(--border)]">
+			<button
+				type="button"
+				className="flex w-full items-center gap-2 px-3 py-2 hover:bg-[var(--accent)] cursor-pointer"
+				onClick={onOpen}
+			>
+				<History className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
 				<span className="text-xs font-medium text-[var(--foreground)]">History</span>
-			</div>
-			{error && (
-				<p className="mt-2 text-[10px] text-[var(--destructive)]">{error}</p>
-			)}
-			{!error && resolvedEntries.length === 0 && (
-				<p className="mt-2 text-[10px] text-[var(--muted-foreground)]">
-					No commits yet.
-				</p>
-			)}
-			{resolvedEntries.length > 0 && (
-				<div className="mt-2 max-h-[220px] overflow-auto rounded border border-[var(--border)] bg-[var(--background)]">
-					<GitLog
-						entries={resolvedEntries}
-						currentBranch={currentBranch}
-						theme={isDark ? 'dark' : 'light'}
-						showHeaders={false}
-						rowSpacing={6}
-						defaultGraphWidth={120}
-						classes={{ containerClass: 'text-[10px]' }}
-					>
-						<GitLog.GraphHTMLGrid nodeSize={10} showCommitNodeTooltips={false} />
-						<GitLog.Table
-							className="text-[10px]"
-							timestampFormat="YYYY-MM-DD"
-						/>
-					</GitLog>
-				</div>
-			)}
+				<span className="ml-auto flex items-center gap-1.5">
+					{loading && entries.length === 0 && (
+						<Loader2 className="h-3 w-3 animate-spin text-[var(--muted-foreground)]" />
+					)}
+					{entries.length > 0 && (
+						<Badge variant="outline" className="text-[10px]">
+							{entries.length}
+						</Badge>
+					)}
+					<ChevronRight className="h-3 w-3 text-[var(--muted-foreground)]" />
+				</span>
+			</button>
 		</div>
 	);
 }
@@ -468,7 +805,7 @@ function HistorySection({
 // GitPanel — main exported component
 // ---------------------------------------------------------------------------
 
-export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
+export function GitPanel({ sessionId, metadata, onOpenDiff, onBranchChange }: GitPanelProps) {
 	const [status, setStatus] = useState<GitStatus | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [initLoading, setInitLoading] = useState(false);
@@ -529,7 +866,8 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 
 	const refreshAll = useCallback(async () => {
 		await Promise.all([fetchStatus(), fetchHistory()]);
-	}, [fetchHistory, fetchStatus]);
+		onBranchChange?.();
+	}, [fetchHistory, fetchStatus, onBranchChange]);
 
 	const handleInitRepo = useCallback(async (remoteUrl?: string) => {
 		setInitLoading(true);
@@ -611,6 +949,8 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 		}
 	}, [onOpenDiff, sessionId]);
 
+	const [historyOpen, setHistoryOpen] = useState(false);
+
 	const showCreateRepo = Boolean(status && (status.hasRepo === false || status.remotes.length === 0));
 	const resolvedMetadata = createdRepoUrl
 		? { ...(metadata || {}), repoUrl: createdRepoUrl }
@@ -645,11 +985,21 @@ export function GitPanel({ sessionId, metadata, onOpenDiff }: GitPanelProps) {
 				error={createError}
 			/>
 			<MetadataSection metadata={resolvedMetadata} />
-			<HistorySection
+			<HistoryButton
+				entries={history}
+				loading={historyLoading}
+				onOpen={() => setHistoryOpen(true)}
+			/>
+			<GitHistoryModal
+				open={historyOpen}
+				onOpenChange={setHistoryOpen}
 				entries={history}
 				loading={historyLoading}
 				error={historyError}
 				currentBranch={currentBranch}
+				repoUrl={resolvedMetadata?.repoUrl}
+				sessionId={sessionId}
+				onBranchCreated={refreshAll}
 			/>
 			<BranchSection sessionId={sessionId} onSuccess={refreshAll} />
 			<div className="px-3 py-3">
@@ -666,35 +1016,29 @@ export function useGitStatus(sessionId: string | undefined, enabled = true) {
 	const [branch, setBranch] = useState<string | null>(null);
 	const [changedCount, setChangedCount] = useState(0);
 
+	const load = useCallback(async () => {
+		if (!sessionId || !enabled) return;
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/github/status`);
+			if (!res.ok) return;
+			const data: GitStatus = await res.json();
+			setBranch(data.branch);
+			setChangedCount(data.changedFiles.length);
+		} catch {
+			// ignore
+		}
+	}, [sessionId, enabled]);
+
 	useEffect(() => {
 		if (!sessionId || !enabled) {
 			setBranch(null);
 			setChangedCount(0);
 			return;
 		}
-		let cancelled = false;
-
-		const load = async () => {
-			try {
-				const res = await fetch(`/api/sessions/${sessionId}/github/status`);
-				if (!res.ok) return;
-				const data: GitStatus = await res.json();
-				if (cancelled) return;
-				setBranch(data.branch);
-				setChangedCount(data.changedFiles.length);
-			} catch {
-				// ignore
-			}
-		};
-
 		load();
-		// Poll every 30s
 		const interval = setInterval(load, 30_000);
-		return () => {
-			cancelled = true;
-			clearInterval(interval);
-		};
-	}, [sessionId, enabled]);
+		return () => clearInterval(interval);
+	}, [sessionId, enabled, load]);
 
-	return { branch, changedCount };
+	return { branch, changedCount, refresh: load };
 }

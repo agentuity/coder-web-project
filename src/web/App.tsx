@@ -1,5 +1,5 @@
 import type React from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { authClient } from './lib/auth-client';
 import { SignIn } from './components/auth/SignIn';
 import { ProfilePage } from './components/auth/ProfilePage';
@@ -57,6 +57,7 @@ function AppContent() {
   const currentPage = urlState.p;
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const isCreatingRef = useRef(false);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [githubAvailable, setGithubAvailable] = useState(false);
@@ -165,6 +166,9 @@ function AppContent() {
 
 	const handleNewSession = useCallback(async (data: { repoUrl?: string; branch?: string; prompt?: string }) => {
 		if (!workspaceId) return;
+		// Ref-based guard prevents double submission (state updates are async)
+		if (isCreatingRef.current) return;
+		isCreatingRef.current = true;
 		setIsCreating(true);
 		try {
 			const res = await fetch(`/api/workspaces/${workspaceId}/sessions`, {
@@ -183,6 +187,7 @@ function AppContent() {
 			console.error('Failed to create session:', error);
 			toast({ type: 'error', message: 'Failed to create session' });
 		} finally {
+			isCreatingRef.current = false;
 			setIsCreating(false);
 		}
 	}, [setUrlState, toast, workspaceId]);

@@ -17,8 +17,11 @@ export function encrypt(plaintext: string): string {
 
 export function decrypt(ciphertext: string): string {
 	const key = getKey();
-	const [ivHex, encHex, tagHex] = ciphertext.split(':');
-	if (!ivHex || !encHex || !tagHex) throw new Error('Invalid ciphertext format');
+	const parts = ciphertext.split(':');
+	if (parts.length !== 3) throw new Error('Invalid ciphertext format');
+	const ivHex = parts[0] as string;
+	const encHex = parts[1] as string;
+	const tagHex = parts[2] as string;
 	const iv = Buffer.from(ivHex, 'hex');
 	const encrypted = Buffer.from(encHex, 'hex');
 	const authTag = Buffer.from(tagHex, 'hex');
