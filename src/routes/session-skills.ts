@@ -121,7 +121,7 @@ api.get('/:id/skills/search', async (c) => {
 		}
 	}
 
-	return c.json(skills);
+	return c.json({ results: skills, _debug: { exitCode: result.exitCode, stdoutLen: result.stdout.length, stderrLen: result.stderr.length, lines: lines.slice(0, 20), rawStdout: result.stdout.slice(0, 500), rawStderr: result.stderr.slice(0, 500) } });
 });
 
 // GET /api/sessions/:id/skills/installed — list installed skills
