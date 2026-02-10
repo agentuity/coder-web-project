@@ -186,7 +186,12 @@ api.post('/:id/skills/install', async (c) => {
 
 	const apiClient = (c.var.sandbox as any).client;
 	const projectDir = resolveProjectDir(session);
-	const command = ['bunx', 'skills', 'add', repo, '--agent', 'opencode', '-y'];
+	// Split "owner/repo@skill-name" into separate --skill flag
+	const atIdx = repo.indexOf('@');
+	const repoPath = atIdx >= 0 ? repo.slice(0, atIdx) : repo;
+	const skillName = atIdx >= 0 ? repo.slice(atIdx + 1) : undefined;
+	const command = ['bunx', 'skills', 'add', repoPath, '--agent', 'opencode', '-y'];
+	if (skillName) command.push('--skill', skillName);
 	const result = await execInSandbox(apiClient, session.sandboxId, command, projectDir);
 	if (result.exitCode !== 0) {
 		return c.json({ error: 'Failed to install skill', details: result.stderr || result.stdout }, 500);
