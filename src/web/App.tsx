@@ -76,13 +76,24 @@ function AppContent() {
   }, [theme]);
 
   // Check if current user has a GitHub PAT configured
-  useEffect(() => {
+  const fetchGithubStatus = useCallback(() => {
     if (!user) return;
     fetch('/api/user/github')
       .then(r => r.json())
       .then((data: { configured?: boolean }) => setGithubAvailable(data.configured ?? false))
       .catch(() => setGithubAvailable(false));
   }, [user]);
+
+  useEffect(() => {
+    fetchGithubStatus();
+  }, [fetchGithubStatus]);
+
+  // Re-fetch GitHub status when token is connected/disconnected in settings
+  useEffect(() => {
+    const handler = () => fetchGithubStatus();
+    window.addEventListener('github-status-changed', handler);
+    return () => window.removeEventListener('github-status-changed', handler);
+  }, [fetchGithubStatus]);
 
   const handleToggleTheme = useCallback(() => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));

@@ -205,12 +205,12 @@ export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath
 										? 'text-red-500'
 										: 'text-yellow-500';
 								return (
-									<button
-										key={`${change.status}-${change.path}`}
-										onClick={() => onOpenFile(change.path)}
-										className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--accent)]"
-										type="button"
-									>
+								<button
+									key={`${change.status}-${change.path}`}
+									onClick={() => (onOpenDiff ?? onOpenFile)(change.path)}
+									className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--accent)]"
+									type="button"
+								>
 										<GitCommit className="h-3 w-3 text-[var(--muted-foreground)]" />
 										<span className={`w-4 text-center text-[10px] font-semibold ${statusColor}`}>
 											{statusLabel}

@@ -1481,11 +1481,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									}
 								/>
 							) : (
-						<FileExplorer
-							sessionId={sessionId}
-							onOpenFile={openFile}
-							activeFilePath={activeFilePath}
-						/>
+					<FileExplorer
+						sessionId={sessionId}
+						onOpenFile={openFile}
+						onOpenDiff={(path) => openDiff(path, '', '')}
+						activeFilePath={activeFilePath}
+					/>
 						)}
 						</div>
 					</div>

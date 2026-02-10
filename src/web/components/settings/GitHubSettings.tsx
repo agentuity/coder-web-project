@@ -57,27 +57,29 @@ export function GitHubSettings() {
 				setError(data.error || 'Invalid GitHub token');
 				return;
 			}
-			const data = (await res.json()) as GitHubStatus;
-			setStatus({
-				configured: true,
-				username: data.username,
-				maskedToken: data.maskedToken,
-			});
-			setToken('');
-		} catch {
-			setError('Failed to connect GitHub token');
-		} finally {
-			setSaving(false);
-		}
+		const data = (await res.json()) as GitHubStatus;
+		setStatus({
+			configured: true,
+			username: data.username,
+			maskedToken: data.maskedToken,
+		});
+		setToken('');
+		window.dispatchEvent(new Event('github-status-changed'));
+	} catch {
+		setError('Failed to connect GitHub token');
+	} finally {
+		setSaving(false);
+	}
 	};
 
 	const handleDisconnect = async () => {
 		setSaving(true);
 		setError(null);
 		try {
-			await fetch('/api/user/github', { method: 'DELETE' });
-			setStatus({ configured: false });
-		} catch {
+		await fetch('/api/user/github', { method: 'DELETE' });
+		setStatus({ configured: false });
+		window.dispatchEvent(new Event('github-status-changed'));
+	} catch {
 			setError('Failed to disconnect GitHub token');
 		} finally {
 			setSaving(false);

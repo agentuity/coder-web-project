@@ -3,7 +3,6 @@ import { Plus, Sparkles, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
-import { cn } from '../../lib/utils';
 
 interface Skill {
 	id: string;
@@ -39,8 +38,6 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 	const nameInputId = useId();
 	const descriptionInputId = useId();
 	const contentInputId = useId();
-	const [activeTab, setActiveTab] = useState<'custom' | 'registry'>('custom');
-
 	const [registrySkills, setRegistrySkills] = useState<RegistrySkill[]>([]);
 	const [registryQuery, setRegistryQuery] = useState('');
 	const [registryLoading, setRegistryLoading] = useState(false);
@@ -112,17 +109,15 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 	);
 
 	useEffect(() => {
-		if (activeTab !== 'registry' || registryQuery.trim().length < 2) {
-			if (registryQuery.trim().length < 2) {
-				setRegistrySkills([]);
-			}
+		if (registryQuery.trim().length < 2) {
+			setRegistrySkills([]);
 			return;
 		}
 		const timeout = setTimeout(() => {
 			fetchRegistry(registryQuery);
 		}, 300);
 		return () => clearTimeout(timeout);
-	}, [activeTab, fetchRegistry, registryQuery]);
+	}, [fetchRegistry, registryQuery]);
 
 	// Create/Update
 	const handleSave = async () => {
@@ -262,186 +257,177 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 						<Button
 							size="sm"
 							variant="outline"
-							onClick={() => { setActiveTab('custom'); setShowForm(true); }}
+							onClick={() => setShowForm(true)}
 							disabled={showForm}
 						>
 							<Plus className="h-4 w-4 mr-1" />
 							New Skill
 						</Button>
 					)}
-					<div className="flex items-center rounded-lg border border-[var(--border)] p-0.5">
-						<button
-							type="button"
-							onClick={() => setActiveTab('custom')}
-							className={cn(
-								'rounded-md px-3 py-1 text-sm font-medium transition-colors',
-								activeTab === 'custom'
-									? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
-									: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-							)}
-						>
-							Custom
-						</button>
-						<button
-							type="button"
-							onClick={() => { setActiveTab('registry'); setShowForm(false); }}
-							className={cn(
-								'rounded-md px-3 py-1 text-sm font-medium transition-colors',
-								activeTab === 'registry'
-									? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
-									: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
-							)}
-						>
-							Registry
-						</button>
-					</div>
 				</div>
 			</div>
 
-			{activeTab === 'custom' && (
-				<>
-					{/* Create/Edit Form */}
-					{showForm && (
-						<Card className="p-4 mb-6 border-[var(--primary)]/30">
-							<h3 className="text-sm font-medium text-[var(--foreground)] mb-3">
-								{editingSkill ? 'Edit Skill' : 'New Skill'}
-							</h3>
-							<div className="space-y-3">
-								<div>
-									<label
-										className="text-xs text-[var(--muted-foreground)] mb-1 block"
-										htmlFor={nameInputId}
-									>
-										Name
-									</label>
-									<input
-										id={nameInputId}
-										type="text"
-										value={formData.name}
-										onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
-										className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--foreground)]"
-										placeholder="e.g., Code Style Rules"
-									/>
-								</div>
-								<div>
-									<label
-										className="text-xs text-[var(--muted-foreground)] mb-1 block"
-										htmlFor={descriptionInputId}
-									>
-										Description (optional)
-									</label>
-									<input
-										id={descriptionInputId}
-										type="text"
-										value={formData.description}
-										onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
-										className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--foreground)]"
-										placeholder="Brief description of what this skill does"
-									/>
-								</div>
-								<div>
-									<label
-										className="text-xs text-[var(--muted-foreground)] mb-1 block"
-										htmlFor={contentInputId}
-									>
-										Content (instructions in markdown)
-									</label>
-									<textarea
-										id={contentInputId}
-										value={formData.content}
-										onChange={(e) => setFormData((prev) => ({ ...prev, content: e.target.value }))}
-										className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] font-mono min-h-[200px] resize-y"
-										placeholder="Write your skill instructions here..."
-									/>
-								</div>
-								<div className="flex gap-2 justify-end">
-									<Button variant="ghost" size="sm" onClick={cancelForm}>
-										Cancel
-									</Button>
-									<Button
-										size="sm"
-										onClick={handleSave}
-										disabled={saving || !formData.name.trim() || !formData.content.trim()}
-									>
-										{saving ? 'Saving...' : editingSkill ? 'Update' : 'Create'}
-									</Button>
-								</div>
-							</div>
-						</Card>
-					)}
+			{/* Installed Skills Section */}
+			<div className="mb-8">
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-3">
+					Installed ({skills.length})
+				</h3>
 
-					{/* Skills List */}
-					{loading ? (
-						<div className="text-sm text-[var(--muted-foreground)]">Loading skills...</div>
-					) : customSkills.length === 0 ? (
-						<div className="text-center py-12">
-							<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
-							<p className="text-sm text-[var(--muted-foreground)]">No custom skills yet</p>
-							<p className="text-xs text-[var(--muted-foreground)] mt-1">
-								Skills are custom instructions injected into the AI agent context
-							</p>
-						</div>
-					) : (
+				{/* Create/Edit Form */}
+				{showForm && (
+					<Card className="p-4 mb-4 border-[var(--primary)]/30">
+						<h3 className="text-sm font-medium text-[var(--foreground)] mb-3">
+							{editingSkill ? 'Edit Skill' : 'New Skill'}
+						</h3>
 						<div className="space-y-3">
-							{customSkills.map((skill) => (
-								<Card key={skill.id} className={`p-4 ${!skill.enabled ? 'opacity-50' : ''}`}>
-									<div className="flex items-start justify-between">
-										<div className="flex-1 min-w-0">
-											<div className="flex items-center gap-2">
-												<h3 className="text-sm font-medium text-[var(--foreground)]">{skill.name}</h3>
-												<Badge variant={skill.enabled ? 'default' : 'secondary'} className="text-[10px]">
-													{skill.enabled ? 'Active' : 'Disabled'}
-												</Badge>
-											</div>
-											{skill.description && (
-												<p className="text-xs text-[var(--muted-foreground)] mt-1">{skill.description}</p>
-											)}
+							<div>
+								<label
+									className="text-xs text-[var(--muted-foreground)] mb-1 block"
+									htmlFor={nameInputId}
+								>
+									Name
+								</label>
+								<input
+									id={nameInputId}
+									type="text"
+									value={formData.name}
+									onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+									className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--foreground)]"
+									placeholder="e.g., Code Style Rules"
+								/>
+							</div>
+							<div>
+								<label
+									className="text-xs text-[var(--muted-foreground)] mb-1 block"
+									htmlFor={descriptionInputId}
+								>
+									Description (optional)
+								</label>
+								<input
+									id={descriptionInputId}
+									type="text"
+									value={formData.description}
+									onChange={(e) => setFormData((prev) => ({ ...prev, description: e.target.value }))}
+									className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-1.5 text-sm text-[var(--foreground)]"
+									placeholder="Brief description of what this skill does"
+								/>
+							</div>
+							<div>
+								<label
+									className="text-xs text-[var(--muted-foreground)] mb-1 block"
+									htmlFor={contentInputId}
+								>
+									Content (instructions in markdown)
+								</label>
+								<textarea
+									id={contentInputId}
+									value={formData.content}
+									onChange={(e) => setFormData((prev) => ({ ...prev, content: e.target.value }))}
+									className="w-full rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] font-mono min-h-[200px] resize-y"
+									placeholder="Write your skill instructions here..."
+								/>
+							</div>
+							<div className="flex gap-2 justify-end">
+								<Button variant="ghost" size="sm" onClick={cancelForm}>
+									Cancel
+								</Button>
+								<Button
+									size="sm"
+									onClick={handleSave}
+									disabled={saving || !formData.name.trim() || !formData.content.trim()}
+								>
+									{saving ? 'Saving...' : editingSkill ? 'Update' : 'Create'}
+								</Button>
+							</div>
+						</div>
+					</Card>
+				)}
+
+				{loading ? (
+					<div className="text-sm text-[var(--muted-foreground)]">Loading skills...</div>
+				) : skills.length === 0 ? (
+					<div className="text-center py-8">
+						<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
+						<p className="text-sm text-[var(--muted-foreground)]">No skills installed yet</p>
+						<p className="text-xs text-[var(--muted-foreground)] mt-1">
+							Create a custom skill or install one from the marketplace below
+						</p>
+					</div>
+				) : (
+					<div className="space-y-3">
+						{skills.map((skill) => (
+							<Card key={skill.id} className={`p-4 ${!skill.enabled ? 'opacity-50' : ''}`}>
+								<div className="flex items-start justify-between">
+									<div className="flex-1 min-w-0">
+										<div className="flex items-center gap-2">
+											<h3 className="text-sm font-medium text-[var(--foreground)]">{skill.name}</h3>
+											<Badge variant="secondary" className="text-[10px]">
+												{skill.type === 'registry' ? 'Registry' : 'Custom'}
+											</Badge>
+											<Badge variant={skill.enabled ? 'default' : 'secondary'} className="text-[10px]">
+												{skill.enabled ? 'Active' : 'Disabled'}
+											</Badge>
+										</div>
+										{skill.description && (
+											<p className="text-xs text-[var(--muted-foreground)] mt-1">{skill.description}</p>
+										)}
+										{skill.type === 'registry' && skill.repo && (
+											<p className="text-xs text-[var(--muted-foreground)] mt-1 font-mono">{skill.repo}</p>
+										)}
+										{skill.type !== 'registry' && skill.content && (
 											<pre className="mt-2 text-xs text-[var(--muted-foreground)] font-mono whitespace-pre-wrap line-clamp-3">
 												{skill.content}
 											</pre>
-										</div>
-										<div className="flex items-center gap-1 ml-4 shrink-0">
-											<Button
-												variant="ghost"
-												size="icon"
-												className="h-7 w-7"
-												onClick={() => handleToggle(skill)}
-												title={skill.enabled ? 'Disable' : 'Enable'}
-											>
-												{skill.enabled ? (
-													<ToggleRight className="h-4 w-4 text-green-500" />
-												) : (
-													<ToggleLeft className="h-4 w-4" />
-												)}
-											</Button>
-											<Button
-												variant="ghost"
-												size="icon"
-												className="h-7 w-7"
-												onClick={() => startEdit(skill)}
-												title="Edit"
-											>
-												<Pencil className="h-3.5 w-3.5" />
-											</Button>
-											<Button
-												variant="ghost"
-												size="icon"
-												className="h-7 w-7 text-red-500"
-												onClick={() => handleDelete(skill.id)}
-												title="Delete"
-											>
-												<Trash2 className="h-3.5 w-3.5" />
-											</Button>
-										</div>
+										)}
 									</div>
-								</Card>
-							))}
-						</div>
-					)}
-				</>
-			)}
+									<div className="flex items-center gap-1 ml-4 shrink-0">
+										{skill.type !== 'registry' && (
+											<>
+												<Button
+													variant="ghost"
+													size="icon"
+													className="h-7 w-7"
+													onClick={() => handleToggle(skill)}
+													title={skill.enabled ? 'Disable' : 'Enable'}
+												>
+													{skill.enabled ? (
+														<ToggleRight className="h-4 w-4 text-green-500" />
+													) : (
+														<ToggleLeft className="h-4 w-4" />
+													)}
+												</Button>
+												<Button
+													variant="ghost"
+													size="icon"
+													className="h-7 w-7"
+													onClick={() => startEdit(skill)}
+													title="Edit"
+												>
+													<Pencil className="h-3.5 w-3.5" />
+												</Button>
+											</>
+										)}
+										<Button
+											variant="ghost"
+											size="icon"
+											className="h-7 w-7 text-red-500"
+											onClick={() => skill.type === 'registry' ? handleRemove(skill.id) : handleDelete(skill.id)}
+											disabled={removingSkills[skill.id] || operationInProgress}
+											title="Remove"
+										>
+											<Trash2 className="h-3.5 w-3.5" />
+										</Button>
+									</div>
+								</div>
+							</Card>
+						))}
+					</div>
+				)}
+			</div>
 
-			{activeTab === 'registry' && (
+			{/* Marketplace Section */}
+			<div>
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-3">Marketplace</h3>
 				<div className="space-y-4">
 					<Card className="p-4">
 						<div className="flex flex-col gap-3">
@@ -467,13 +453,11 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 					{registryLoading ? (
 						<div className="text-sm text-[var(--muted-foreground)]">Searching skills...</div>
 					) : registryQuery.trim().length < 2 ? (
-						<div className="text-center py-10">
-							<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
-							<p className="text-sm text-[var(--muted-foreground)]">Type at least 2 characters to search</p>
+						<div className="text-center py-8">
+							<p className="text-sm text-[var(--muted-foreground)]">Type at least 2 characters to search the registry</p>
 						</div>
 					) : registrySkills.length === 0 ? (
-						<div className="text-center py-10">
-							<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
+						<div className="text-center py-8">
 							<p className="text-sm text-[var(--muted-foreground)]">
 								No skills found for &ldquo;{registryQuery.trim()}&rdquo;
 							</p>
@@ -544,7 +528,7 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 						</div>
 					)}
 				</div>
-			)}
+			</div>
 		</div>
 	);
 }

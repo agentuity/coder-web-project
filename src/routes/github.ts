@@ -239,9 +239,13 @@ api.get('/:id/github/log', async (c) => {
 			projectDir,
 		);
 
-		if (exitCode !== 0) {
-			return c.json({ error: stderr.trim() || 'Failed to load git log' }, 400);
+	if (exitCode !== 0) {
+		const errMsg = stderr.trim();
+		if (errMsg.includes('does not have any commits') || errMsg.includes('bad default revision')) {
+			return c.json([] as GitLogEntry[]);
 		}
+		return c.json({ error: errMsg || 'Failed to load git log' }, 500);
+	}
 
 		const entries: GitLogEntry[] = stdout
 			.split('\n')
