@@ -9,7 +9,7 @@ import { db } from '../db';
 import { chatSessions } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import { getOpencodeClient } from '../opencode';
-import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxSetEnv, sandboxWriteFiles } from '@agentuity/server';
+import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
 
 const SANDBOX_HOME = '/home/agentuity';
@@ -400,91 +400,6 @@ api.post('/:id/questions/:reqId', async (c) => {
 		return c.json({ success: true });
 	} catch (error) {
 		return c.json({ error: 'Failed to reply to question', details: String(error) }, 500);
-	}
-});
-
-// ---------------------------------------------------------------------------
-// GET /api/sessions/:id/env — read sandbox environment variables
-// ---------------------------------------------------------------------------
-api.get('/:id/env', async (c) => {
-	const [session] = await db
-		.select()
-		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
-	if (!session) return c.json({ error: 'Session not found' }, 404);
-	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
-
-	try {
-		const apiClient = (c.var.sandbox as any).client;
-		const execution = await sandboxExecute(apiClient, {
-			sandboxId: session.sandboxId,
-			options: {
-				command: ['bash', '-c', 'printenv'],
-				timeout: '10s',
-			},
-		});
-
-		if (execution.status !== 'completed' || !execution.stdoutStreamUrl) {
-			return c.json({ error: 'Failed to read environment variables' }, 500);
-		}
-
-		const stdoutResp = await fetch(execution.stdoutStreamUrl);
-		if (!stdoutResp.ok) {
-			return c.json({ error: 'Failed to read environment variables' }, 500);
-		}
-		const stdout = await stdoutResp.text();
-
-		const env: Record<string, string> = {};
-		for (const line of stdout.split('\n')) {
-			const trimmed = line.trim();
-			if (!trimmed) continue;
-			const eqIdx = trimmed.indexOf('=');
-			if (eqIdx <= 0) continue;
-			const key = trimmed.slice(0, eqIdx);
-			const value = trimmed.slice(eqIdx + 1);
-			env[key] = value;
-		}
-
-		return c.json({ env });
-	} catch (error) {
-		return c.json({ error: 'Failed to read environment variables', details: String(error) }, 500);
-	}
-});
-
-// ---------------------------------------------------------------------------
-// PUT /api/sessions/:id/env — update sandbox environment variables
-// ---------------------------------------------------------------------------
-api.put('/:id/env', async (c) => {
-	const [session] = await db
-		.select()
-		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
-	if (!session) return c.json({ error: 'Session not found' }, 404);
-	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
-
-	const body = await c.req
-		.json<{ env?: Record<string, string | null> }>()
-		.catch(() => ({ env: undefined }));
-	const envPayload = body.env && typeof body.env === 'object' ? body.env : null;
-	if (!envPayload || Object.keys(envPayload).length === 0) {
-		return c.json({ error: 'Missing env payload' }, 400);
-	}
-
-	try {
-		const apiClient = (c.var.sandbox as any).client;
-		const result = await sandboxSetEnv(apiClient, {
-			sandboxId: session.sandboxId,
-			env: envPayload,
-		});
-
-		const env: Record<string, string | null> = {};
-		for (const key of Object.keys(envPayload)) {
-			env[key] = result.env[key] ?? null;
-		}
-
-		return c.json({ success: true, env });
-	} catch (error) {
-		return c.json({ error: 'Failed to update environment variables', details: String(error) }, 500);
 	}
 });
 

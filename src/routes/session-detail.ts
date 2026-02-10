@@ -3,7 +3,7 @@
  */
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
-import { chatSessions, skills, sources } from '../db/schema';
+import { chatSessions, skills, sources, userSettings } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import {
 	createSandbox,
@@ -20,6 +20,7 @@ import {
 	setCachedHealthTimestamp,
 	SANDBOX_STATUS_TTL_MS,
 } from '../lib/sandbox-health';
+import { decrypt } from '../lib/encryption';
 
 const api = createRouter();
 
@@ -182,12 +183,25 @@ api.post('/:id/fork', async (c) => {
 	(async () => {
 		try {
 			const sandboxCtx: SandboxContext = { sandbox, logger };
+			let githubToken: string | undefined;
+			try {
+				const [settings] = await db
+					.select()
+					.from(userSettings)
+					.where(eq(userSettings.userId, user.id));
+				if (settings?.githubPat) {
+					githubToken = decrypt(settings.githubPat);
+				}
+			} catch {
+				logger.warn('Failed to load GitHub token for sandbox', { userId: user.id });
+			}
 			const { sandboxId, sandboxUrl } = await createSandbox(sandboxCtx, {
 				repoUrl,
 				branch,
 				opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
 				customSkills,
 				registrySkills,
+				githubToken,
 			});
 
 			const client = getOpencodeClient(sandboxId, sandboxUrl);

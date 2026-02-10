@@ -178,32 +178,37 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 					</button>
 				</div>
 
-			<form onSubmit={handleSubmit} className="space-y-4">
-				{githubAvailable && (
-					<>
-						<div className="flex items-center gap-2 text-xs">
-							<button
-								type="button"
-								onClick={() => setMode('dropdown')}
-								className={cn(
-									"text-xs",
-									mode === 'dropdown' ? 'text-[var(--primary)]' : 'text-[var(--muted-foreground)]',
-								)}
-							>
-								Select repository
-							</button>
-							<span className="text-[var(--muted-foreground)]">|</span>
-							<button
-								type="button"
-								onClick={() => setMode('url')}
-								className={cn(
-									"text-xs",
-									mode === 'url' ? 'text-[var(--primary)]' : 'text-[var(--muted-foreground)]',
-								)}
-							>
-								Use URL instead
-							</button>
-						</div>
+		<form onSubmit={handleSubmit} className="space-y-4">
+			{!githubAvailable && (
+				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+					Connect GitHub in Profile settings to enable repository selection and git features.
+				</div>
+			)}
+			{githubAvailable && (
+				<>
+					<div className="flex items-center gap-2 text-xs">
+						<button
+							type="button"
+							onClick={() => setMode('dropdown')}
+							className={cn(
+								"text-xs",
+								mode === 'dropdown' ? 'text-[var(--primary)]' : 'text-[var(--muted-foreground)]',
+							)}
+						>
+							Select repository
+						</button>
+						<span className="text-[var(--muted-foreground)]">|</span>
+						<button
+							type="button"
+							onClick={() => setMode('url')}
+							className={cn(
+								"text-xs",
+								mode === 'url' ? 'text-[var(--primary)]' : 'text-[var(--muted-foreground)]',
+							)}
+						>
+							Use URL instead
+						</button>
+					</div>
 
 						{mode === 'dropdown' ? (
 							<div className="space-y-2" ref={repoDropdownRef}>

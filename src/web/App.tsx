@@ -75,13 +75,14 @@ function AppContent() {
     localStorage.setItem('agentuity-theme', theme);
   }, [theme]);
 
-  // Check if GitHub integration is available (GH_TOKEN configured server-side)
+  // Check if current user has a GitHub PAT configured
   useEffect(() => {
-    fetch('/api/github/status')
+    if (!user) return;
+    fetch('/api/user/github')
       .then(r => r.json())
-      .then((data: { available?: boolean }) => setGithubAvailable(data.available ?? false))
+      .then((data: { configured?: boolean }) => setGithubAvailable(data.configured ?? false))
       .catch(() => setGithubAvailable(false));
-  }, []);
+  }, [user]);
 
   const handleToggleTheme = useCallback(() => {
     setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));

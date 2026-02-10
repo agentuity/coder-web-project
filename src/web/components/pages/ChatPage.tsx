@@ -12,7 +12,7 @@ import {
 	Paperclip,
 	ExternalLink,
 	Terminal,
-	Settings,
+
 	WifiOff,
 	X,
 } from 'lucide-react';
@@ -21,7 +21,7 @@ import { Badge } from '../ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
 import { FileExplorer } from '../chat/FileExplorer';
-import { EnvPanel } from '../chat/EnvPanel';
+
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
 import { GitPanel, useGitStatus } from '../chat/GitPanel';
@@ -303,7 +303,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [shareCopied, setShareCopied] = useState(false);
 	const [urlState, setUrlState] = useUrlState();
 	const viewMode = urlState.v;
-	const sidebarTab = urlState.tab === 'env' ? 'files' : urlState.tab;
+	const sidebarTab = urlState.tab;
 	const [sshCopied, setSshCopied] = useState(false);
 	const [sandboxCopied, setSandboxCopied] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -1370,24 +1370,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					</PopoverContent>
 					</Popover>
 				)}
-				{/* Env vars popover */}
-				{session.sandboxId && (
-					<Popover>
-						<PopoverTrigger asChild>
-							<Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
-								<Settings className="h-3.5 w-3.5" />
-								Env
-							</Button>
-						</PopoverTrigger>
-						<PopoverContent
-							align="end"
-							side="bottom"
-							className="w-96 max-h-[520px] overflow-auto p-0"
-						>
-							<EnvPanel sessionId={sessionId} disabled={session.status !== 'active'} />
-						</PopoverContent>
-					</Popover>
-				)}
+	
 			{/* Git badge */}
 			{githubAvailable && gitBranch && (
 				<div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
@@ -1447,60 +1430,66 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			<div className="flex flex-1 min-w-0 flex-col overflow-hidden">
 				<div className="flex-1 min-w-0 overflow-hidden">
 					<IDELayout
-					sidebar={
-						<div className="flex h-full flex-col">
-							{githubAvailable && (
-								<div className="flex border-b border-[var(--border)] shrink-0">
-									<button
-										className={cn(
-											"flex-1 px-3 py-2 text-xs font-medium transition-colors",
-											sidebarTab === 'files'
-												? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
-												: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
-										)}
-										onClick={() => setUrlState({ tab: 'files' })}
-										type="button"
-									>
-										Files
-									</button>
-									<button
-										className={cn(
-											"flex-1 px-3 py-2 text-xs font-medium transition-colors",
-											sidebarTab === 'git'
-												? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
-												: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
-										)}
-										onClick={() => setUrlState({ tab: 'git' })}
-										type="button"
-									>
-										<span>Git</span>
-										{gitChangedCount > 0 && (
-											<span className="ml-1 rounded px-1 text-[10px] bg-[var(--muted)] text-[var(--primary)]">
-												{gitChangedCount}
-											</span>
-										)}
-									</button>
-								</div>
-							)}
-							<div className="flex-1 overflow-y-auto">
-								{githubAvailable && sidebarTab === 'git' ? (
-									<GitPanel
-										sessionId={sessionId}
-										metadata={session.metadata ?? undefined}
-										onOpenDiff={(path, oldContent, newContent) =>
-											openDiff(path, oldContent, newContent)
-										}
-									/>
-								) : (
-							<FileExplorer
-								sessionId={sessionId}
-								onOpenFile={openFile}
-								activeFilePath={activeFilePath}
-							/>
-							)}
+				sidebar={
+					<div className="flex h-full flex-col">
+						{githubAvailable ? (
+							<div className="flex border-b border-[var(--border)] shrink-0">
+								<button
+									className={cn(
+										"flex-1 px-3 py-2 text-xs font-medium transition-colors",
+										sidebarTab === 'files'
+											? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
+											: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
+									)}
+									onClick={() => setUrlState({ tab: 'files' })}
+									type="button"
+								>
+									Files
+								</button>
+								<button
+									className={cn(
+										"flex-1 px-3 py-2 text-xs font-medium transition-colors",
+										sidebarTab === 'git'
+											? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
+											: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
+									)}
+									onClick={() => setUrlState({ tab: 'git' })}
+									type="button"
+								>
+									<span>Git</span>
+									{gitChangedCount > 0 && (
+										<span className="ml-1 rounded px-1 text-[10px] bg-[var(--muted)] text-[var(--primary)]">
+											{gitChangedCount}
+										</span>
+									)}
+								</button>
 							</div>
+						) : (
+							<div className="flex border-b border-[var(--border)] shrink-0">
+								<span className="flex-1 px-3 py-2 text-xs font-medium text-[var(--foreground)] border-b-2 border-[var(--primary)]">
+									Files
+								</span>
+							</div>
+						)}
+						<div className="flex-1 overflow-y-auto">
+							{githubAvailable && sidebarTab === 'git' ? (
+								<GitPanel
+									sessionId={sessionId}
+									metadata={session.metadata ?? undefined}
+									onOpenDiff={(path, oldContent, newContent) =>
+										openDiff(path, oldContent, newContent)
+									}
+								/>
+							) : (
+						<FileExplorer
+							sessionId={sessionId}
+							onOpenFile={openFile}
+							activeFilePath={activeFilePath}
+						/>
+						)}
 						</div>
-					}
+					</div>
+				}
 						codePanel={
 							<CodePanel
 								sessionId={sessionId}

@@ -65,11 +65,10 @@ This project uses PostgreSQL via `@agentuity/drizzle` (Drizzle ORM). Schema chan
 
 **When you change the schema:**
 
-1. Edit `src/db/schema.ts` (the runtime schema)
-2. Mirror the same changes in `src/db/schema.kit.ts` (the drizzle-kit schema)
-3. Run `bun run db:generate` (generates a SQL migration from schema changes)
-4. Run `bun run db:migrate` (applies pending migrations to PostgreSQL)
-5. Deploy with `bun run deploy`
+1. Edit `src/db/schema.ts` -- it uses `drizzle-orm/pg-core` for schema definitions so both the runtime and drizzle-kit can use the same file.
+2. Run `bun run db:generate` (generates a SQL migration from schema changes)
+3. Run `bun run db:migrate` (applies pending migrations to PostgreSQL)
+4. Deploy with `bun run deploy`
 
 **Important:**
 

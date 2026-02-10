@@ -1,11 +1,23 @@
 import { createRouter } from '@agentuity/runtime';
+import { db } from '../db';
+import { userSettings } from '../db/schema';
+import { eq } from '@agentuity/drizzle';
+import { decrypt } from '../lib/encryption';
 
 const router = createRouter();
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
-function getGithubToken() {
-	return process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
+async function getUserGithubToken(userId: string, logger: { warn: (...args: any[]) => void }) {
+	const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, userId));
+	if (settings?.githubPat) {
+		try {
+			return decrypt(settings.githubPat);
+		} catch {
+			logger.warn('Failed to decrypt GitHub token for user', { userId });
+		}
+	}
+	return '';
 }
 
 function githubHeaders(token: string) {
@@ -18,15 +30,17 @@ function githubHeaders(token: string) {
 
 // GET /status — check if GitHub integration is available
 router.get('/status', async (c) => {
-	const token = getGithubToken();
-	return c.json({ available: !!token });
+	const user = c.get('user')!;
+	const token = await getUserGithubToken(user.id, c.var.logger);
+	return c.json({ available: !!token, configured: !!token });
 });
 
 // GET /repos — list user's GitHub repos
 router.get('/repos', async (c) => {
-	const token = getGithubToken();
+	const user = c.get('user')!;
+	const token = await getUserGithubToken(user.id, c.var.logger);
 	if (!token) {
-		return c.json({ repos: [], error: 'GH_TOKEN not configured' });
+		return c.json({ repos: [], configured: false });
 	}
 
 	try {
@@ -72,9 +86,10 @@ router.get('/repos', async (c) => {
 
 // GET /repos/:owner/:repo/branches — list branches
 router.get('/repos/:owner/:repo/branches', async (c) => {
-	const token = getGithubToken();
+	const user = c.get('user')!;
+	const token = await getUserGithubToken(user.id, c.var.logger);
 	if (!token) {
-		return c.json({ branches: [], error: 'GH_TOKEN not configured' });
+		return c.json({ branches: [], configured: false });
 	}
 
 	const { owner, repo } = c.req.param();

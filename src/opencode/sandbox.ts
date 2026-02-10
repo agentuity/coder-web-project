@@ -13,6 +13,7 @@ export interface SandboxConfig {
   env?: Record<string, string>;
   customSkills?: Array<{ name: string; content: string }>;
   registrySkills?: Array<{ repo: string; skillName: string }>;
+  githubToken?: string;
 }
 
 export interface SandboxContext {
@@ -48,8 +49,9 @@ export async function createSandbox(
     env: {
       ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
       OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
-      GH_TOKEN: '${secret:GH_TOKEN}',
-      GITHUB_TOKEN: '${secret:GH_TOKEN}',
+      ...(config.githubToken
+        ? { GH_TOKEN: config.githubToken, GITHUB_TOKEN: config.githubToken }
+        : {}),
       ...(config.env || {}),
     },
     dependencies: ['git', 'gh'],

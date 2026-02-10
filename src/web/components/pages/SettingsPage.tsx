@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useState } from 'react';
 import { Settings, Save, AlertTriangle } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
+import { GitHubSettings } from '../settings/GitHubSettings';
 
 interface Workspace {
 	id: string;
@@ -129,6 +130,15 @@ export function SettingsPage({ workspaceId }: SettingsPageProps) {
 				</Button>
 				{saved && <span className="text-xs text-green-500">Settings saved</span>}
 			</div>
+
+			{/* GitHub */}
+			<Card className="p-4 mb-6">
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-1">GitHub</h3>
+				<p className="text-xs text-[var(--muted-foreground)] mb-4">
+					Connect a GitHub personal access token for repository access in coding sessions.
+				</p>
+				<GitHubSettings />
+			</Card>
 
 			{/* Danger Zone */}
 			<Card className="p-4 mt-8 border-red-500/20">

@@ -1,4 +1,9 @@
-import { pgTable, uuid, text, timestamp, jsonb, boolean } from '@agentuity/drizzle';
+/**
+ * Database schema — used by both the application at runtime and drizzle-kit
+ * for migrations. Imports from drizzle-orm/pg-core so both Bun and Node
+ * (drizzle-kit) can resolve it.
+ */
+import { pgTable, uuid, text, timestamp, jsonb, boolean } from 'drizzle-orm/pg-core';
 
 /**
  * Workspaces group sessions, skills, and sources for a single user today.
@@ -54,6 +59,14 @@ export const sources = pgTable('sources', {
   type: text('type').notNull(),
   config: jsonb('config').notNull().default({}),
   enabled: boolean('enabled').default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
+});
+
+export const userSettings = pgTable('user_settings', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: text('user_id').notNull().unique(),
+  githubPat: text('github_pat'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

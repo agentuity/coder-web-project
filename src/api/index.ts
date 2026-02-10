@@ -14,6 +14,7 @@ import sessionMcpRoutes from '../routes/session-mcp';
 import sharedRoutes from '../routes/shared';
 import githubRoutes from '../routes/github';
 import githubGlobalRoutes from '../routes/github-global';
+import userSettingsRoutes from '../routes/user-settings';
 
 const api = createRouter();
 
@@ -41,6 +42,9 @@ api.get('/me', async (c) => {
 	const user = c.get('user');
 	return c.json({ user, session });
 });
+
+// User settings routes
+api.route('/user', userSettingsRoutes);
 
 // GitHub routes (non-session scoped)
 api.route('/github', githubGlobalRoutes);

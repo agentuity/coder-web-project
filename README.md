@@ -174,7 +174,7 @@ Without Google OAuth credentials, the app defaults to email/password authenticat
 
 Schema is defined in `src/db/schema.ts`. When making changes:
 
-1. Edit `src/db/schema.ts` and `src/db/schema.kit.ts` (must stay in sync)
+1. Edit `src/db/schema.ts` (uses `drizzle-orm/pg-core` so both runtime and drizzle-kit share it)
 2. Run `bun run db:generate`
 3. Run `bun run db:migrate`
 4. Deploy with `bun run deploy`
