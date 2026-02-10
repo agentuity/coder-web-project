@@ -323,7 +323,7 @@ export function CodePanel({
 						<div className="flex-1 min-h-0 overflow-y-auto">
 							{loading && (
 								<div className="flex items-center justify-center py-8">
-									<AlertCircle className="h-4 w-4 animate-pulse text-[var(--muted-foreground)]" />
+									<Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
 								</div>
 							)}
 							{error && (

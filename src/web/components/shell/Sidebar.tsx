@@ -337,7 +337,10 @@ export function Sidebar({
         <div className="p-2">
           <button
             onClick={onToggleCollapse}
-            className="flex w-full items-center justify-center p-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+            className={cn(
+              'flex w-full items-center p-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
+              isCollapsed ? 'justify-center' : 'justify-end'
+            )}
             type="button"
             title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}

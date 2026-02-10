@@ -3,6 +3,7 @@ import { Plus, Sparkles, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { Badge } from '../ui/badge';
+import { cn } from '../../lib/utils';
 
 interface Skill {
 	id: string;
@@ -316,30 +317,44 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 					<h2 className="text-xl font-semibold text-[var(--foreground)]">Skills</h2>
 					<span className="text-xs text-[var(--muted-foreground)]">Custom instructions for the AI agent</span>
 				</div>
-				<div className="flex items-center gap-2">
-					<Button
-						size="sm"
-						variant={activeTab === 'custom' ? 'default' : 'ghost'}
-						onClick={() => setActiveTab('custom')}
-					>
-						Custom
-					</Button>
-					<Button
-						size="sm"
-						variant={activeTab === 'registry' ? 'default' : 'ghost'}
-						onClick={() => {
-							setActiveTab('registry');
-							setShowForm(false);
-						}}
-					>
-						Registry
-					</Button>
-					{activeTab === 'custom' && !showForm && (
-						<Button size="sm" onClick={() => setShowForm(true)}>
+				<div className="flex items-center gap-3">
+					{!showForm && (
+						<Button
+							size="sm"
+							variant="outline"
+							onClick={() => { setActiveTab('custom'); setShowForm(true); }}
+							disabled={showForm}
+						>
 							<Plus className="h-4 w-4 mr-1" />
 							New Skill
 						</Button>
 					)}
+					<div className="flex items-center rounded-lg border border-[var(--border)] p-0.5">
+						<button
+							type="button"
+							onClick={() => setActiveTab('custom')}
+							className={cn(
+								'rounded-md px-3 py-1 text-sm font-medium transition-colors',
+								activeTab === 'custom'
+									? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+									: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+							)}
+						>
+							Custom
+						</button>
+						<button
+							type="button"
+							onClick={() => { setActiveTab('registry'); setShowForm(false); }}
+							className={cn(
+								'rounded-md px-3 py-1 text-sm font-medium transition-colors',
+								activeTab === 'registry'
+									? 'bg-[var(--primary)] text-[var(--primary-foreground)]'
+									: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]'
+							)}
+						>
+							Registry
+						</button>
+					</div>
 				</div>
 			</div>
 
