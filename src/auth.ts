@@ -5,9 +5,9 @@
  * - Without them → email/password fallback (local dev)
  */
 import { createAuth, createSessionMiddleware, createApiKeyMiddleware, mountAuthRoutes } from '@agentuity/auth';
-
-const DATABASE_URL = process.env.DATABASE_URL;
-if (!DATABASE_URL) throw new Error('DATABASE_URL environment variable is required');
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import * as authSchema from '@agentuity/auth/schema';
+import { db } from './db';
 
 const BASE_URL = process.env.AGENTUITY_CLOUD_BASE_URL || process.env.AGENTUITY_BASE_URL || process.env.BETTER_AUTH_URL;
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
@@ -16,7 +16,7 @@ const hasGoogle = Boolean(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET);
 
 export const auth = createAuth({
   ...(BASE_URL ? { baseURL: BASE_URL } : {}),
-  connectionString: DATABASE_URL,
+  database: drizzleAdapter(db, { provider: 'pg', schema: authSchema }),
   emailAndPassword: { enabled: !hasGoogle },
   // In dev mode (no Google creds), allow any origin so Tailscale/tunnels work
   ...(!hasGoogle ? {

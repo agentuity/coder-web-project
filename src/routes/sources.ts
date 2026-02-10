@@ -4,7 +4,7 @@
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { sources } from '../db/schema';
-import { eq } from '@agentuity/drizzle';
+import { eq } from 'drizzle-orm';
 
 const api = createRouter();
 

@@ -1,7 +1,7 @@
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { userSettings } from '../db/schema';
-import { eq } from '@agentuity/drizzle';
+import { eq } from 'drizzle-orm';
 import { decrypt } from '../lib/encryption';
 
 const router = createRouter();

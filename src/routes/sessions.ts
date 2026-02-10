@@ -4,7 +4,7 @@
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions, skills, sources, userSettings } from '../db/schema';
-import { eq, desc } from '@agentuity/drizzle';
+import { eq, desc } from 'drizzle-orm';
 import {
 	createSandbox,
 	generateOpenCodeConfig,
@@ -70,10 +70,7 @@ api.post('/', async (c) => {
 		: null;
 
 	// Create session record first (status: creating)
-	// Generate UUID client-side to make the INSERT idempotent.
-	// @agentuity/drizzle's resilient proxy retries queries on connection errors,
-	// which can cause duplicate INSERTs with server-generated UUIDs. A client-side
-	// UUID ensures retries hit the PK constraint instead of creating duplicates.
+	// Generate UUID client-side for idempotent INSERT with onConflictDoNothing.
 	const sessionId = randomUUID();
 	const insertedRows = await db
 		.insert(chatSessions)
