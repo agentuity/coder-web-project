@@ -68,6 +68,63 @@ function parseFrontmatter(content: string): Record<string, string> {
 	return data;
 }
 
+// GET /api/sessions/:id/skills/search?q=<query> — search skills registry via CLI
+api.get('/:id/skills/search', async (c) => {
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')!));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	const query = c.req.query('q')?.trim();
+	if (!query || query.length < 2) {
+		return c.json({ error: 'Query must be at least 2 characters' }, 400);
+	}
+
+	// Validate query - only allow safe characters
+	if (!/^[A-Za-z0-9 ._-]+$/.test(query)) {
+		return c.json({ error: 'Invalid search query' }, 400);
+	}
+
+	const apiClient = (c.var.sandbox as any).client;
+	const projectDir = resolveProjectDir(session);
+	const command = ['npx', 'skills', 'find', query];
+	const result = await execInSandbox(apiClient, session.sandboxId, command, projectDir);
+
+	// Parse the ANSI output from `npx skills find`
+	// Format:
+	//   owner/repo@skill-name
+	//   └ https://skills.sh/owner/repo/skill-name
+	const ansiRegex = new RegExp('\x1B\\[[0-9;]*[a-zA-Z]', 'g');
+	const lines = result.stdout
+		.replace(ansiRegex, '')
+		.split('\n')
+		.map((l) => l.trim())
+		.filter((l): l is string => l.length > 0);
+
+	const skills: Array<{ name: string; repo: string; url?: string }> = [];
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		// Match lines like "owner/repo@skill-name" (skill names may contain colons)
+		const match = line.match(/^([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)@(.+)$/);
+		if (match && match[1] && match[2]) {
+			const repo = match[1];
+			const skillName = match[2];
+			// Next line might be the URL (starts with └)
+			let url: string | undefined;
+			const nextLine = lines[i + 1];
+			if (nextLine && nextLine.startsWith('\u2514')) {
+				const urlMatch = nextLine.match(/https?:\/\/[^\s]+/);
+				if (urlMatch) url = urlMatch[0];
+			}
+			skills.push({ name: skillName, repo, url });
+		}
+	}
+
+	return c.json(skills);
+});
+
 // GET /api/sessions/:id/skills/installed — list installed skills
 api.get('/:id/skills/installed', async (c) => {
 	const [session] = await db
@@ -123,7 +180,7 @@ api.post('/:id/skills/install', async (c) => {
 
 	const body = (await c.req.json().catch(() => ({}))) as { repo?: string };
 	const repo = body.repo?.trim();
-	if (!repo || !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+	if (!repo || !/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+(@[A-Za-z0-9._:-]+)?$/.test(repo)) {
 		return c.json({ error: 'Invalid repo format' }, 400);
 	}
 

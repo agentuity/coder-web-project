@@ -8,36 +8,6 @@ import { eq } from '@agentuity/drizzle';
 
 const api = createRouter();
 
-// GET /api/skills/registry — proxy to skills.sh registry
-api.get('/registry', async (c) => {
-	const requestUrl = new URL(c.req.url);
-	const upstream = new URL('https://skills.sh/api/skills');
-	if (requestUrl.search) {
-		upstream.search = requestUrl.search;
-	}
-
-	let response = await fetch(upstream.toString());
-	if (!response.ok && requestUrl.search) {
-		// Fallback: try without query params in case registry doesn't support search
-		console.warn(`Skills registry search failed (${response.status}), falling back to unfiltered list`);
-		upstream.search = '';
-		response = await fetch(upstream.toString());
-	}
-
-	if (!response.ok) {
-		return c.json({ error: 'Skills registry unavailable' }, 502);
-	}
-
-	let data: unknown;
-	try {
-		data = await response.json();
-	} catch {
-		return c.json({ error: 'Registry response invalid' }, 502);
-	}
-
-	return c.json(data);
-});
-
 // POST /api/workspaces/:wid/skills — create skill
 api.post('/', async (c) => {
 	const workspaceId = c.req.param('wid') as string;

@@ -24,6 +24,7 @@ interface RegistrySkill {
 	repo?: string | null;
 	owner?: string | null;
 	installs?: number | null;
+	url?: string | null;
 }
 
 interface InstalledSkill {
@@ -31,48 +32,6 @@ interface InstalledSkill {
 	description?: string | null;
 	repo?: string | null;
 	directory?: string | null;
-}
-
-function normalizeRegistryResponse(data: any): RegistrySkill[] {
-	const candidates = Array.isArray(data)
-		? data
-		: Array.isArray(data?.skills)
-			? data.skills
-			: Array.isArray(data?.data)
-				? data.data
-				: Array.isArray(data?.results)
-					? data.results
-					: [];
-
-	return candidates
-		.map((item: any) => {
-			const name =
-				(item?.name as string | undefined) ||
-				(item?.title as string | undefined) ||
-				(item?.id as string | undefined) ||
-				'';
-			if (!name) return null;
-			const description =
-				(item?.description as string | undefined) ||
-				(item?.summary as string | undefined) ||
-				(item?.tagline as string | undefined) ||
-				null;
-			const repo =
-				(item?.repo as string | undefined) ||
-				(item?.repository as string | undefined) ||
-				(item?.full_name as string | undefined) ||
-				(item?.source as string | undefined) ||
-				null;
-			const owner =
-				(item?.owner as string | undefined) ||
-				(item?.author as string | undefined) ||
-				(item?.publisher as string | undefined) ||
-				null;
-			const installsRaw = item?.installs ?? item?.install_count ?? item?.downloads ?? item?.count;
-			const installs = typeof installsRaw === 'number' ? installsRaw : null;
-			return { name, description, repo, owner, installs } as RegistrySkill;
-		})
-		.filter(Boolean) as RegistrySkill[];
 }
 
 export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
@@ -119,6 +78,16 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 
 	const fetchRegistry = useCallback(
 		async (query: string) => {
+			if (!sessionId) {
+				setRegistrySkills([]);
+				return;
+			}
+			const trimmed = query.trim();
+			if (trimmed.length < 2) {
+				setRegistrySkills([]);
+				return;
+			}
+
 			if (abortControllerRef.current) {
 				abortControllerRef.current.abort();
 			}
@@ -127,24 +96,34 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 			setRegistryLoading(true);
 			setRegistryError(null);
 			try {
-				const params = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : '';
-				const res = await fetch(`/api/skills/registry${params}`, {
-					signal: abortControllerRef.current.signal,
-				});
+				const res = await fetch(
+					`/api/sessions/${sessionId}/skills/search?q=${encodeURIComponent(trimmed)}`,
+					{ signal: abortControllerRef.current.signal },
+				);
 				if (!res.ok) {
-					throw new Error('Registry unavailable');
+					const err = await res.json().catch(() => ({ error: 'Search failed' }));
+					throw new Error(err.error || 'Search failed');
 				}
 				const data = await res.json();
-				setRegistrySkills(normalizeRegistryResponse(data));
+				const mapped: RegistrySkill[] = (Array.isArray(data) ? data : []).map((item: any) => ({
+					name: item.name || '',
+					repo: item.repo || null,
+					owner: item.repo?.split('/')[0] || null,
+					installs: null,
+					description: null,
+					url: item.url || null,
+				}));
+				setRegistrySkills(mapped);
 			} catch (error) {
 				if (error instanceof Error && error.name === 'AbortError') return;
-				setRegistryError('Registry is unavailable right now.');
+				const msg = error instanceof Error ? error.message : 'Search failed';
+				setRegistryError(msg);
 				setRegistrySkills([]);
 			} finally {
 				setRegistryLoading(false);
 			}
 		},
-		[],
+		[sessionId],
 	);
 
 	const fetchInstalled = useCallback(async () => {
@@ -187,12 +166,17 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 	}, [fetchInstalled, sessionId]);
 
 	useEffect(() => {
-		if (activeTab !== 'registry') return;
+		if (activeTab !== 'registry' || !sessionId || registryQuery.trim().length < 2) {
+			if (registryQuery.trim().length < 2) {
+				setRegistrySkills([]);
+			}
+			return;
+		}
 		const timeout = setTimeout(() => {
 			fetchRegistry(registryQuery);
 		}, 300);
 		return () => clearTimeout(timeout);
-	}, [activeTab, fetchRegistry, registryQuery]);
+	}, [activeTab, fetchRegistry, registryQuery, sessionId]);
 
 	// Create/Update
 	const handleSave = async () => {
@@ -274,8 +258,10 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 
 	const handleInstall = async (skill: RegistrySkill) => {
 		if (!sessionId || operationInProgress) return;
-		const repoRef = skill.repo || (skill.owner ? `${skill.owner}/${skill.name}` : null);
-		if (!repoRef) return;
+		// Construct full ref: owner/repo@skill-name for specific skill install
+		const baseRepo = skill.repo || (skill.owner ? `${skill.owner}/${skill.name}` : null);
+		if (!baseRepo) return;
+		const repoRef = skill.name && skill.repo ? `${skill.repo}@${skill.name}` : baseRepo;
 		setOperationInProgress(true);
 		setInstallingSkills((prev) => ({ ...prev, [repoRef]: true }));
 		try {
@@ -517,8 +503,8 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 								</Button>
 							</div>
 							<div className="flex items-center justify-between text-xs text-[var(--muted-foreground)]">
-								<span>Browse skills.sh and install to the active sandbox.</span>
-								{!sessionId && <span>Select a session to install skills.</span>}
+								<span>Search the skills registry and install to the active sandbox.</span>
+								{!sessionId && <span>Start a session to search and install skills.</span>}
 							</div>
 						</div>
 					</Card>
@@ -569,22 +555,33 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 					{registryError && (
 						<p className="text-xs text-red-500">{registryError}</p>
 					)}
-					{registryLoading ? (
-						<div className="text-sm text-[var(--muted-foreground)]">Loading registry...</div>
-					) : registrySkills.length === 0 ? (
-						<div className="text-center py-10">
-							<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
-							<p className="text-sm text-[var(--muted-foreground)]">No registry skills found</p>
-							<p className="text-xs text-[var(--muted-foreground)] mt-1">
-								Try a different search term.
-							</p>
-						</div>
+				{registryLoading ? (
+					<div className="text-sm text-[var(--muted-foreground)]">Searching skills...</div>
+				) : !sessionId ? (
+					<div className="text-center py-10">
+						<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
+						<p className="text-sm text-[var(--muted-foreground)]">Start a session to search the skills registry</p>
+					</div>
+				) : registryQuery.trim().length < 2 ? (
+					<div className="text-center py-10">
+						<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
+						<p className="text-sm text-[var(--muted-foreground)]">Type at least 2 characters to search</p>
+					</div>
+				) : registrySkills.length === 0 ? (
+					<div className="text-center py-10">
+						<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
+						<p className="text-sm text-[var(--muted-foreground)]">No skills found for &ldquo;{registryQuery.trim()}&rdquo;</p>
+						<p className="text-xs text-[var(--muted-foreground)] mt-1">
+							Try a different search term.
+						</p>
+					</div>
 					) : (
 						<div className="space-y-3">
 							{registrySkills
 								.filter((skill) => (!installedOnly ? true : isRegistryInstalled(skill)))
 								.map((skill) => {
-									const repoRef = skill.repo || (skill.owner ? `${skill.owner}/${skill.name}` : null);
+									const baseRepo = skill.repo || (skill.owner ? `${skill.owner}/${skill.name}` : null);
+									const fullRef = skill.name && skill.repo ? `${skill.repo}@${skill.name}` : baseRepo;
 									const installed = isRegistryInstalled(skill);
 									const installedMatch = installedSkills.find(
 										(item) =>
@@ -607,9 +604,11 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 														<p className="text-xs text-[var(--muted-foreground)] mt-1">{skill.description}</p>
 													)}
 													<div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
-														{repoRef && <span className="font-mono">{repoRef}</span>}
-														{typeof skill.installs === 'number' && (
-															<span>{skill.installs.toLocaleString()} installs</span>
+														{fullRef && <span className="font-mono">{fullRef}</span>}
+														{skill.url && (
+															<a href={skill.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-[var(--foreground)]">
+																skills.sh
+															</a>
 														)}
 													</div>
 												</div>
@@ -627,9 +626,9 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 														<Button
 															size="sm"
 															onClick={() => handleInstall(skill)}
-															disabled={!sessionId || !repoRef || installingSkills[repoRef] || operationInProgress}
+															disabled={!sessionId || !fullRef || installingSkills[fullRef] || operationInProgress}
 														>
-															{repoRef && installingSkills[repoRef] ? 'Installing...' : 'Install'}
+															{fullRef && installingSkills[fullRef] ? 'Installing...' : 'Install'}
 														</Button>
 													)}
 												</div>
