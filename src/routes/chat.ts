@@ -203,6 +203,15 @@ api.post('/:id/messages', async (c) => {
 				.where(eq(chatSessions.id, session.id));
 		}
 
+		// Track in thread state
+		const thread = c.var.thread;
+		if (thread?.state) {
+			const count = (await thread.state.get<number>('messageCount')) || 0;
+			await thread.state.set('messageCount', count + 1);
+			await thread.state.set('lastMessageAt', new Date().toISOString());
+			await thread.state.set('sessionId', c.req.param('id'));
+		}
+
 		return c.json({ success: true });
 	} catch (error) {
 		return c.json({ error: 'Failed to send message', details: String(error) }, 500);
@@ -307,6 +316,13 @@ api.post('/:id/abort', async (c) => {
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
 	try {
 		await client.session.abort({ path: { id: session.opencodeSessionId } });
+
+		// Track in thread state
+		const thread = c.var.thread;
+		if (thread?.state) {
+			await thread.state.set('lastAbortAt', new Date().toISOString());
+		}
+
 		return c.json({ success: true });
 	} catch (error) {
 		return c.json({ error: 'Failed to abort', details: String(error) }, 500);

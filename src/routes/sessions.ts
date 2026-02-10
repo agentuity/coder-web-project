@@ -85,6 +85,7 @@ api.post('/', async (c) => {
 	// Capture context variables before async block (c may not be valid after response)
 	const sandbox = c.var.sandbox;
 	const logger = c.var.logger;
+	const thread = c.var.thread;
 
 	// Return session immediately so UI can show "Starting session..."
 	// Do sandbox setup in background (fire-and-forget)
@@ -139,6 +140,15 @@ api.post('/', async (c) => {
 					updatedAt: new Date(),
 				})
 				.where(eq(chatSessions.id, session!.id));
+
+			// Track in thread state
+			if (thread?.state) {
+				await thread.state.set('sessionId', session!.id);
+				await thread.state.set('sandboxId', sandboxId);
+				await thread.state.set('createdAt', new Date().toISOString());
+				await thread.state.set('status', 'active');
+				await thread.state.set('workspaceId', workspaceId);
+			}
 
 			// Send initial prompt async (fire-and-forget)
 			if (body.prompt && opencodeSessionId) {

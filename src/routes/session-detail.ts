@@ -180,6 +180,13 @@ api.post('/:id/fork', async (c) => {
 	const sandbox = c.var.sandbox;
 	const logger = c.var.logger;
 
+	// Track in thread state
+	const thread = c.var.thread;
+	if (thread?.state) {
+		await thread.state.set('forkedAt', new Date().toISOString());
+		await thread.state.set('forkedToSessionId', session!.id);
+	}
+
 	(async () => {
 		try {
 			const sandboxCtx: SandboxContext = { sandbox, logger };
@@ -338,6 +345,12 @@ api.post('/:id/share', async (c) => {
 
 		await stream.write(shareData);
 		await stream.close();
+
+		// Track in thread state
+		const thread = c.var.thread;
+		if (thread?.state) {
+			await thread.state.set('sharedAt', new Date().toISOString());
+		}
 
 		return c.json({ url: stream.url, id: stream.id });
 	} catch (error) {

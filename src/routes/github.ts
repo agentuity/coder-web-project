@@ -451,6 +451,12 @@ api.post('/:id/github/create-repo', async (c) => {
 				.where(eq(chatSessions.id, session.id));
 		}
 
+		// Track in thread state
+		const thread = c.var.thread;
+		if (thread?.state) {
+			await thread.state.set('repoCreatedAt', new Date().toISOString());
+		}
+
 		return c.json({ success: true, repoUrl });
 	} catch (error) {
 		return c.json({ error: 'Failed to create GitHub repository', details: String(error) }, 500);
@@ -585,6 +591,14 @@ api.post('/:id/github/commit', async (c) => {
 			})
 			.where(eq(chatSessions.id, session.id));
 
+		// Track in thread state
+		const thread = c.var.thread;
+		if (thread?.state) {
+			const count = (await thread.state.get<number>('commitCount')) || 0;
+			await thread.state.set('commitCount', count + 1);
+			await thread.state.set('lastCommitAt', new Date().toISOString());
+		}
+
 		return c.json({
 			hash,
 			message: body.message.trim(),
@@ -671,6 +685,12 @@ api.post('/:id/github/pr', async (c) => {
 			})
 			.where(eq(chatSessions.id, session.id));
 
+		// Track in thread state
+		const thread = c.var.thread;
+		if (thread?.state) {
+			await thread.state.set('lastPrAt', new Date().toISOString());
+		}
+
 		return c.json({
 			url: prUrl,
 			number: prNumber,
@@ -705,6 +725,14 @@ api.post('/:id/github/push', async (c) => {
 				success: false,
 				error: stderr.trim() || 'Failed to push branch',
 			}, 400);
+		}
+
+		// Track in thread state
+		const thread = c.var.thread;
+		if (thread?.state) {
+			const count = (await thread.state.get<number>('pushCount')) || 0;
+			await thread.state.set('pushCount', count + 1);
+			await thread.state.set('lastPushAt', new Date().toISOString());
 		}
 
 		return c.json({ success: true });
