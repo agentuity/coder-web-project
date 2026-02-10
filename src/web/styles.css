@@ -86,9 +86,27 @@ body {
   font-family: 'Satoshi Variable', 'Satoshi', system-ui, -apple-system, sans-serif;
 }
 
-/* Title/heading font */
+/* Title/heading font — scoped to app chrome, not library components */
 h1, h2, #logo {
   font-family: 'Instrument Serif', Georgia, serif;
+}
+
+/* Reset heading font inside better-auth-ui settings cards */
+[data-slot] h1, [data-slot] h2,
+[data-slot] h3, [data-slot] h4 {
+  font-family: 'Satoshi Variable', 'Satoshi', system-ui, -apple-system, sans-serif;
+}
+
+/* Ensure dialog overlays are opaque in dark mode */
+.dark [data-radix-popper-content-wrapper],
+.dark [data-sonner-toaster] {
+  color-scheme: dark;
+}
+
+/* Solid background for dialog content in dark mode */
+.dark [role="dialog"] {
+  background-color: var(--card);
+  color: var(--card-foreground);
 }
 
 
