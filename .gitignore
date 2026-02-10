@@ -41,3 +41,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]\*.json
 # Agentuity build files
 
 .agentuity
+
+# Profile-specific Agentuity configs (contain personal projectId/orgId)
+
+agentuity.*.json
