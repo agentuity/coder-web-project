@@ -10,13 +10,14 @@ interface Skill {
 	name: string;
 	description: string | null;
 	content: string;
+	type: string;
+	repo?: string | null;
 	enabled: boolean;
 	createdAt: string;
 }
 
 interface SkillsPageProps {
 	workspaceId: string;
-	sessionId?: string;
 }
 
 interface RegistrySkill {
@@ -28,14 +29,7 @@ interface RegistrySkill {
 	url?: string | null;
 }
 
-interface InstalledSkill {
-	name: string;
-	description?: string | null;
-	repo?: string | null;
-	directory?: string | null;
-}
-
-export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
+export function SkillsPage({ workspaceId }: SkillsPageProps) {
 	const [skills, setSkills] = useState<Skill[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [showForm, setShowForm] = useState(false);
@@ -53,10 +47,6 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 	const [registryError, setRegistryError] = useState<string | null>(null);
 	const abortControllerRef = useRef<AbortController | null>(null);
 
-	const [installedSkills, setInstalledSkills] = useState<InstalledSkill[]>([]);
-	const [installedLoading, setInstalledLoading] = useState(false);
-	const [installedError, setInstalledError] = useState<string | null>(null);
-	const [installedOnly, setInstalledOnly] = useState(false);
 	const [installingSkills, setInstallingSkills] = useState<Record<string, boolean>>({});
 	const [removingSkills, setRemovingSkills] = useState<Record<string, boolean>>({});
 	const [operationInProgress, setOperationInProgress] = useState(false);
@@ -79,10 +69,6 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 
 	const fetchRegistry = useCallback(
 		async (query: string) => {
-			if (!sessionId) {
-				setRegistrySkills([]);
-				return;
-			}
 			const trimmed = query.trim();
 			if (trimmed.length < 2) {
 				setRegistrySkills([]);
@@ -97,10 +83,8 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 			setRegistryLoading(true);
 			setRegistryError(null);
 			try {
-				const res = await fetch(
-					`/api/sessions/${sessionId}/skills/search?q=${encodeURIComponent(trimmed)}`,
-					{ signal: abortControllerRef.current.signal },
-				);
+				const res = await fetch(`/api/skills/search?q=${encodeURIComponent(trimmed)}`,
+					{ signal: abortControllerRef.current.signal });
 				if (!res.ok) {
 					const err = await res.json().catch(() => ({ error: 'Search failed' }));
 					throw new Error(err.error || 'Search failed');
@@ -124,50 +108,11 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 				setRegistryLoading(false);
 			}
 		},
-		[sessionId],
+		[],
 	);
 
-	const fetchInstalled = useCallback(async () => {
-		if (!sessionId) {
-			setInstalledSkills([]);
-			return;
-		}
-		setInstalledLoading(true);
-		setInstalledError(null);
-		try {
-			const res = await fetch(`/api/sessions/${sessionId}/skills/installed`);
-			if (!res.ok) {
-				const error = await res.json().catch(() => ({ error: 'Unknown error' }));
-				if (res.status === 503) {
-					setInstalledError('Sandbox is starting up. Please wait...');
-				} else {
-					setInstalledError(error.error || 'Failed to load installed skills');
-				}
-				setInstalledSkills([]);
-				setInstalledLoading(false);
-				return;
-			}
-			const data = await res.json();
-			setInstalledSkills(Array.isArray(data) ? data : []);
-		} catch {
-			setInstalledError('Unable to load installed skills.');
-			setInstalledSkills([]);
-		} finally {
-			setInstalledLoading(false);
-		}
-	}, [sessionId]);
-
 	useEffect(() => {
-		if (!sessionId) {
-			setInstalledSkills([]);
-			setInstalledOnly(false);
-			return;
-		}
-		fetchInstalled();
-	}, [fetchInstalled, sessionId]);
-
-	useEffect(() => {
-		if (activeTab !== 'registry' || !sessionId || registryQuery.trim().length < 2) {
+		if (activeTab !== 'registry' || registryQuery.trim().length < 2) {
 			if (registryQuery.trim().length < 2) {
 				setRegistrySkills([]);
 			}
@@ -177,7 +122,7 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 			fetchRegistry(registryQuery);
 		}, 300);
 		return () => clearTimeout(timeout);
-	}, [activeTab, fetchRegistry, registryQuery, sessionId]);
+	}, [activeTab, fetchRegistry, registryQuery]);
 
 	// Create/Update
 	const handleSave = async () => {
@@ -238,78 +183,73 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 		setFormData({ name: '', description: '', content: '' });
 	};
 
-	const installedNameSet = useMemo(() => {
-		return new Set(installedSkills.map((skill) => skill.name.toLowerCase()));
-	}, [installedSkills]);
-
-	const installedRepoSet = useMemo(() => {
-		return new Set(
-			installedSkills
-				.map((skill) => skill.repo?.toLowerCase())
-				.filter((repo): repo is string => Boolean(repo)),
-		);
-	}, [installedSkills]);
-
-	const isRegistryInstalled = (skill: RegistrySkill): boolean => {
-		const repo = skill.repo?.toLowerCase();
-		if (repo && installedRepoSet.has(repo)) return true;
-		const name = skill.name.toLowerCase();
-		return installedNameSet.has(name);
-	};
+	const customSkills = useMemo(() => skills.filter((skill) => skill.type !== 'registry'), [skills]);
+	const registrySkillsFromDb = useMemo(
+		() => skills.filter((skill) => skill.type === 'registry'),
+		[skills],
+	);
+	const registrySkillMap = useMemo(() => {
+		const map = new Map<string, Skill>();
+		for (const skill of registrySkillsFromDb) {
+			if (!skill.repo) continue;
+			map.set(`${skill.repo.toLowerCase()}@${skill.name.toLowerCase()}`, skill);
+		}
+		return map;
+	}, [registrySkillsFromDb]);
 
 	const handleInstall = async (skill: RegistrySkill) => {
-		if (!sessionId || operationInProgress) return;
-		// Construct full ref: owner/repo@skill-name for specific skill install
-		const baseRepo = skill.repo || (skill.owner ? `${skill.owner}/${skill.name}` : null);
-		if (!baseRepo) return;
-		const repoRef = skill.name && skill.repo ? `${skill.repo}@${skill.name}` : baseRepo;
+		if (operationInProgress) return;
+		const repo = skill.repo?.trim();
+		if (!repo) return;
+		const installKey = `${repo}@${skill.name}`;
 		setOperationInProgress(true);
-		setInstallingSkills((prev) => ({ ...prev, [repoRef]: true }));
+		setInstallingSkills((prev) => ({ ...prev, [installKey]: true }));
 		try {
-			const res = await fetch(`/api/sessions/${sessionId}/skills/install`, {
+			const res = await fetch(`/api/workspaces/${workspaceId}/skills`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ repo: repoRef }),
+				body: JSON.stringify({
+					type: 'registry',
+					name: skill.name,
+					description: skill.description || null,
+					repo,
+				}),
 			});
 			if (!res.ok) {
 				const errBody = await res.json().catch(() => null);
-				throw new Error(errBody?.details || errBody?.error || 'Failed to install skill');
+				throw new Error(errBody?.details || errBody?.error || 'Failed to save skill');
 			}
-			await fetchInstalled();
+			await fetchSkills();
 		} catch (err: any) {
 			setRegistryError(err?.message || 'Failed to install skill.');
 		} finally {
-			setInstallingSkills((prev) => ({ ...prev, [repoRef]: false }));
+			setInstallingSkills((prev) => ({ ...prev, [installKey]: false }));
 			setOperationInProgress(false);
 		}
 	};
 
-	const handleRemove = async (name: string) => {
-		if (!sessionId || operationInProgress) return;
-		if (!confirm('Remove this skill from the sandbox?')) return;
+	const handleRemove = async (skillId: string) => {
+		if (operationInProgress) return;
+		if (!confirm('Remove this skill from the workspace?')) return;
 		setOperationInProgress(true);
-		setRemovingSkills((prev) => ({ ...prev, [name]: true }));
+		setRemovingSkills((prev) => ({ ...prev, [skillId]: true }));
 		try {
-			const res = await fetch(`/api/sessions/${sessionId}/skills/installed/${encodeURIComponent(name)}`,
-				{
-					method: 'DELETE',
-				},
-			);
+			const res = await fetch(`/api/skills/${skillId}`, { method: 'DELETE' });
 			if (!res.ok) {
 				const errBody = await res.json().catch(() => null);
 				throw new Error(errBody?.details || errBody?.error || 'Failed to remove skill');
 			}
-			await fetchInstalled();
+			await fetchSkills();
 		} catch (err: any) {
-			setInstalledError(err?.message || 'Failed to remove skill.');
+			setRegistryError(err?.message || 'Failed to remove skill.');
 		} finally {
-			setRemovingSkills((prev) => ({ ...prev, [name]: false }));
+			setRemovingSkills((prev) => ({ ...prev, [skillId]: false }));
 			setOperationInProgress(false);
 		}
 	};
 
 	return (
-		<div className="p-6 max-w-4xl">
+		<div className="p-6">
 			{/* Header */}
 			<div className="flex items-center justify-between mb-6">
 				<div className="flex items-center gap-2">
@@ -433,17 +373,17 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 					{/* Skills List */}
 					{loading ? (
 						<div className="text-sm text-[var(--muted-foreground)]">Loading skills...</div>
-					) : skills.length === 0 ? (
+					) : customSkills.length === 0 ? (
 						<div className="text-center py-12">
 							<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
-							<p className="text-sm text-[var(--muted-foreground)]">No skills yet</p>
+							<p className="text-sm text-[var(--muted-foreground)]">No custom skills yet</p>
 							<p className="text-xs text-[var(--muted-foreground)] mt-1">
 								Skills are custom instructions injected into the AI agent context
 							</p>
 						</div>
 					) : (
 						<div className="space-y-3">
-							{skills.map((skill) => (
+							{customSkills.map((skill) => (
 								<Card key={skill.id} className={`p-4 ${!skill.enabled ? 'opacity-50' : ''}`}>
 									<div className="flex items-start justify-between">
 										<div className="flex-1 min-w-0">
@@ -514,149 +454,93 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 									placeholder="Search skills registry"
 									aria-label="Search skills registry"
 								/>
-								<Button
-									size="sm"
-									variant={installedOnly ? 'secondary' : 'ghost'}
-									onClick={() => setInstalledOnly((prev) => !prev)}
-									disabled={!sessionId}
-								>
-									Installed only
-								</Button>
 							</div>
 							<div className="flex items-center justify-between text-xs text-[var(--muted-foreground)]">
-								<span>Search the skills registry and install to the active sandbox.</span>
-								{!sessionId && <span>Start a session to search and install skills.</span>}
+								<span>Search the skills registry and add to this workspace.</span>
 							</div>
 						</div>
-					</Card>
-
-					<Card className="p-4">
-						<div className="flex items-center justify-between mb-2">
-							<h3 className="text-sm font-medium text-[var(--foreground)]">Installed Skills</h3>
-							<span className="text-xs text-[var(--muted-foreground)]">
-								{installedLoading ? 'Loading...' : `${installedSkills.length} installed`}
-							</span>
-						</div>
-						{installedError && (
-							<p className="text-xs text-red-500 mb-2">{installedError}</p>
-						)}
-						{!sessionId ? (
-							<p className="text-xs text-[var(--muted-foreground)]">Select a session to view installed skills.</p>
-						) : installedLoading ? (
-							<p className="text-xs text-[var(--muted-foreground)]">Loading installed skills...</p>
-						) : installedSkills.length === 0 ? (
-							<p className="text-xs text-[var(--muted-foreground)]">No skills installed yet.</p>
-						) : (
-							<div className="space-y-2">
-								{installedSkills.map((skill) => {
-									const removeKey = skill.directory || skill.name;
-									return (
-										<div key={removeKey} className="flex items-center justify-between">
-											<div>
-												<p className="text-sm text-[var(--foreground)]">{skill.name}</p>
-												{skill.description && (
-													<p className="text-xs text-[var(--muted-foreground)]">{skill.description}</p>
-												)}
-											</div>
-											<Button
-												variant="ghost"
-												size="sm"
-												onClick={() => handleRemove(removeKey)}
-												disabled={removingSkills[removeKey] || operationInProgress}
-											>
-												{removingSkills[removeKey] ? 'Removing...' : 'Remove'}
-											</Button>
-										</div>
-									);
-								})}
-							</div>
-						)}
 					</Card>
 
 					{registryError && (
 						<p className="text-xs text-red-500">{registryError}</p>
 					)}
-				{registryLoading ? (
-					<div className="text-sm text-[var(--muted-foreground)]">Searching skills...</div>
-				) : !sessionId ? (
-					<div className="text-center py-10">
-						<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
-						<p className="text-sm text-[var(--muted-foreground)]">Start a session to search the skills registry</p>
-					</div>
-				) : registryQuery.trim().length < 2 ? (
-					<div className="text-center py-10">
-						<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
-						<p className="text-sm text-[var(--muted-foreground)]">Type at least 2 characters to search</p>
-					</div>
-				) : registrySkills.length === 0 ? (
-					<div className="text-center py-10">
-						<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
-						<p className="text-sm text-[var(--muted-foreground)]">No skills found for &ldquo;{registryQuery.trim()}&rdquo;</p>
-						<p className="text-xs text-[var(--muted-foreground)] mt-1">
-							Try a different search term.
-						</p>
-					</div>
+					{registryLoading ? (
+						<div className="text-sm text-[var(--muted-foreground)]">Searching skills...</div>
+					) : registryQuery.trim().length < 2 ? (
+						<div className="text-center py-10">
+							<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
+							<p className="text-sm text-[var(--muted-foreground)]">Type at least 2 characters to search</p>
+						</div>
+					) : registrySkills.length === 0 ? (
+						<div className="text-center py-10">
+							<Sparkles className="h-8 w-8 text-[var(--muted-foreground)] mx-auto mb-2" />
+							<p className="text-sm text-[var(--muted-foreground)]">
+								No skills found for &ldquo;{registryQuery.trim()}&rdquo;
+							</p>
+							<p className="text-xs text-[var(--muted-foreground)] mt-1">Try a different search term.</p>
+						</div>
 					) : (
 						<div className="space-y-3">
-							{registrySkills
-								.filter((skill) => (!installedOnly ? true : isRegistryInstalled(skill)))
-								.map((skill) => {
-									const baseRepo = skill.repo || (skill.owner ? `${skill.owner}/${skill.name}` : null);
-									const fullRef = skill.name && skill.repo ? `${skill.repo}@${skill.name}` : baseRepo;
-									const installed = isRegistryInstalled(skill);
-									const installedMatch = installedSkills.find(
-										(item) =>
-											(item.repo && skill.repo && item.repo === skill.repo) || item.name === skill.name,
-									);
-									const removeKey = installedMatch?.directory || installedMatch?.name || skill.name;
-									return (
-										<Card key={`${skill.name}-${skill.repo ?? skill.owner ?? 'registry'}`} className="p-4">
-											<div className="flex items-start justify-between">
-												<div className="flex-1 min-w-0">
-													<div className="flex items-center gap-2">
-														<h3 className="text-sm font-medium text-[var(--foreground)]">{skill.name}</h3>
-														{installed && (
-															<Badge variant="secondary" className="text-[10px]">
-																Installed
-															</Badge>
-														)}
-													</div>
-													{skill.description && (
-														<p className="text-xs text-[var(--muted-foreground)] mt-1">{skill.description}</p>
+							{registrySkills.map((skill) => {
+								const repo = skill.repo || null;
+								const fullRef = repo ? `${repo}@${skill.name}` : null;
+								const registryKey = repo ? `${repo.toLowerCase()}@${skill.name.toLowerCase()}` : null;
+								const installedSkill = registryKey ? registrySkillMap.get(registryKey) : undefined;
+								const installed = Boolean(installedSkill);
+								const installKey = fullRef || skill.name;
+								return (
+									<Card key={`${skill.name}-${skill.repo ?? skill.owner ?? 'registry'}`} className="p-4">
+										<div className="flex items-start justify-between">
+											<div className="flex-1 min-w-0">
+												<div className="flex items-center gap-2">
+													<h3 className="text-sm font-medium text-[var(--foreground)]">{skill.name}</h3>
+													{installed && (
+														<Badge variant="secondary" className="text-[10px]">
+															Installed
+														</Badge>
 													)}
-													<div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
-														{fullRef && <span className="font-mono">{fullRef}</span>}
-														{skill.url && (
-															<a href={skill.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-[var(--foreground)]">
-																skills.sh
-															</a>
-														)}
-													</div>
 												</div>
-												<div className="flex items-center gap-2 ml-4 shrink-0">
-													{installed ? (
-														<Button
-															variant="ghost"
-															size="sm"
-															onClick={() => handleRemove(removeKey)}
-															disabled={!sessionId || removingSkills[removeKey] || operationInProgress}
+												{skill.description && (
+													<p className="text-xs text-[var(--muted-foreground)] mt-1">{skill.description}</p>
+												)}
+												<div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--muted-foreground)]">
+													{fullRef && <span className="font-mono">{fullRef}</span>}
+													{skill.url && (
+														<a
+															href={skill.url}
+															target="_blank"
+															rel="noopener noreferrer"
+															className="underline hover:text-[var(--foreground)]"
 														>
-															{removingSkills[removeKey] ? 'Removing...' : 'Remove'}
-														</Button>
-													) : (
-														<Button
-															size="sm"
-															onClick={() => handleInstall(skill)}
-															disabled={!sessionId || !fullRef || installingSkills[fullRef] || operationInProgress}
-														>
-															{fullRef && installingSkills[fullRef] ? 'Installing...' : 'Install'}
-														</Button>
+															skills.sh
+														</a>
 													)}
 												</div>
 											</div>
-										</Card>
-									);
-								})}
+											<div className="flex items-center gap-2 ml-4 shrink-0">
+												{installed && installedSkill ? (
+													<Button
+														variant="ghost"
+														size="sm"
+														onClick={() => handleRemove(installedSkill.id)}
+														disabled={removingSkills[installedSkill.id] || operationInProgress}
+													>
+														{removingSkills[installedSkill.id] ? 'Removing...' : 'Remove'}
+													</Button>
+												) : (
+													<Button
+														size="sm"
+														onClick={() => handleInstall(skill)}
+														disabled={!fullRef || installingSkills[installKey] || operationInProgress}
+													>
+														{installingSkills[installKey] ? 'Installing...' : 'Install'}
+													</Button>
+												)}
+											</div>
+										</div>
+									</Card>
+								);
+							})}
 						</div>
 					)}
 				</div>

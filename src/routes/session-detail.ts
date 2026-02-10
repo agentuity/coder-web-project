@@ -141,7 +141,6 @@ api.post('/:id/fork', async (c) => {
 
 	const opencodeConfig = generateOpenCodeConfig(
 		{ model: sourceSession.model },
-		workspaceSkills.map((s) => ({ name: s.name, content: s.content, enabled: s.enabled ?? true })),
 		workspaceSources.map((s) => ({
 			name: s.name,
 			type: s.type,
@@ -149,6 +148,14 @@ api.post('/:id/fork', async (c) => {
 			enabled: s.enabled ?? true,
 		})),
 	);
+
+	const enabledSkills = workspaceSkills.filter((s) => s.enabled ?? true);
+	const customSkills = enabledSkills
+		.filter((s) => s.type !== 'registry')
+		.map((s) => ({ name: s.name, content: s.content }));
+	const registrySkills = enabledSkills
+		.filter((s) => s.type === 'registry' && s.repo)
+		.map((s) => ({ repo: s.repo as string, skillName: s.name }));
 
 	const metadata = (sourceSession.metadata || {}) as Record<string, unknown>;
 	const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
@@ -179,6 +186,8 @@ api.post('/:id/fork', async (c) => {
 				repoUrl,
 				branch,
 				opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
+				customSkills,
+				registrySkills,
 			});
 
 			const client = getOpencodeClient(sandboxId, sandboxUrl);

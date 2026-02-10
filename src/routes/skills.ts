@@ -8,18 +8,94 @@ import { eq } from '@agentuity/drizzle';
 
 const api = createRouter();
 
+// GET /api/skills/search?q=<query> — search skills.sh registry (no sandbox needed)
+api.get('/search', async (c) => {
+	const query = c.req.query('q')?.trim();
+	if (!query || query.length < 2) {
+		return c.json({ error: 'Query must be at least 2 characters' }, 400);
+	}
+	if (!/^[A-Za-z0-9 ._-]+$/.test(query)) {
+		return c.json({ error: 'Invalid search query' }, 400);
+	}
+
+	try {
+		const proc = Bun.spawn(['bunx', 'skills', 'find', query], {
+			stdout: 'pipe',
+			stderr: 'pipe',
+			timeout: 30000,
+		});
+		const stdout = await new Response(proc.stdout).text();
+		await new Response(proc.stderr).text();
+		await proc.exited;
+
+		// Parse the ANSI output from skills find
+		const ansiRegex = new RegExp('\x1B\\[[0-9;]*[a-zA-Z]', 'g');
+		const lines = stdout
+			.replace(ansiRegex, '')
+			.split('\n')
+			.map((l) => l.trim())
+			.filter(Boolean);
+
+		const results: Array<{ name: string; repo: string; url?: string }> = [];
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i]!;
+			const match = line.match(/^([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)@(.+)$/);
+			if (match && match[1] && match[2]) {
+				const repo = match[1];
+				const skillName = match[2];
+				let url: string | undefined;
+				const nextLine = lines[i + 1];
+				if (nextLine && nextLine.startsWith('\u2514')) {
+					const urlMatch = nextLine.match(/https?:\/\/[^\s]+/);
+					if (urlMatch) url = urlMatch[0];
+				}
+				results.push({ name: skillName, repo, url });
+			}
+		}
+
+		return c.json(results);
+	} catch (error) {
+		return c.json({ error: 'Skill search failed', details: String(error) }, 502);
+	}
+});
+
 // POST /api/workspaces/:wid/skills — create skill
 api.post('/', async (c) => {
 	const workspaceId = c.req.param('wid') as string;
-	const body = await c.req.json<{ name: string; description?: string; content: string }>();
+	const body = await c.req.json<{
+		name?: string;
+		description?: string;
+		content?: string;
+		type?: string;
+		repo?: string;
+	}>();
+
+	const name = body.name?.trim();
+	if (!name) {
+		return c.json({ error: 'Name is required' }, 400);
+	}
+
+	const type = body.type || 'custom';
+	if (type !== 'custom' && type !== 'registry') {
+		return c.json({ error: 'Invalid skill type' }, 400);
+	}
+
+	if (type === 'custom' && !body.content?.trim()) {
+		return c.json({ error: 'Content is required for custom skills' }, 400);
+	}
+	if (type === 'registry' && !body.repo?.trim()) {
+		return c.json({ error: 'Repo is required for registry skills' }, 400);
+	}
 
 	const [skill] = await db
 		.insert(skills)
 		.values({
 			workspaceId,
-			name: body.name,
+			type,
+			name,
 			description: body.description,
-			content: body.content,
+			content: body.content || '',
+			repo: type === 'registry' ? body.repo : null,
 		})
 		.returning();
 

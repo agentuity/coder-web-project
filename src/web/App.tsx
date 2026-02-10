@@ -174,7 +174,7 @@ function AppContent() {
 
 	const handleNavigate = useCallback((page: 'skills' | 'sources' | 'settings' | 'profile') => {
 		// Preserve active session for pages that need sandbox access
-		const keepSession = page === 'skills' || page === 'sources';
+		const keepSession = page === 'sources';
 		setUrlState({ s: keepSession ? (activeSessionId ?? null) : null, p: page });
 	}, [setUrlState, activeSessionId]);
 
@@ -258,9 +258,9 @@ function AppContent() {
       />
     );
 	} else if (currentPage === 'skills' && workspaceId) {
-		content = <SkillsPage workspaceId={workspaceId} sessionId={activeSessionId ?? undefined} />;
+		content = <SkillsPage workspaceId={workspaceId} />;
 	} else if (currentPage === 'sources' && workspaceId) {
-		content = <SourcesPage workspaceId={workspaceId} sessionId={activeSessionId ?? undefined} />;
+		content = <SourcesPage workspaceId={workspaceId} />;
 	} else if (currentPage === 'settings' && workspaceId) {
 		content = <SettingsPage workspaceId={workspaceId} />;
 	} else if (currentPage === 'profile') {

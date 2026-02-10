@@ -11,6 +11,8 @@ export interface SandboxConfig {
   branch?: string;
   opencodeConfigJson: string;
   env?: Record<string, string>;
+  customSkills?: Array<{ name: string; content: string }>;
+  registrySkills?: Array<{ repo: string; skillName: string }>;
 }
 
 export interface SandboxContext {
@@ -55,6 +57,8 @@ export async function createSandbox(
 
   const sandboxId = sandbox.id as string;
   ctx.logger.info(`Sandbox created: ${sandboxId}`);
+  const repoName = config.repoUrl ? config.repoUrl.split('/').pop()?.replace('.git', '') || 'project' : 'project';
+  const workDir = `/home/agentuity/${repoName}`;
 
   try {
     // 2. Write opencode.json config
@@ -75,7 +79,6 @@ export async function createSandbox(
 
     // 3. Clone repo if specified
     if (config.repoUrl) {
-      const repoName = config.repoUrl.split('/').pop()?.replace('.git', '') || 'project';
       await sandbox.execute({
         command: [
           'bash', '-c',
@@ -89,7 +92,7 @@ export async function createSandbox(
           await sandbox.execute({
             command: [
               'bash', '-c',
-              `cd /home/agentuity/${repoName} && git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}'`,
+              `cd ${workDir} && git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}'`,
             ],
           });
         }
@@ -97,14 +100,46 @@ export async function createSandbox(
     } else {
       // Create a default project directory
       await sandbox.execute({
-        command: ['bash', '-c', 'mkdir -p /home/agentuity/project'],
+        command: ['bash', '-c', `mkdir -p ${workDir}`],
       });
     }
 
+    // 3b. Install skills
+    if (config.customSkills && config.customSkills.length > 0) {
+      for (const skill of config.customSkills) {
+        const slug = skill.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '');
+        const skillDir = `${workDir}/.agents/skills/custom-${slug}`;
+        const skillContent = skill.content.startsWith('---')
+          ? skill.content
+          : `---\nname: "${skill.name}"\n---\n\n${skill.content}`;
+        await sandbox.execute({
+          command: [
+            'bash', '-c',
+            `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'SKILLEOF'\n${skillContent}\nSKILLEOF`,
+          ],
+        });
+      }
+    }
+
+    if (config.registrySkills && config.registrySkills.length > 0) {
+      for (const skill of config.registrySkills) {
+        try {
+          await sandbox.execute({
+            command: [
+              'bash', '-c',
+              `cd "${workDir}" && bunx skills add "${skill.repo}" --skill "${skill.skillName}" --agent opencode -y`,
+            ],
+          });
+        } catch (err) {
+          ctx.logger.warn(`Failed to install registry skill ${skill.repo}@${skill.skillName}`, { error: err });
+        }
+      }
+    }
+
     // 4. Start OpenCode server
-    const workDir = config.repoUrl
-      ? `/home/agentuity/${config.repoUrl.split('/').pop()?.replace('.git', '') || 'project'}`
-      : '/home/agentuity/project';
 
     await sandbox.execute({
       command: [

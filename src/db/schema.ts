@@ -37,9 +37,11 @@ export const chatSessions = pgTable('chat_sessions', {
 export const skills = pgTable('skills', {
   id: uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  type: text('type').notNull().default('custom'),
   name: text('name').notNull(),
   description: text('description'),
   content: text('content').notNull(),
+  repo: text('repo'),
   enabled: boolean('enabled').default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),

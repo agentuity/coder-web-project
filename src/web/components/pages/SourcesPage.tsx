@@ -15,17 +15,7 @@ interface Source {
 
 interface SourcesPageProps {
 	workspaceId: string;
-	sessionId?: string;
 }
-
-type McpStatus =
-	| { status: 'connected' }
-	| { status: 'disabled' }
-	| { status: 'failed'; error: string }
-	| { status: 'needs_auth' }
-	| { status: 'needs_client_registration'; error: string };
-
-type McpStatusMap = Record<string, McpStatus>;
 
 type SourceType = 'stdio' | 'sse';
 
@@ -71,7 +61,7 @@ function configPreview(config: Record<string, unknown>): string {
 	return JSON.stringify(config);
 }
 
-export function SourcesPage({ workspaceId, sessionId }: SourcesPageProps) {
+export function SourcesPage({ workspaceId }: SourcesPageProps) {
 	const [sources, setSources] = useState<Source[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [showForm, setShowForm] = useState(false);
@@ -84,11 +74,6 @@ export function SourcesPage({ workspaceId, sessionId }: SourcesPageProps) {
 	const argsInputId = useId();
 	const envInputId = useId();
 	const urlInputId = useId();
-	const [statusLoading, setStatusLoading] = useState(false);
-	const [statusError, setStatusError] = useState<string | null>(null);
-	const [statusMap, setStatusMap] = useState<McpStatusMap>({});
-	const [mcpAction, setMcpAction] = useState<Record<string, boolean>>({});
-
 	// Form state
 	const [formName, setFormName] = useState('');
 	const [formType, setFormType] = useState<SourceType>('stdio');
@@ -114,43 +99,6 @@ export function SourcesPage({ workspaceId, sessionId }: SourcesPageProps) {
 	useEffect(() => {
 		fetchSources();
 	}, [fetchSources]);
-
-	const fetchStatus = useCallback(async () => {
-		if (!sessionId) {
-			setStatusMap({});
-			return;
-		}
-		setStatusLoading(true);
-		setStatusError(null);
-		try {
-			const res = await fetch(`/api/sessions/${sessionId}/mcp/status`);
-			if (!res.ok) {
-				if (res.status === 503) {
-					setStatusError('Sandbox is starting up. Please wait...');
-				} else {
-					setStatusError('Live status unavailable.');
-				}
-				setStatusMap({});
-				setStatusLoading(false);
-				return;
-			}
-			const data = await res.json();
-			setStatusMap(data && typeof data === 'object' ? data : {});
-		} catch {
-			setStatusError('Live status unavailable.');
-			setStatusMap({});
-		} finally {
-			setStatusLoading(false);
-		}
-	}, [sessionId]);
-
-	useEffect(() => {
-		if (!sessionId) {
-			setStatusMap({});
-			return;
-		}
-		fetchStatus();
-	}, [fetchStatus, sessionId]);
 
 	const resetForm = () => {
 		setFormName('');
@@ -271,72 +219,8 @@ export function SourcesPage({ workspaceId, sessionId }: SourcesPageProps) {
 		resetForm();
 	};
 
-	const handleConnect = async (name: string) => {
-		if (!sessionId) return;
-		setMcpAction((prev) => ({ ...prev, [name]: true }));
-		try {
-			const res = await fetch(`/api/sessions/${sessionId}/mcp/${encodeURIComponent(name)}/connect`, {
-				method: 'POST',
-			});
-			if (!res.ok) throw new Error('Connect failed');
-			await fetchStatus();
-		} catch {
-			setStatusError('Failed to connect MCP server.');
-		} finally {
-			setMcpAction((prev) => ({ ...prev, [name]: false }));
-		}
-	};
-
-	const handleDisconnect = async (name: string) => {
-		if (!sessionId) return;
-		setMcpAction((prev) => ({ ...prev, [name]: true }));
-		try {
-			const res = await fetch(`/api/sessions/${sessionId}/mcp/${encodeURIComponent(name)}/disconnect`, {
-				method: 'POST',
-			});
-			if (!res.ok) throw new Error('Disconnect failed');
-			await fetchStatus();
-		} catch {
-			setStatusError('Failed to disconnect MCP server.');
-		} finally {
-			setMcpAction((prev) => ({ ...prev, [name]: false }));
-		}
-	};
-
-	const renderStatusBadge = (status?: McpStatus) => {
-		if (!sessionId) {
-			return (
-				<Badge variant="secondary" className="text-[10px]">
-					No session
-				</Badge>
-			);
-		}
-		if (!status) {
-			return (
-				<Badge variant="secondary" className="text-[10px]">
-					Not configured
-				</Badge>
-			);
-		}
-		const labelMap: Record<McpStatus['status'], string> = {
-			connected: 'Connected',
-			disabled: 'Disabled',
-			failed: 'Failed',
-			needs_auth: 'Needs auth',
-			needs_client_registration: 'Needs registration',
-		};
-		const label = labelMap[status.status] ?? status.status;
-		const tone: 'default' | 'secondary' | 'destructive' =
-			status.status === 'connected' ? 'default' : status.status === 'failed' ? 'destructive' : 'secondary';
-		return (
-			<Badge variant={tone} className="text-[10px]">
-				{label}
-			</Badge>
-		);
-	};
-
 	return (
-		<div className="p-6 max-w-4xl">
+		<div className="p-6">
 			{/* Header */}
 			<div className="flex items-center justify-between mb-6">
 				<div className="flex items-center gap-2">
@@ -351,13 +235,6 @@ export function SourcesPage({ workspaceId, sessionId }: SourcesPageProps) {
 					</Button>
 				)}
 			</div>
-			{sessionId && (
-				<div className="mb-4 text-xs text-[var(--muted-foreground)]">
-					Live status {statusLoading ? 'loading…' : 'available from the active sandbox.'}
-				</div>
-			)}
-			{statusError && <div className="mb-4 text-xs text-red-500">{statusError}</div>}
-
 			{/* Create/Edit Form */}
 			{showForm && (
 				<Card className="p-4 mb-6 border-[var(--primary)]/30">
@@ -528,94 +405,59 @@ export function SourcesPage({ workspaceId, sessionId }: SourcesPageProps) {
 				</div>
 			) : (
 				<div className="space-y-3">
-					{sources.map((source) => {
-						const status = statusMap[source.name];
-						const statusError =
-							status &&
-							(status.status === 'failed' || status.status === 'needs_client_registration')
-								? status.error
-								: null;
-						const actionBusy = mcpAction[source.name];
-						const canConnect = Boolean(sessionId) && source.enabled && status?.status !== 'connected';
-						const canDisconnect = Boolean(sessionId) && status?.status === 'connected';
-						return (
-							<Card key={source.id} className={`p-4 ${!source.enabled ? 'opacity-50' : ''}`}>
-								<div className="flex items-start justify-between">
-									<div className="flex-1 min-w-0">
-										<div className="flex items-center gap-2 flex-wrap">
-											<h3 className="text-sm font-medium text-[var(--foreground)]">{source.name}</h3>
-											<Badge variant="outline" className="text-[10px] font-mono">
-												{source.type}
-											</Badge>
-											<Badge variant={source.enabled ? 'default' : 'secondary'} className="text-[10px]">
-												{source.enabled ? 'Active' : 'Disabled'}
-											</Badge>
-											{renderStatusBadge(status)}
-										</div>
-										<p className="mt-1 text-xs text-[var(--muted-foreground)] font-mono truncate">
-											{configPreview(source.config)}
-										</p>
-										{statusError && (
-											<p className="mt-2 text-xs text-red-500">{statusError}</p>
-										)}
+					{sources.map((source) => (
+						<Card key={source.id} className={`p-4 ${!source.enabled ? 'opacity-50' : ''}`}>
+							<div className="flex items-start justify-between">
+								<div className="flex-1 min-w-0">
+									<div className="flex items-center gap-2 flex-wrap">
+										<h3 className="text-sm font-medium text-[var(--foreground)]">{source.name}</h3>
+										<Badge variant="outline" className="text-[10px] font-mono">
+											{source.type}
+										</Badge>
+										<Badge variant={source.enabled ? 'default' : 'secondary'} className="text-[10px]">
+											{source.enabled ? 'Active' : 'Disabled'}
+										</Badge>
 									</div>
-									<div className="flex items-center gap-1 ml-4 shrink-0">
-										{sessionId && (
-											<Button
-												variant="ghost"
-												size="sm"
-												onClick={() => handleConnect(source.name)}
-												disabled={!canConnect || actionBusy}
-											>
-												Connect
-											</Button>
-										)}
-										{sessionId && (
-											<Button
-												variant="ghost"
-												size="sm"
-												onClick={() => handleDisconnect(source.name)}
-												disabled={!canDisconnect || actionBusy}
-											>
-												Disconnect
-											</Button>
-										)}
-										<Button
-											variant="ghost"
-											size="icon"
-											className="h-7 w-7"
-											onClick={() => handleToggle(source)}
-											title={source.enabled ? 'Disable' : 'Enable'}
-										>
-											{source.enabled ? (
-												<ToggleRight className="h-4 w-4 text-green-500" />
-											) : (
-												<ToggleLeft className="h-4 w-4" />
-											)}
-										</Button>
-										<Button
-											variant="ghost"
-											size="icon"
-											className="h-7 w-7"
-											onClick={() => startEdit(source)}
-											title="Edit"
-										>
-											<Pencil className="h-3.5 w-3.5" />
-										</Button>
-										<Button
-											variant="ghost"
-											size="icon"
-											className="h-7 w-7 text-red-500"
-											onClick={() => handleDelete(source.id)}
-											title="Delete"
-										>
-											<Trash2 className="h-3.5 w-3.5" />
-										</Button>
-									</div>
+									<p className="mt-1 text-xs text-[var(--muted-foreground)] font-mono truncate">
+										{configPreview(source.config)}
+									</p>
 								</div>
-							</Card>
-						);
-					})}
+								<div className="flex items-center gap-1 ml-4 shrink-0">
+									<Button
+										variant="ghost"
+										size="icon"
+										className="h-7 w-7"
+										onClick={() => handleToggle(source)}
+										title={source.enabled ? 'Disable' : 'Enable'}
+									>
+										{source.enabled ? (
+											<ToggleRight className="h-4 w-4 text-green-500" />
+										) : (
+											<ToggleLeft className="h-4 w-4" />
+										)}
+									</Button>
+									<Button
+										variant="ghost"
+										size="icon"
+										className="h-7 w-7"
+										onClick={() => startEdit(source)}
+										title="Edit"
+									>
+										<Pencil className="h-3.5 w-3.5" />
+									</Button>
+									<Button
+										variant="ghost"
+										size="icon"
+										className="h-7 w-7 text-red-500"
+										onClick={() => handleDelete(source.id)}
+										title="Delete"
+									>
+										<Trash2 className="h-3.5 w-3.5" />
+									</Button>
+								</div>
+							</div>
+						</Card>
+					))}
 				</div>
 			)}
 		</div>

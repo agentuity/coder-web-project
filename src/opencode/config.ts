@@ -12,7 +12,6 @@ export interface OpenCodeConfig {
     permission?: Record<string, string>;
     tools?: Record<string, boolean>;
   }>;
-  rules?: string[];
   mcp?: Record<string, {
     type: string;
     command?: string[];
@@ -30,12 +29,6 @@ export interface OpenCodeConfigOptions {
 	model?: string | null;
 }
 
-export interface SkillConfig {
-  name: string;
-  content: string;
-  enabled: boolean;
-}
-
 export interface SourceConfig {
   name: string;
   type: string;
@@ -48,7 +41,6 @@ export interface SourceConfig {
  */
 export function generateOpenCodeConfig(
 	options: OpenCodeConfigOptions = {},
-	skills: SkillConfig[] = [],
 	sources: SourceConfig[] = [],
 ): OpenCodeConfig {
 	const sessionModel = options.model ?? undefined;
@@ -68,12 +60,6 @@ export function generateOpenCodeConfig(
 			},
 		},
 	};
-
-  // Add user-defined skills as OpenCode rules
-  const enabledSkills = skills.filter(s => s.enabled);
-  if (enabledSkills.length > 0) {
-    config.rules = enabledSkills.map(s => s.content);
-  }
 
   // Add MCP sources — transform our DB format to OpenCode format
   const enabledSources = sources.filter(s => s.enabled);

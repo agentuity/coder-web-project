@@ -44,7 +44,6 @@ api.post('/', async (c) => {
 	// Generate OpenCode config
 	const opencodeConfig = generateOpenCodeConfig(
 		{ model: body.model },
-		workspaceSkills.map((s) => ({ name: s.name, content: s.content, enabled: s.enabled ?? true })),
 		workspaceSources.map((s) => ({
 			name: s.name,
 			type: s.type,
@@ -52,6 +51,14 @@ api.post('/', async (c) => {
 			enabled: s.enabled ?? true,
 		})),
 	);
+
+	const enabledSkills = workspaceSkills.filter((s) => s.enabled ?? true);
+	const customSkills = enabledSkills
+		.filter((s) => s.type !== 'registry')
+		.map((s) => ({ name: s.name, content: s.content }));
+	const registrySkills = enabledSkills
+		.filter((s) => s.type === 'registry' && s.repo)
+		.map((s) => ({ repo: s.repo as string, skillName: s.name }));
 
 	// Auto-title from initial prompt
 	const title = body.prompt
@@ -87,6 +94,8 @@ api.post('/', async (c) => {
 				repoUrl: body.repoUrl,
 				branch: body.branch,
 				opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
+				customSkills,
+				registrySkills,
 			});
 
 			const client = getOpencodeClient(sandboxId, sandboxUrl);
