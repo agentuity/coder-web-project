@@ -173,8 +173,10 @@ function AppContent() {
 	}, [setUrlState]);
 
 	const handleNavigate = useCallback((page: 'skills' | 'sources' | 'settings' | 'profile') => {
-		setUrlState({ s: null, p: page });
-	}, [setUrlState]);
+		// Preserve active session for pages that need sandbox access
+		const keepSession = page === 'skills' || page === 'sources';
+		setUrlState({ s: keepSession ? (activeSessionId ?? null) : null, p: page });
+	}, [setUrlState, activeSessionId]);
 
   const handleFlagSession = useCallback(async (id: string, flagged: boolean) => {
     try {

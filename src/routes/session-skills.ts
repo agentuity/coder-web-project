@@ -88,7 +88,7 @@ api.get('/:id/skills/search', async (c) => {
 	}
 
 	const apiClient = (c.var.sandbox as any).client;
-	const command = ['npx', 'skills', 'find', query];
+	const command = ['bunx', 'skills', 'find', query];
 	const result = await execInSandbox(apiClient, session.sandboxId, command, SANDBOX_HOME);
 
 	// Parse the ANSI output from `npx skills find`
@@ -121,7 +121,7 @@ api.get('/:id/skills/search', async (c) => {
 		}
 	}
 
-	return c.json({ results: skills, _debug: { exitCode: result.exitCode, stdoutLen: result.stdout.length, stderrLen: result.stderr.length, lines: lines.slice(0, 20), rawStdout: result.stdout.slice(0, 500), rawStderr: result.stderr.slice(0, 500) } });
+	return c.json(skills);
 });
 
 // GET /api/sessions/:id/skills/installed — list installed skills
@@ -186,7 +186,7 @@ api.post('/:id/skills/install', async (c) => {
 
 	const apiClient = (c.var.sandbox as any).client;
 	const projectDir = resolveProjectDir(session);
-	const command = ['npx', 'skills', 'add', repo, '--agent', 'opencode', '-y'];
+	const command = ['bunx', 'skills', 'add', repo, '--agent', 'opencode', '-y'];
 	const result = await execInSandbox(apiClient, session.sandboxId, command, projectDir);
 	if (result.exitCode !== 0) {
 		return c.json({ error: 'Failed to install skill', details: result.stderr || result.stdout }, 500);
@@ -211,7 +211,7 @@ api.delete('/:id/skills/installed/:name', async (c) => {
 
 	const apiClient = (c.var.sandbox as any).client;
 	const projectDir = resolveProjectDir(session);
-	const command = ['npx', 'skills', 'remove', name, '--agent', 'opencode', '-y'];
+	const command = ['bunx', 'skills', 'remove', name, '--agent', 'opencode', '-y'];
 	const result = await execInSandbox(apiClient, session.sandboxId, command, projectDir);
 	if (result.exitCode !== 0) {
 		return c.json({ error: 'Failed to remove skill', details: result.stderr || result.stdout }, 500);
