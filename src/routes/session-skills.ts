@@ -193,7 +193,9 @@ api.post('/:id/skills/install', async (c) => {
 	const command = ['bunx', 'skills', 'add', repoPath, '--agent', 'opencode', '-y'];
 	if (skillName) command.push('--skill', skillName);
 	const result = await execInSandbox(apiClient, session.sandboxId, command, projectDir);
-	if (result.exitCode !== 0) {
+	// Exit code -1 means sandbox didn't report it; treat as success if stdout looks good
+	const failed = result.exitCode > 0 || (result.exitCode !== 0 && !result.stdout.includes('Installation complete'));
+	if (failed) {
 		return c.json({ error: 'Failed to install skill', details: result.stderr || result.stdout }, 500);
 	}
 
@@ -218,7 +220,8 @@ api.delete('/:id/skills/installed/:name', async (c) => {
 	const projectDir = resolveProjectDir(session);
 	const command = ['bunx', 'skills', 'remove', name, '--agent', 'opencode', '-y'];
 	const result = await execInSandbox(apiClient, session.sandboxId, command, projectDir);
-	if (result.exitCode !== 0) {
+	const failed = result.exitCode > 0 || (result.exitCode !== 0 && !result.stdout.includes('removed'));
+	if (failed) {
 		return c.json({ error: 'Failed to remove skill', details: result.stderr || result.stdout }, 500);
 	}
 
