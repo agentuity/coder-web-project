@@ -255,10 +255,10 @@ function AppContent() {
         githubAvailable={githubAvailable}
       />
     );
-  } else if (currentPage === 'skills' && workspaceId) {
-    content = <SkillsPage workspaceId={workspaceId} />;
-  } else if (currentPage === 'sources' && workspaceId) {
-    content = <SourcesPage workspaceId={workspaceId} />;
+	} else if (currentPage === 'skills' && workspaceId) {
+		content = <SkillsPage workspaceId={workspaceId} sessionId={activeSessionId ?? undefined} />;
+	} else if (currentPage === 'sources' && workspaceId) {
+		content = <SourcesPage workspaceId={workspaceId} sessionId={activeSessionId ?? undefined} />;
 	} else if (currentPage === 'settings' && workspaceId) {
 		content = <SettingsPage workspaceId={workspaceId} />;
 	} else if (currentPage === 'profile') {

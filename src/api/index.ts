@@ -10,6 +10,8 @@ import sessionDetailRoutes from '../routes/session-detail';
 import chatRoutes from '../routes/chat';
 import skillRoutes from '../routes/skills';
 import sourceRoutes from '../routes/sources';
+import sessionSkillRoutes from '../routes/session-skills';
+import sessionMcpRoutes from '../routes/session-mcp';
 import sharedRoutes from '../routes/shared';
 import githubRoutes from '../routes/github';
 import githubGlobalRoutes from '../routes/github-global';
@@ -62,6 +64,10 @@ api.route('/sessions', githubRoutes);
 // Skills routes (nested under workspaces + standalone)
 api.route('/workspaces/:wid/skills', skillRoutes);
 api.route('/skills', skillRoutes);
+
+// Session-scoped skill and MCP routes
+api.route('/sessions', sessionSkillRoutes);
+api.route('/sessions', sessionMcpRoutes);
 
 // Sources routes (nested under workspaces + standalone)
 api.route('/workspaces/:wid/sources', sourceRoutes);
