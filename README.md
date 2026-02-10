@@ -16,7 +16,53 @@ Each coding session gets its own isolated sandbox with a full development enviro
 - **Session Sharing** via public URLs
 - **Dark Mode** with full theme support
 
-## Quick Start
+## Quick Start the Agent Way
+
+Copy and paste these instructions into your coding agent to automate the full setup:
+
+```
+Set up this Agentuity Coder project from scratch. Follow these steps in order, stopping if any step fails:
+
+1. Install dependencies:
+   Run: bun install
+
+2. Create a database (name must be lowercase letters, digits, and underscores only):
+   Run: agentuity cloud db create --name my_coder_db
+
+3. Create the .env file by copying .env.example:
+   Run: cp .env.example .env
+
+4. Write DATABASE_URL to .env without exposing it in your context:
+   Run this shell command to extract the URL from the CLI and write it directly to .env:
+   DB_URL=$(agentuity cloud db get my_coder_db --json | bun -e "const d=await Bun.stdin.json();console.log(d.url)")
+   Then use sed or a file write to set DATABASE_URL=$DB_URL in the .env file.
+   Do NOT paste the connection string as plain text — keep it in the .env file only.
+
+5. Generate AGENTUITY_AUTH_SECRET and write it to .env:
+   AUTH_SECRET=$(openssl rand -base64 32)
+   Write AGENTUITY_AUTH_SECRET=$AUTH_SECRET into the .env file.
+
+6. Set org secrets for AI sandboxes:
+   Run: agentuity cloud env set ANTHROPIC_API_KEY <key> --secret --org
+   Run: agentuity cloud env set OPENAI_API_KEY <key> --secret --org
+   (GH_TOKEN is optional, for GitHub features in sandboxes)
+   Run: agentuity cloud env set GH_TOKEN <token> --secret --org
+
+7. Run database migrations:
+   Run: bun run db:migrate
+
+8. Verify everything:
+   Run: bun run setup:check
+   All required checks should pass.
+
+9. Deploy:
+   Run: bun run deploy
+   The CLI will create a new project under your Agentuity org on first deploy.
+
+If setup:check reports failures, fix them before deploying.
+```
+
+## Quick Start the Human Way
 
 ### Prerequisites
 
@@ -34,7 +80,7 @@ bun install
 ### 2. Set Up Database
 
 ```bash
-agentuity cloud database create
+agentuity cloud db create --name my_coder_db
 ```
 
 Copy the connection string from the output.
@@ -54,9 +100,9 @@ Edit `.env` and fill in:
 These secrets are used by AI sandboxes (not by the app itself). Set them in your Agentuity org:
 
 ```bash
-agentuity cloud secret set ANTHROPIC_API_KEY
-agentuity cloud secret set OPENAI_API_KEY
-agentuity cloud secret set GH_TOKEN
+agentuity cloud env set ANTHROPIC_API_KEY <your-key> --secret --org
+agentuity cloud env set OPENAI_API_KEY <your-key> --secret --org
+agentuity cloud env set GH_TOKEN <your-token> --secret --org
 ```
 
 At minimum you need `ANTHROPIC_API_KEY` for Claude-based coding.
@@ -88,46 +134,6 @@ bun run deploy
 ```
 
 The CLI will initialize a new project under your Agentuity org on first deploy.
-
-## For Your Agent
-
-<details>
-<summary>Copy and paste these instructions into your coding agent to automate the full setup.</summary>
-
-```
-Set up this Agentuity Coder project from scratch. Follow these steps in order, stopping if any step fails:
-
-1. Run: bun install
-
-2. Create a database:
-   Run: agentuity cloud database create
-   Save the connection string from the output.
-
-3. Create the .env file:
-   Copy .env.example to .env, then set:
-   - DATABASE_URL = the connection string from step 2
-   - AGENTUITY_AUTH_SECRET = generate by running: openssl rand -base64 32
-
-4. Set org secrets for AI sandboxes (the CLI will prompt for values):
-   Run: agentuity cloud secret set ANTHROPIC_API_KEY
-   Run: agentuity cloud secret set OPENAI_API_KEY
-   (GH_TOKEN is optional, for GitHub features in sandboxes)
-
-5. Run database migrations:
-   Run: bun run db:migrate
-
-6. Verify everything:
-   Run: bun run setup:check
-   All required checks should pass.
-
-7. Deploy:
-   Run: bun run deploy
-   The CLI will create a new project under your Agentuity org on first deploy.
-
-If setup:check reports failures, fix them before deploying.
-```
-
-</details>
 
 ## Configuration
 
@@ -225,4 +231,4 @@ Example: `/?s=abc123&v=ide&tab=git` opens session abc123 in IDE mode with the gi
 
 ## License
 
-Proprietary. Copyright Agentuity, Inc.
+Apache License 2.0. See [LICENSE.md](LICENSE.md).
