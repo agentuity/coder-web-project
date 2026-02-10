@@ -5,6 +5,7 @@ import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions, skills, sources, userSettings } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
+import { randomUUID } from 'node:crypto';
 import {
 	createSandbox,
 	generateOpenCodeConfig,
@@ -165,9 +166,12 @@ api.post('/:id/fork', async (c) => {
 	const baseTitle = sourceSession.title || 'Untitled Session';
 	const title = `Fork of ${baseTitle}`;
 
-	const [session] = await db
+	// Client-side UUID for idempotent INSERT (see sessions.ts for explanation)
+	const forkSessionId = randomUUID();
+	const forkInsertedRows = await db
 		.insert(chatSessions)
 		.values({
+			id: forkSessionId,
 			workspaceId,
 			createdBy: sourceSession.createdBy || user.id,
 			status: 'creating',
@@ -176,7 +180,18 @@ api.post('/:id/fork', async (c) => {
 			model: sourceSession.model ?? null,
 			metadata: { ...metadata, repoUrl, branch },
 		})
+		.onConflictDoNothing()
 		.returning();
+
+	let session = forkInsertedRows[0];
+	if (!session) {
+		const [existing] = await db
+			.select()
+			.from(chatSessions)
+			.where(eq(chatSessions.id, forkSessionId))
+			.limit(1);
+		session = existing;
+	}
 
 	const sandbox = c.var.sandbox;
 	const logger = c.var.logger;

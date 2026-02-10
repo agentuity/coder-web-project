@@ -19,6 +19,7 @@ import {
 	SANDBOX_STATUS_TTL_MS,
 } from '../lib/sandbox-health';
 import { decrypt } from '../lib/encryption';
+import { randomUUID } from 'node:crypto';
 
 const api = createRouter();
 
@@ -69,9 +70,15 @@ api.post('/', async (c) => {
 		: null;
 
 	// Create session record first (status: creating)
-	const [session] = await db
+	// Generate UUID client-side to make the INSERT idempotent.
+	// @agentuity/drizzle's resilient proxy retries queries on connection errors,
+	// which can cause duplicate INSERTs with server-generated UUIDs. A client-side
+	// UUID ensures retries hit the PK constraint instead of creating duplicates.
+	const sessionId = randomUUID();
+	const insertedRows = await db
 		.insert(chatSessions)
 		.values({
+			id: sessionId,
 			workspaceId,
 			createdBy: user.id,
 			status: 'creating',
@@ -80,7 +87,19 @@ api.post('/', async (c) => {
 			model: body.model ?? null,
 			metadata: { repoUrl: body.repoUrl, branch: body.branch },
 		})
+		.onConflictDoNothing()
 		.returning();
+
+	// If retry caused the insert to be a no-op (PK already existed), fetch the existing row
+	let session = insertedRows[0];
+	if (!session) {
+		const [existing] = await db
+			.select()
+			.from(chatSessions)
+			.where(eq(chatSessions.id, sessionId))
+			.limit(1);
+		session = existing;
+	}
 
 	// Capture context variables before async block (c may not be valid after response)
 	const sandbox = c.var.sandbox;

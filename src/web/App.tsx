@@ -122,10 +122,12 @@ function AppContent() {
   // Auto-create workspace on first load; restore selection from localStorage
   useEffect(() => {
     if (!user) return;
+    let aborted = false;
     
     fetch('/api/workspaces')
       .then(r => r.json())
       .then((workspaces: any[]) => {
+        if (aborted) return;
         if (workspaces.length > 0) {
           const savedId = localStorage.getItem('selectedWorkspaceId');
           const match = savedId ? workspaces.find((w: any) => w.id === savedId) : null;
@@ -141,11 +143,14 @@ function AppContent() {
           })
             .then(r => r.json())
             .then(w => {
+              if (aborted) return;
               setWorkspaceId(w.id);
               localStorage.setItem('selectedWorkspaceId', w.id);
             });
         }
       });
+    
+    return () => { aborted = true; };
   }, [user]);
 
   // Fetch sessions
@@ -180,7 +185,7 @@ function AppContent() {
         throw new Error('Failed to create session');
 			}
 			const session = await res.json();
-			setSessions(prev => [session, ...prev]);
+			setSessions(prev => prev.some(s => s.id === session.id) ? prev : [session, ...prev]);
 			setUrlState({ s: session.id, p: 'chat' });
 			setShowNewDialog(false);
 		} catch (error) {
