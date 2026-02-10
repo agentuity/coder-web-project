@@ -11,7 +11,8 @@
     "test": "bun test",
     "start": "bun .agentuity/app.js",
     "deploy": "agentuity deploy",
-    "typecheck": "bunx tsc --noEmit"
+    "typecheck": "bunx tsc --noEmit",
+    "db:push": "bunx drizzle-kit push"
   },
   "dependencies": {
     "@agentuity/auth": "^1.0.4",
