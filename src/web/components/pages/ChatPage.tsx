@@ -1089,7 +1089,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	);
 
 	const inputArea = (
-		<div className="relative z-40 border-t border-[var(--border)] p-3">
+		<div className="relative z-40 border-t border-[var(--border)] bg-[var(--background)] p-4">
 			{messageQueue.length > 0 && (
 				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
 					<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
@@ -1137,10 +1137,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						</div>
 					)}
 					<PromptInputFooter>
-						<div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+					<div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
 						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
 						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
-						<span>Enter to send · Shift+Enter for new line</span>
+						<span className="hidden md:inline">Enter to send · Shift+Enter for new line</span>
 							{commentCount > 0 && (
 								<Badge variant="secondary" className="text-[10px]">
 									{commentCount} comment{commentCount > 1 ? 's' : ''}
@@ -1215,10 +1215,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 							}
 						}}
 						maxLength={100}
-						className="max-w-[200px] border-b border-[var(--border)] bg-transparent text-sm font-semibold text-[var(--foreground)] outline-none"
+						className="max-w-[140px] md:max-w-[200px] border-b border-[var(--border)] bg-transparent text-sm font-semibold text-[var(--foreground)] outline-none"
 					/>
 				) : (
-					<h2 className="max-w-[200px] text-sm font-semibold text-[var(--foreground)]">
+					<h2 className="max-w-[140px] md:max-w-[200px] text-sm font-semibold text-[var(--foreground)]">
 						<button
 							type="button"
 							className="w-full truncate text-left hover:text-[var(--primary)]"
@@ -1280,20 +1280,24 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						</Button>
 					)
 				)}
-				{sessionUsage.totalTokens > 0 && (
-					<ContextIndicator
-						tokens={sessionUsage.tokens}
-						cost={sessionUsage.cost}
-						modelID={sessionUsage.modelID}
-						providerID={sessionUsage.providerID}
-					/>
-				)}
-				{queuedCount > 0 && (
-					<Badge variant="secondary" className="text-[10px] gap-1">
-						<ListOrdered className="h-2.5 w-2.5" />
-						Queue {queuedCount}
-					</Badge>
-				)}
+				<div className="hidden md:block">
+					{sessionUsage.totalTokens > 0 && (
+						<ContextIndicator
+							tokens={sessionUsage.tokens}
+							cost={sessionUsage.cost}
+							modelID={sessionUsage.modelID}
+							providerID={sessionUsage.providerID}
+						/>
+					)}
+				</div>
+				<div className="hidden md:block">
+					{queuedCount > 0 && (
+						<Badge variant="secondary" className="text-[10px] gap-1">
+							<ListOrdered className="h-2.5 w-2.5" />
+							Queue {queuedCount}
+						</Badge>
+					)}
+				</div>
           {sessionStatus.type === 'retry' && (
             <Badge variant="destructive" className="text-[10px]">
               Retrying ({sessionStatus.attempt})
@@ -1307,13 +1311,13 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<PopoverTrigger asChild>
 						<Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
 							<Terminal className="h-3.5 w-3.5" />
-							SSH
+							<span className="hidden md:inline">SSH</span>
 						</Button>
 					</PopoverTrigger>
 					<PopoverContent
 						align="end"
 						side="bottom"
-						className="w-80 border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)]"
+						className="w-[calc(100vw-2rem)] border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] md:w-80"
 					>
 						<div className="space-y-3">
 							<div className="flex items-center gap-2 text-xs">
@@ -1373,7 +1377,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	
 			{/* Git badge */}
 			{githubAvailable && gitBranch && (
-				<div className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
+				<div className="hidden md:flex items-center gap-1.5 text-xs text-[var(--muted-foreground)]">
 					<GitBranch className="h-3 w-3" />
 					<span className="font-mono max-w-[120px] truncate text-[var(--foreground)]">
 						{gitBranch}

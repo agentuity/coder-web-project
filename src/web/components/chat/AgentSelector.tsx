@@ -42,18 +42,21 @@ export function CommandPicker({ value, onChange }: CommandPickerProps) {
 
   return (
     <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] hover:bg-[var(--muted)]"
-        title="Select agent"
-      >
-        <Bot className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
-        <span>{selected?.label ?? 'Agent'}</span>
-        <ChevronDown className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
-      </button>
-      {open && (
-        <div className="absolute bottom-full z-50 mb-2 w-56 rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg">
+		<button
+			type="button"
+			onClick={() => setOpen((prev) => !prev)}
+			className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] hover:bg-[var(--muted)]"
+			title="Select agent"
+			aria-label="Select agent"
+		>
+			<Bot className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+			<span className="hidden md:inline">{selected?.label ?? 'Agent'}</span>
+			<span className="hidden md:inline">
+				<ChevronDown className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+			</span>
+		</button>
+		{open && (
+			<div className="absolute bottom-full left-0 z-50 mb-2 w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg md:w-56">
           <button
             key={chatOption.value}
             type="button"

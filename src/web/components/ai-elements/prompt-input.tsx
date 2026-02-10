@@ -46,7 +46,7 @@ export const PromptInput = ({
 
 	return (
 		<form
-			className={cn('w-full', className)}
+			className={cn('w-full safe-area-bottom', className)}
 			onSubmit={handleSubmit}
 			{...props}
 		>

@@ -71,14 +71,14 @@ export function AppShell({
 
   return (
     <div className="flex h-screen bg-[var(--background)]">
-      {isSidebarOpen && (
-        <button
-          type="button"
-          className="fixed inset-0 z-30 bg-black/40 md:hidden"
-          onClick={() => setIsSidebarOpen(false)}
-          aria-label="Close sidebar"
-        />
-      )}
+		{isSidebarOpen && (
+			<button
+				type="button"
+				className="fixed inset-0 z-40 bg-black/40 md:hidden"
+				onClick={() => setIsSidebarOpen(false)}
+				aria-label="Close sidebar"
+			/>
+		)}
 
       <Sidebar
         sessions={sessions}

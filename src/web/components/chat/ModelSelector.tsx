@@ -74,22 +74,25 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 
   return (
     <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] hover:bg-[var(--muted)]"
-        title="Select model"
-      >
-        <Cpu className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
-        <span className="inline-flex items-center gap-1.5">
-          <span className={`h-2 w-2 rounded-full ${selected.group.color}`} />
-          <span>{selected.label}</span>
-        </span>
-        <ChevronDown className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
-      </button>
+		<button
+			type="button"
+			onClick={() => setOpen((prev) => !prev)}
+			className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] hover:bg-[var(--muted)]"
+			title="Select model"
+			aria-label="Select model"
+		>
+			<Cpu className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+			<span className="inline-flex items-center gap-1.5">
+				<span className={`h-2 w-2 rounded-full ${selected.group.color}`} />
+				<span className="hidden md:inline">{selected.label}</span>
+			</span>
+			<span className="hidden md:inline">
+				<ChevronDown className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+			</span>
+		</button>
 
       {open && (
-        <div className="absolute bottom-full z-50 mb-2 w-64 rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg">
+			<div className="absolute bottom-full left-0 z-50 mb-2 w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg md:w-64">
           {MODEL_GROUPS.map((group) => (
             <div key={group.providerID} className="mb-2 last:mb-0">
               <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">

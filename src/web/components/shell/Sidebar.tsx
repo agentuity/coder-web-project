@@ -168,13 +168,13 @@ export function Sidebar({
 
   return (
     <div
-      className={cn(
-        'flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-200',
-        isCollapsed ? 'w-14' : 'w-64',
-        isMobileOpen
-          ? 'absolute inset-y-0 left-0 z-40 flex md:static md:flex'
-          : 'hidden md:flex',
-      )}
+		className={cn(
+			'flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-200',
+			isCollapsed ? 'w-14' : 'w-64',
+			isMobileOpen
+				? 'absolute inset-y-0 left-0 z-50 flex md:static md:flex'
+				: 'hidden md:flex',
+		)}
     >
       <div className={cn('flex items-center gap-2 px-4 py-3', isCollapsed && 'justify-center px-2')}>
         <AgentuityLogo size={20} className="text-cyan-400" />
