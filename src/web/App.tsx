@@ -118,7 +118,7 @@ function AppContent() {
     return () => window.removeEventListener('keydown', handler);
   }, [showNewDialog]);
 
-  // Auto-create workspace on first load
+  // Auto-create workspace on first load; restore selection from localStorage
   useEffect(() => {
     if (!user) return;
     
@@ -126,7 +126,11 @@ function AppContent() {
       .then(r => r.json())
       .then((workspaces: any[]) => {
         if (workspaces.length > 0) {
-          setWorkspaceId(workspaces[0].id);
+          const savedId = localStorage.getItem('selectedWorkspaceId');
+          const match = savedId ? workspaces.find((w: any) => w.id === savedId) : null;
+          const selected = match ? match.id : workspaces[0].id;
+          setWorkspaceId(selected);
+          localStorage.setItem('selectedWorkspaceId', selected);
         } else {
           // Create default workspace
           fetch('/api/workspaces', {
@@ -135,7 +139,10 @@ function AppContent() {
             body: JSON.stringify({ name: 'Default Workspace' }),
           })
             .then(r => r.json())
-            .then(w => setWorkspaceId(w.id));
+            .then(w => {
+              setWorkspaceId(w.id);
+              localStorage.setItem('selectedWorkspaceId', w.id);
+            });
         }
       });
   }, [user]);
@@ -237,6 +244,11 @@ function AppContent() {
 		}
 	}, [activeSessionId, setUrlState, toast]);
 
+	const handleWorkspaceChange = useCallback((id: string) => {
+		setWorkspaceId(id);
+		localStorage.setItem('selectedWorkspaceId', id);
+	}, []);
+
 	const handleForkedSession = useCallback((session: Session) => {
 		setSessions(prev => [session, ...prev]);
 		setUrlState({ s: session.id, p: 'chat' });
@@ -274,7 +286,7 @@ function AppContent() {
 	} else if (currentPage === 'sources' && workspaceId) {
 		content = <SourcesPage workspaceId={workspaceId} />;
 	} else if (currentPage === 'settings' && workspaceId) {
-		content = <SettingsPage workspaceId={workspaceId} />;
+		content = <SettingsPage workspaceId={workspaceId} onWorkspaceChange={handleWorkspaceChange} />;
 	} else if (currentPage === 'profile') {
 		content = <ProfilePage />;
 	} else {
