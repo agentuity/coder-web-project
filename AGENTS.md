@@ -6,6 +6,8 @@
 - **Dev**: `bun run dev` (starts development server)
 - **Typecheck**: `bun run typecheck` (runs TypeScript type checking)
 - **Deploy**: `bun run deploy` (deploys your app to the Agentuity cloud)
+- **DB Generate**: `bun run db:generate` (generates a SQL migration from schema changes)
+- **DB Migrate**: `bun run db:migrate` (applies pending migrations to PostgreSQL)
 - **DB Push**: `bun run db:push` (syncs schema changes to PostgreSQL via drizzle-kit)
 
 ## Agent-Friendly CLI
@@ -65,14 +67,15 @@ This project uses PostgreSQL via `@agentuity/drizzle` (Drizzle ORM). Schema chan
 
 1. Edit `src/db/schema.ts` (the runtime schema)
 2. Mirror the same changes in `src/db/schema.kit.ts` (the drizzle-kit schema)
-3. Run `bun run db:push` to apply changes to the database
-4. Deploy with `bun run deploy`
+3. Run `bun run db:generate` (generates a SQL migration from schema changes)
+4. Run `bun run db:migrate` (applies pending migrations to PostgreSQL)
+5. Deploy with `bun run deploy`
 
 **Important:**
 
-- `@agentuity/drizzle` does NOT auto-migrate. Adding columns to the schema definition without running `db:push` will cause 500 errors at runtime.
+- `@agentuity/drizzle` does NOT auto-migrate. Adding columns to the schema definition without running `db:migrate` will cause 500 errors at runtime.
 - The `tablesFilter` in `drizzle.config.ts` prevents drizzle-kit from dropping Better Auth tables (`user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, `jwks`, `apikey`). Never remove this filter.
-- Better Auth creates and manages its own tables via `@agentuity/auth`. If they get dropped, they can be recreated by restarting the server (Better Auth recreates on initialization) or by running the Better Auth CLI migrate command.
+- Better Auth creates and manages its own tables via `@agentuity/auth`. If they get dropped, they can be recreated by running the Better Auth CLI migrate command.
 
 ## Learn More
 
