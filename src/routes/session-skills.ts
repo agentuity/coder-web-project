@@ -30,7 +30,7 @@ async function execInSandbox(
 	const execution = await sandboxExecute(apiClient, {
 		sandboxId,
 		options: {
-			command: ['bash', '-c', `cd "${workDir}" && ${command.join(' ')}`],
+			command: ['bash', '-c', `cd "${workDir}" 2>/dev/null; ${command.join(' ')}`],
 			timeout: '60s',
 		},
 	});
@@ -88,9 +88,8 @@ api.get('/:id/skills/search', async (c) => {
 	}
 
 	const apiClient = (c.var.sandbox as any).client;
-	const projectDir = resolveProjectDir(session);
 	const command = ['npx', 'skills', 'find', query];
-	const result = await execInSandbox(apiClient, session.sandboxId, command, projectDir);
+	const result = await execInSandbox(apiClient, session.sandboxId, command, SANDBOX_HOME);
 
 	// Parse the ANSI output from `npx skills find`
 	// Format:
@@ -139,9 +138,10 @@ api.get('/:id/skills/installed', async (c) => {
 	const skillsDir = `${projectDir}/.opencode/skills`;
 	const listCmd = ['if', '[', '-d', skillsDir, '];', 'then', 'find', skillsDir, '-maxdepth', '2', '-name', 'SKILL.md', '-print;', 'fi'];
 
-	const listResult = await execInSandbox(apiClient, session.sandboxId, listCmd, projectDir);
-	if (listResult.exitCode !== 0) {
-		return c.json({ error: 'Failed to list installed skills', details: listResult.stderr }, 500);
+	const listResult = await execInSandbox(apiClient, session.sandboxId, listCmd, SANDBOX_HOME);
+	// exitCode may be non-zero if directory doesn't exist — treat empty stdout as "no skills"
+	if (listResult.exitCode !== 0 && listResult.stdout.trim() === '') {
+		return c.json([]);
 	}
 
 	const skillFiles = listResult.stdout
