@@ -120,8 +120,8 @@ export function EnvPanel({ sessionId, disabled = false }: EnvPanelProps) {
 			</div>
 			<div className="px-3 py-2 space-y-3">
 				<p className="text-[10px] text-[var(--muted-foreground)]">
-					Updates apply to the running sandbox immediately. Values are visible to
-					the agent and anyone with access to this session.
+				Environment variables are available to commands and tools running in the sandbox.
+				Values are visible to the agent and anyone with access to this session.
 				</p>
 				<div className="flex items-center gap-2">
 					<Input
