@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, RefreshCw, AlertCircle, FolderTree, ChevronDown, FileEdit, GitCommit } from 'lucide-react';
+import { Loader2, RefreshCw, AlertCircle, FolderTree, ChevronDown, GitCommit } from 'lucide-react';
 import { Button } from '../ui/button';
 import { FileTree, type FileTreeNode } from '../ai-elements/file-tree';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
@@ -35,10 +35,9 @@ interface FileExplorerProps {
 	onOpenFile: (path: string) => void;
 	onOpenDiff?: (path: string) => void;
 	activeFilePath?: string | null;
-	recentFiles?: string[];
 }
 
-export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath, recentFiles = [] }: FileExplorerProps) {
+export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath }: FileExplorerProps) {
 	const [nodes, setNodes] = useState<FileTreeNode[]>([]);
 	const [entryCount, setEntryCount] = useState(0);
 	const [loading, setLoading] = useState(true);
@@ -191,28 +190,7 @@ export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath
 
 			{/* Tree view */}
 			<div className="overflow-auto p-1 flex-1 space-y-2">
-				{recentFiles.length > 0 && (
-					<Collapsible defaultOpen className="rounded-md border border-[var(--border)] bg-[var(--muted)]/40">
-						<CollapsibleTrigger className="flex w-full items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
-							<span>Recent Changes ({recentFiles.length})</span>
-							<ChevronDown className="h-3 w-3" />
-						</CollapsibleTrigger>
-						<CollapsibleContent className="border-t border-[var(--border)] px-2 py-1.5 space-y-1">
-						{recentFiles.map((file) => (
-							<button
-								key={file}
-								onClick={() => (onOpenDiff ?? onOpenFile)(file)}
-								className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-[11px] text-[var(--foreground)] hover:bg-[var(--accent)]"
-								type="button"
-							>
-									<FileEdit className="h-3 w-3 text-yellow-500" />
-									<span className="truncate" title={file}>{file.split('/').pop()}</span>
-								</button>
-							))}
-						</CollapsibleContent>
-					</Collapsible>
-				)}
-				{gitChanges.length > 0 && (
+			{gitChanges.length > 0 && (
 					<Collapsible defaultOpen className="rounded-md border border-[var(--border)] bg-[var(--muted)]/40">
 						<CollapsibleTrigger className="flex w-full items-center justify-between px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-foreground)]">
 							<span>Git Changes ({gitChanges.length})</span>

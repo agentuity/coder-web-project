@@ -420,43 +420,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		getDiffAnnotations,
 		getFileComments,
 	} = useCodeComments();
-	const [recentFiles, setRecentFiles] = useState<string[]>([]);
-	const processedToolPartsRef = useRef(new Set<string>());
-
 	useEffect(() => {
 		if (!sessionId) return;
-		processedToolPartsRef.current = new Set();
-		setRecentFiles([]);
 		setAttachments([]);
 	}, [sessionId]);
 
-	const handleOpenRecentDiff = useCallback(async (filePath: string) => {
-		try {
-			const res = await fetch(
-				`/api/sessions/${sessionId}/github/diff-file?path=${encodeURIComponent(filePath)}`
-			);
-			if (!res.ok) throw new Error('Failed to load diff');
-			const data = await res.json();
-			if (data.oldContent !== undefined && data.newContent !== undefined) {
-				openDiff(filePath, data.oldContent, data.newContent);
-				return;
-			}
-		} catch {
-			// fallback below
-		}
-		try {
-			const res = await fetch(`/api/sessions/${sessionId}/files/content?path=${encodeURIComponent(filePath)}`);
-			if (!res.ok) throw new Error('Failed to load file');
-			const data = await res.json();
-			if (typeof data.content === 'string') {
-				openFile(filePath, data.content);
-				return;
-			}
-		} catch {
-			// fallback below
-		}
-		openFile(filePath);
-	}, [openDiff, openFile, sessionId]);
+
 	const activeFilePath = activeTab?.filePath ?? null;
 	const isBusy = sessionStatus.type === 'busy';
 	const displayMessages = session.status === 'terminated' ? archivedMessages : messages;
@@ -871,35 +840,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		return groups;
 	};
 
-	useEffect(() => {
-		const newPaths: string[] = [];
 
-		for (const message of displayMessages) {
-			const parts = getDisplayParts(message.id);
-			for (const part of parts) {
-				if (part.type !== 'tool') continue;
-				if (part.state.status !== 'completed') continue;
-				if (!isWriteOrEditTool(part)) continue;
-				if (processedToolPartsRef.current.has(part.id)) continue;
-				processedToolPartsRef.current.add(part.id);
-				const filePath = extractFilePath(part);
-				if (filePath) newPaths.push(filePath);
-			}
-		}
-
-		if (newPaths.length === 0) return;
-
-		setRecentFiles((prev) => {
-			let updated = [...prev];
-			for (const filePath of newPaths) {
-				const existingIndex = updated.indexOf(filePath);
-				if (existingIndex >= 0) updated.splice(existingIndex, 1);
-				updated.unshift(filePath);
-			}
-			return updated;
-		});
-
-	}, [displayMessages, extractFilePath, getDisplayParts, isWriteOrEditTool]);
 
 	const renderPart = (part: Part, message: ChatMessage) => {
 		switch (part.type) {
@@ -1551,13 +1492,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 										}
 									/>
 								) : (
-								<FileExplorer
-									sessionId={sessionId}
-									onOpenFile={openFile}
-									onOpenDiff={handleOpenRecentDiff}
-									activeFilePath={activeFilePath}
-									recentFiles={recentFiles}
-								/>
+							<FileExplorer
+								sessionId={sessionId}
+								onOpenFile={openFile}
+								activeFilePath={activeFilePath}
+							/>
 							)}
 							</div>
 						</div>
