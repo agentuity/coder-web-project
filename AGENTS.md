@@ -61,12 +61,6 @@ export function App() {
 
 This project uses PostgreSQL via `@agentuity/drizzle` (Drizzle ORM). Schema changes are managed with `drizzle-kit`.
 
-**Schema files:**
-
-- `src/db/schema.ts` — The source of truth for app table definitions. Imports from `@agentuity/drizzle` (Bun-only). Used at runtime.
-- `src/db/schema.kit.ts` — Mirror of `schema.ts` that imports from `drizzle-orm/pg-core` directly. Required because `drizzle-kit` runs under Node (not Bun) and cannot resolve `@agentuity/drizzle`'s exports. **Keep this file in sync with `schema.ts`.**
-- `drizzle.config.ts` — Drizzle-kit configuration. Uses `tablesFilter` to only manage app tables (`workspaces`, `chat_sessions`, `skills`, `sources`). Better Auth manages its own tables separately.
-
 **When you change the schema:**
 
 1. Edit `src/db/schema.ts` (the runtime schema)
