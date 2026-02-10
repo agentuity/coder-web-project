@@ -270,10 +270,13 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ repo: repoRef }),
 			});
-			if (!res.ok) throw new Error('Failed to install skill');
+			if (!res.ok) {
+				const errBody = await res.json().catch(() => null);
+				throw new Error(errBody?.details || errBody?.error || 'Failed to install skill');
+			}
 			await fetchInstalled();
-		} catch {
-			setRegistryError('Failed to install skill.');
+		} catch (err: any) {
+			setRegistryError(err?.message || 'Failed to install skill.');
 		} finally {
 			setInstallingSkills((prev) => ({ ...prev, [repoRef]: false }));
 			setOperationInProgress(false);
@@ -291,10 +294,13 @@ export function SkillsPage({ workspaceId, sessionId }: SkillsPageProps) {
 					method: 'DELETE',
 				},
 			);
-			if (!res.ok) throw new Error('Failed to remove skill');
+			if (!res.ok) {
+				const errBody = await res.json().catch(() => null);
+				throw new Error(errBody?.details || errBody?.error || 'Failed to remove skill');
+			}
 			await fetchInstalled();
-		} catch {
-			setInstalledError('Failed to remove skill.');
+		} catch (err: any) {
+			setInstalledError(err?.message || 'Failed to remove skill.');
 		} finally {
 			setRemovingSkills((prev) => ({ ...prev, [name]: false }));
 			setOperationInProgress(false);

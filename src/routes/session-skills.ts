@@ -135,7 +135,7 @@ api.get('/:id/skills/installed', async (c) => {
 
 	const apiClient = (c.var.sandbox as any).client;
 	const projectDir = resolveProjectDir(session);
-	const skillsDir = `${projectDir}/.opencode/skills`;
+	const skillsDir = `${projectDir}/.agents/skills`;
 	const listCmd = ['if', '[', '-d', skillsDir, '];', 'then', 'find', skillsDir, '-maxdepth', '2', '-name', 'SKILL.md', '-print;', 'fi'];
 
 	const listResult = await execInSandbox(apiClient, session.sandboxId, listCmd, SANDBOX_HOME);
