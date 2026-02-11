@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useAnalytics } from '@agentuity/react';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -15,6 +16,7 @@ export function GitHubSettings() {
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const { track } = useAnalytics();
 
 	useEffect(() => {
 		let active = true;
@@ -56,6 +58,7 @@ export function GitHubSettings() {
 				setError(data.error || 'Invalid GitHub token');
 				return;
 			}
+			track('github_connected');
 		const data = (await res.json()) as GitHubStatus;
 		setStatus({
 			configured: true,
@@ -75,7 +78,10 @@ export function GitHubSettings() {
 		setSaving(true);
 		setError(null);
 		try {
-		await fetch('/api/user/github', { method: 'DELETE' });
+		const res = await fetch('/api/user/github', { method: 'DELETE' });
+		if (res.ok) {
+			track('github_disconnected');
+		}
 		setStatus({ configured: false });
 		window.dispatchEvent(new Event('github-status-changed'));
 	} catch {

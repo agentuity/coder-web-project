@@ -73,6 +73,7 @@ import { useAudioPlayback } from '../../hooks/useAudioPlayback';
 import { VoiceControls } from '../ui/VoiceControls';
 import { cn } from '../../lib/utils';
 import { useUrlState } from '../../hooks/useUrlState';
+import { useAnalytics } from '@agentuity/react';
 
 interface ChatPageProps {
   sessionId: string;
@@ -143,6 +144,7 @@ const ALLOWED_EXTENSIONS = new Set([
 export function ChatPage({ sessionId, session: initialSession, onForkedSession, githubAvailable = true }: ChatPageProps) {
   const [session, setSession] = useState(initialSession);
   const { toast } = useToast();
+  const { track } = useAnalytics();
   const [statusStartedAt, setStatusStartedAt] = useState(() => Date.now());
   const [statusElapsedMs, setStatusElapsedMs] = useState(0);
   const [archivedMessages, setArchivedMessages] = useState<ChatMessage[]>([]);
@@ -317,6 +319,16 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+	const handleModelChange = useCallback((model: string) => {
+		setSelectedModel(model);
+		track('model_changed', { model });
+	}, [track]);
+
+	const handleViewModeChange = useCallback((mode: 'chat' | 'ide') => {
+		setUrlState({ v: mode });
+		track('view_mode_changed', { mode });
+	}, [setUrlState, track]);
+
 	const { enqueue: enqueueAudio, clearQueue: clearAudioQueue, isSpeaking } = useAudioPlayback();
 
 	const handleSendRef = useRef<(text: string) => Promise<void>>(undefined);
@@ -358,6 +370,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			toast({ type: 'error', message: voiceError });
 		}
 	}, [voiceError, toast]);
+
+	const handleNarratorToggle = useCallback(() => {
+		const nextEnabled = !narratorEnabled;
+		toggleNarrator();
+		track('narrator_toggled', { enabled: nextEnabled });
+	}, [narratorEnabled, toggleNarrator, track]);
+
+	const handleMicToggle = useCallback(() => {
+		const nextEnabled = !isListening;
+		toggleMic();
+		track('voice_input_toggled', { enabled: nextEnabled });
+	}, [isListening, toggleMic, track]);
 
 	// Stop audio playback when user starts speaking (interruption)
 	useEffect(() => {
@@ -448,6 +472,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				try {
 					const item = await readFile(file);
 					newItems.push(item);
+					track('file_attached', { fileType: file.type || ext || 'unknown' });
 				} catch {
 					invalidFiles.push(file.name);
 				}
@@ -471,7 +496,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				setAttachments((prev) => [...prev, ...newItems]);
 			}
 		},
-		[attachments.length, toast],
+		[attachments.length, toast, track],
 	);
 	const {
 		tabs,
@@ -491,6 +516,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		getDiffAnnotations,
 		getFileComments,
 	} = useCodeComments();
+	const handleAddComment = useCallback((...args: Parameters<typeof addComment>) => {
+		addComment(...args);
+		track('code_comment_added');
+	}, [addComment, track]);
 	useEffect(() => {
 		if (!sessionId) return;
 		setAttachments([]);
@@ -554,6 +583,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				if (!res.ok) {
 					throw new Error('Failed to send message');
 				}
+				track('message_sent', {
+					hasAttachments: Boolean(payload.attachments?.length),
+					attachmentCount: payload.attachments?.length ?? 0,
+					command: payload.command ?? null,
+					model: payload.model,
+				});
 			} catch (err) {
 				console.error('Failed to send message:', err);
 				toast({ type: 'error', message: 'Failed to send message' });
@@ -561,7 +596,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				setIsSending(false);
 			}
 		},
-		[sessionId, toast],
+		[sessionId, toast, track],
 	);
 
 	const handleSend = async (text: string) => {
@@ -618,6 +653,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       }
       const newSession = await res.json();
       onForkedSession?.(newSession);
+      track('session_forked');
     } catch (error) {
       console.error('Failed to fork session:', error);
       toast({ type: 'error', message: 'Failed to fork session' });
@@ -638,6 +674,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       const { url } = await res.json();
       setShareUrl(url);
       toast({ type: 'success', message: 'Share link created!' });
+      track('session_shared');
     } catch (error) {
       console.error('Failed to share session:', error);
       toast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to share session' });
@@ -697,7 +734,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
   // Abort
   const handleAbort = async () => {
     try {
-      await fetch(`/api/sessions/${sessionId}/abort`, { method: 'POST' });
+      const res = await fetch(`/api/sessions/${sessionId}/abort`, { method: 'POST' });
+      if (res.ok) {
+        track('session_aborted');
+      }
     } catch {
       // Ignore abort errors
     }
@@ -714,12 +754,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			if (!res.ok) {
 				const data = await res.json().catch(() => ({}));
 				console.error('Revert failed:', data);
+				return;
 			}
+			track('checkpoint_reverted');
 			// UI updates come via SSE session.updated event
 		} catch (error) {
 			console.error('Revert failed:', error);
 		}
-	}, [sessionId]);
+	}, [sessionId, track]);
 
 	const handleUnrevert = useCallback(async () => {
 		if (!sessionId) return;
@@ -1039,7 +1081,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<ToolCallCard
 					key={part.id}
 					part={part}
-					onAddComment={addComment}
+					onAddComment={handleAddComment}
 					getDiffAnnotations={getDiffAnnotations}
 					getFileComments={getFileComments}
 					sources={message.role === 'assistant' ? getSourcesForToolPart(part) : []}
@@ -1347,7 +1389,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<PromptInputFooter>
 					<div className="flex flex-wrap items-center gap-1 sm:gap-2 text-[10px] text-[var(--muted-foreground)]">
 					<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
-					<ModelSelector value={selectedModel} onChange={setSelectedModel} />
+					<ModelSelector value={selectedModel} onChange={handleModelChange} />
 					<span className="hidden md:inline">Enter to send · Shift+Enter for new line</span>
 							{commentCount > 0 && (
 								<Badge variant="secondary" className="text-[10px]">
@@ -1386,16 +1428,16 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 								<Paperclip className="h-4 w-4" />
 							</Button>
 							{session.status === 'active' && (
-								<VoiceControls
-									narratorEnabled={narratorEnabled}
-									onNarratorToggle={toggleNarrator}
-									isListening={isListening}
-									onMicToggle={toggleMic}
-									isProcessing={isProcessing}
-									isSupported={voiceSupported}
-									isCountingDown={isCountingDown}
-									countdownProgress={countdownProgress}
-								/>
+							<VoiceControls
+								narratorEnabled={narratorEnabled}
+								onNarratorToggle={handleNarratorToggle}
+								isListening={isListening}
+								onMicToggle={handleMicToggle}
+								isProcessing={isProcessing}
+								isSupported={voiceSupported}
+								isCountingDown={isCountingDown}
+								countdownProgress={countdownProgress}
+							/>
 							)}
 							<PromptInputSubmit
 								disabled={submitDisabled}
@@ -1621,7 +1663,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={() => setUrlState({ v: 'chat' })}
+						onClick={() => handleViewModeChange('chat')}
 						className={`h-7 px-2 text-xs ${viewMode === 'chat' ? 'bg-[var(--background)] shadow-sm' : ''}`}
 						title="Chat"
 					>
@@ -1630,7 +1672,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={() => setUrlState({ v: 'ide' })}
+						onClick={() => handleViewModeChange('ide')}
 						className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
 						title="Code"
 					>
@@ -1712,17 +1754,17 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					</div>
 				}
 						codePanel={
-							<CodePanel
-								sessionId={sessionId}
-								tabs={tabs}
-								activeId={activeId}
-								onSelectTab={setActiveId}
-								onCloseTab={closeTab}
-								onUpdateTab={updateTab}
-								onAddComment={addComment}
-								getDiffAnnotations={getDiffAnnotations}
-								getFileComments={getFileComments}
-							/>
+					<CodePanel
+						sessionId={sessionId}
+						tabs={tabs}
+						activeId={activeId}
+						onSelectTab={setActiveId}
+						onCloseTab={closeTab}
+						onUpdateTab={updateTab}
+						onAddComment={handleAddComment}
+						getDiffAnnotations={getDiffAnnotations}
+						getFileComments={getFileComments}
+					/>
 						}
 					/>
 				</div>
@@ -1795,16 +1837,16 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									<Paperclip className="h-4 w-4" />
 								</Button>
 								{session.status === 'active' && (
-									<VoiceControls
-										narratorEnabled={narratorEnabled}
-										onNarratorToggle={toggleNarrator}
-										isListening={isListening}
-										onMicToggle={toggleMic}
-										isProcessing={isProcessing}
-										isSupported={voiceSupported}
-										isCountingDown={isCountingDown}
-										countdownProgress={countdownProgress}
-									/>
+								<VoiceControls
+									narratorEnabled={narratorEnabled}
+									onNarratorToggle={handleNarratorToggle}
+									isListening={isListening}
+									onMicToggle={handleMicToggle}
+									isProcessing={isProcessing}
+									isSupported={voiceSupported}
+									isCountingDown={isCountingDown}
+									countdownProgress={countdownProgress}
+								/>
 								)}
 								<PromptInputSubmit
 									disabled={submitDisabled}

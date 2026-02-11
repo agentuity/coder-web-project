@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useAPI } from '@agentuity/react';
+import { useAnalytics, useAPI } from '@agentuity/react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
@@ -30,6 +30,7 @@ interface NewSessionDialogProps {
 }
 
 export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, githubAvailable = true }: NewSessionDialogProps) {
+	const { track } = useAnalytics();
 	const [mode, setMode] = useState<'dropdown' | 'url'>('dropdown');
 	const [repoUrl, setRepoUrl] = useState('');
 	const [branch, setBranch] = useState('');
@@ -42,6 +43,7 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 	const [repoDropdownOpen, setRepoDropdownOpen] = useState(false);
 	const [repoError, setRepoError] = useState<string | null>(null);
 	const repoDropdownRef = useRef<HTMLDivElement | null>(null);
+	const wasOpenRef = useRef(false);
 	const repoId = useId();
 	const branchId = useId();
 	const promptId = useId();
@@ -132,6 +134,13 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 			setRepoDropdownOpen(false);
 		}
 	}, [isOpen]);
+
+	useEffect(() => {
+		if (isOpen && !wasOpenRef.current) {
+			track('session_dialog_opened');
+		}
+		wasOpenRef.current = isOpen;
+	}, [isOpen, track]);
 
 	const filteredRepos = useMemo(() => {
 		const term = repoSearch.trim().toLowerCase();

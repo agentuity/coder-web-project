@@ -1,4 +1,5 @@
 import { Code2, MessageSquare, Plus, Sparkles, Plug, Clock } from 'lucide-react';
+import { useTrackOnMount } from '@agentuity/react';
 import { Button } from '../ui/button';
 
 interface Session {
@@ -37,6 +38,7 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 export function WorkspacePage({ sessions = [], onNewSession, onSelectSession, onNavigate }: WorkspacePageProps) {
+	useTrackOnMount({ eventName: 'page_viewed', properties: { page: 'workspace_home' } });
 	const activeSessions = sessions.filter(s => s.status === 'active');
 	const recentSessions = sessions.slice(0, 5);
 

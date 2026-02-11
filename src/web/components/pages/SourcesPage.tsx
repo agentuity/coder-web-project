@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useState } from 'react';
+import { useAnalytics, useTrackOnMount } from '@agentuity/react';
 import { Plus, Plug, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -62,6 +63,8 @@ function configPreview(config: Record<string, unknown>): string {
 }
 
 export function SourcesPage({ workspaceId }: SourcesPageProps) {
+	const { track } = useAnalytics();
+	useTrackOnMount({ eventName: 'page_viewed', properties: { page: 'sources' } });
 	const [sources, setSources] = useState<Source[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [showForm, setShowForm] = useState(false);
@@ -151,17 +154,23 @@ export function SourcesPage({ workspaceId }: SourcesPageProps) {
 		try {
 			const config = buildConfig();
 			if (editingSource) {
-				await fetch(`/api/sources/${editingSource.id}`, {
+				const res = await fetch(`/api/sources/${editingSource.id}`, {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ name: formName, type: formType, config }),
 				});
+				if (res.ok) {
+					track('source_updated');
+				}
 			} else {
-				await fetch(`/api/workspaces/${workspaceId}/sources`, {
+				const res = await fetch(`/api/workspaces/${workspaceId}/sources`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ name: formName, type: formType, config }),
 				});
+				if (res.ok) {
+					track('source_created');
+				}
 			}
 			setShowForm(false);
 			setEditingSource(null);
@@ -186,7 +195,10 @@ export function SourcesPage({ workspaceId }: SourcesPageProps) {
 	// Delete
 	const handleDelete = async (id: string) => {
 		if (!confirm('Delete this source?')) return;
-		await fetch(`/api/sources/${id}`, { method: 'DELETE' });
+		const res = await fetch(`/api/sources/${id}`, { method: 'DELETE' });
+		if (res.ok) {
+			track('source_deleted');
+		}
 		fetchSources();
 	};
 

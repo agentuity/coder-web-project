@@ -12,9 +12,10 @@ import { SkillsPage } from './components/pages/SkillsPage';
 import { SourcesPage } from './components/pages/SourcesPage';
 import { SettingsPage } from './components/pages/SettingsPage';
 import { SharedSessionPage } from './components/pages/SharedSessionPage';
-import { useAPI } from '@agentuity/react';
+import { useAnalytics, useAPI } from '@agentuity/react';
 import { ToastProvider, useToast } from './components/ui/toast';
 import { useUrlState } from './hooks/useUrlState';
+import { useAnalyticsIdentify } from './hooks/useAnalyticsIdentify';
 
 /**
  * Detect if the current URL is a shared session route.
@@ -51,6 +52,9 @@ function AppContent() {
   const userName = user?.name ? String(user.name) : undefined;
   const userEmail = user?.email ? String(user.email) : undefined;
   const hasUser = Boolean(userName || userEmail);
+  const { track } = useAnalytics();
+
+  useAnalyticsIdentify({ name: userName, email: userEmail });
 
   const [urlState, setUrlState] = useUrlState();
   const activeSessionId = urlState.s ?? undefined;
@@ -76,6 +80,10 @@ function AppContent() {
     localStorage.setItem('agentuity-theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    track('page_viewed', { page: currentPage });
+  }, [currentPage, track]);
+
   // Check if current user has a GitHub PAT configured
   const fetchGithubStatus = useCallback(() => {
     if (!user) return;
@@ -97,8 +105,12 @@ function AppContent() {
   }, [fetchGithubStatus]);
 
   const handleToggleTheme = useCallback(() => {
-    setTheme(prev => (prev === 'dark' ? 'light' : 'dark'));
-  }, []);
+    setTheme(prev => {
+      const newTheme = prev === 'dark' ? 'light' : 'dark';
+      track('theme_toggled', { theme: newTheme });
+      return newTheme;
+    });
+  }, [track]);
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -188,6 +200,11 @@ function AppContent() {
 			setSessions(prev => prev.some(s => s.id === session.id) ? prev : [session, ...prev]);
 			setUrlState({ s: session.id, p: 'chat' });
 			setShowNewDialog(false);
+			track('session_created', {
+				hasRepo: !!data.repoUrl,
+				hasBranch: !!data.branch,
+				hasPrompt: !!data.prompt,
+			});
 		} catch (error) {
 			console.error('Failed to create session:', error);
 			toast({ type: 'error', message: 'Failed to create session' });
@@ -195,7 +212,7 @@ function AppContent() {
 			isCreatingRef.current = false;
 			setIsCreating(false);
 		}
-	}, [setUrlState, toast, workspaceId]);
+	}, [setUrlState, toast, track, workspaceId]);
 
 	const handleSelectSession = useCallback((id: string) => {
 		setUrlState({ s: id, p: 'chat' });
@@ -215,10 +232,11 @@ function AppContent() {
         body: JSON.stringify({ flagged }),
       });
       setSessions(prev => prev.map(s => (s.id === id ? { ...s, flagged } : s)));
+      track('session_flagged', { flagged });
     } catch (err) {
       console.error('Failed to flag session:', err);
     }
-  }, []);
+  }, [track]);
 
   const handleRetrySession = useCallback(async (id: string) => {
     try {
@@ -228,11 +246,12 @@ function AppContent() {
       }
       const session = await res.json();
       setSessions(prev => prev.map(s => (s.id === id ? session : s)));
+      track('session_retried');
     } catch (error) {
       console.error('Failed to retry session:', error);
       toast({ type: 'error', message: 'Failed to retry session' });
     }
-  }, [toast]);
+  }, [toast, track]);
 
 	const handleDeleteSession = useCallback(async (id: string) => {
 		try {
@@ -248,16 +267,18 @@ function AppContent() {
 				}
 				return updated;
 			});
+			track('session_deleted');
 		} catch (error) {
 			console.error('Failed to delete session:', error);
 			toast({ type: 'error', message: 'Failed to delete session' });
 		}
-	}, [activeSessionId, setUrlState, toast]);
+	}, [activeSessionId, setUrlState, toast, track]);
 
 	const handleWorkspaceChange = useCallback((id: string) => {
 		setWorkspaceId(id);
 		localStorage.setItem('selectedWorkspaceId', id);
-	}, []);
+		track('workspace_switched', { workspaceId: id });
+	}, [track]);
 
 	const handleForkedSession = useCallback((session: Session) => {
 		setSessions(prev => [session, ...prev]);

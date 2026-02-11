@@ -1,5 +1,6 @@
 import { Plus, Sparkles, Plug, Settings, Star, RefreshCw, Trash2, ChevronRight, ChevronDown, ChevronLeft, LogOut, Moon, Sun, User } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useAnalytics } from '@agentuity/react';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
@@ -65,6 +66,7 @@ export function Sidebar({
   onToggleTheme,
   onSignOut,
 }: SidebarProps) {
+  const { track } = useAnalytics();
   const [showTerminated, setShowTerminated] = useState(false);
   const isCollapsed = Boolean(collapsed) && !isMobileOpen;
   const displayName = userName || userEmail || 'User';
@@ -77,6 +79,21 @@ export function Sidebar({
       terminatedSessions: sessions.filter(isTerminated),
     };
   }, [sessions]);
+
+  const handleNewSession = () => {
+    track('sidebar_new_session_clicked');
+    onNewSession();
+  };
+
+  const handleSessionSelect = (id: string) => {
+    track('sidebar_session_selected');
+    onSelectSession(id);
+  };
+
+  const handleNavigate = (destination: 'skills' | 'sources' | 'settings' | 'profile') => {
+    track('sidebar_navigation', { destination });
+    onNavigate(destination);
+  };
 
   const renderSessionRow = (session: Session) => (
     <div
@@ -91,7 +108,7 @@ export function Sidebar({
     >
       <button
         type="button"
-        onClick={() => onSelectSession(session.id)}
+        onClick={() => handleSessionSelect(session.id)}
         className={cn(
           'flex flex-1 items-center gap-2 truncate text-left',
           isCollapsed && 'justify-center'
@@ -183,7 +200,7 @@ export function Sidebar({
       <div className={cn('p-3', isCollapsed && 'px-2')}>
         {isCollapsed ? (
           <Button
-            onClick={onNewSession}
+            onClick={handleNewSession}
             className="w-full"
             size="icon"
             title="New Session"
@@ -192,7 +209,7 @@ export function Sidebar({
             <Plus className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={onNewSession} className="w-full" size="sm">
+          <Button onClick={handleNewSession} className="w-full" size="sm">
             <Plus className="mr-2 h-4 w-4" />
             New Session
           </Button>
@@ -256,7 +273,7 @@ export function Sidebar({
       <div className={cn('p-2 space-y-1', isCollapsed && 'px-1')}>
         <button
           type="button"
-          onClick={() => onNavigate('skills')}
+          onClick={() => handleNavigate('skills')}
           className={cn(
             'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
             currentPage === 'skills' ? 'bg-[var(--accent)]' : '',
@@ -270,7 +287,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          onClick={() => onNavigate('sources')}
+          onClick={() => handleNavigate('sources')}
           className={cn(
             'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
             currentPage === 'sources' ? 'bg-[var(--accent)]' : '',
@@ -284,7 +301,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          onClick={() => onNavigate('settings')}
+          onClick={() => handleNavigate('settings')}
           className={cn(
             'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
             currentPage === 'settings' ? 'bg-[var(--accent)]' : '',
@@ -306,7 +323,7 @@ export function Sidebar({
             </div>
           )}
           <button
-            onClick={() => onNavigate('profile')}
+            onClick={() => handleNavigate('profile')}
             className={cn(
               'shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]',
               currentPage === 'profile' && 'text-[var(--foreground)]'

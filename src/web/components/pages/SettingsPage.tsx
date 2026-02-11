@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useState } from 'react';
+import { useAnalytics, useTrackOnMount } from '@agentuity/react';
 import { Settings, Save, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -18,6 +19,8 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPageProps) {
+	const { track } = useAnalytics();
+	useTrackOnMount({ eventName: 'page_viewed', properties: { page: 'settings' } });
 	const [workspace, setWorkspace] = useState<Workspace | null>(null);
 	const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -79,13 +82,14 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 					description: description || undefined,
 				}),
 			});
-			if (!res.ok) {
-				const errBody = await res.json().catch(() => null);
-				throw new Error(errBody?.error || 'Failed to save settings');
-			}
-			setSaved(true);
-			fetchAllWorkspaces();
-			setTimeout(() => setSaved(false), 2000);
+		if (!res.ok) {
+			const errBody = await res.json().catch(() => null);
+			throw new Error(errBody?.error || 'Failed to save settings');
+		}
+		track('workspace_updated');
+		setSaved(true);
+		fetchAllWorkspaces();
+		setTimeout(() => setSaved(false), 2000);
 		} catch (err: any) {
 			setSettingsError(err?.message || 'Failed to save settings.');
 		}

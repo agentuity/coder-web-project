@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAnalytics } from '@agentuity/react';
 import { Shield, ShieldCheck, ShieldX } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -13,6 +14,7 @@ export function PermissionCard({ request, sessionId }: PermissionCardProps) {
 	const [replying, setReplying] = useState(false);
 	const [replied, setReplied] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const { track } = useAnalytics();
 
 	const handleReply = async (reply: 'once' | 'always' | 'reject') => {
 		setReplying(true);
@@ -27,6 +29,7 @@ export function PermissionCard({ request, sessionId }: PermissionCardProps) {
 				setError('Failed to send reply. Try again.');
 				return;
 			}
+			track('permission_responded', { action: reply === 'reject' ? 'reject' : 'allow' });
 			setReplied(true);
 		} catch {
 			setError('Network error. Try again.');

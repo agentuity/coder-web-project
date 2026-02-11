@@ -1,5 +1,6 @@
 import { AlertCircle, Loader2, Mail } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useAnalytics } from '@agentuity/react';
 import { authClient } from '../../lib/auth-client';
 
 const GoogleIcon = () => (
@@ -14,6 +15,7 @@ const GoogleIcon = () => (
 
 export function SignIn() {
   const { data: session } = authClient.useSession();
+  const { track } = useAnalytics();
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [mode, setMode] = useState<'choose' | 'email'>('choose');
@@ -50,6 +52,7 @@ export function SignIn() {
     setIsLoading(true);
     try {
       await authClient.signIn.social({ provider: 'google', callbackURL: '/' });
+      track('user_signed_in', { method: 'google' });
     } catch (err) {
       setServerError(err instanceof Error ? err.message : 'Google sign-in failed');
     } finally {
@@ -70,11 +73,15 @@ export function SignIn() {
         });
         if ((result as any)?.error) {
           setServerError((result as any).error.message || 'Sign up failed');
+        } else {
+          track('user_signed_up', { method: 'email' });
         }
       } else {
         const result = await authClient.signIn.email({ email, password });
         if ((result as any)?.error) {
           setServerError((result as any).error.message || 'Sign in failed');
+        } else {
+          track('user_signed_in', { method: 'email' });
         }
       }
     } catch (err) {

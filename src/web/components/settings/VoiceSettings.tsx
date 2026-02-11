@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useState } from 'react';
+import { useAnalytics } from '@agentuity/react';
 import { Volume2 } from 'lucide-react';
 import { Button } from '../ui/button';
 
@@ -26,6 +27,7 @@ const VOICE_OPTIONS = [
 ];
 
 export function VoiceSettings() {
+  const { track } = useAnalytics();
   const [prefs, setPrefs] = useState<VoicePreferences>({
     voiceEnabled: true,
     voiceName: 'coral',
@@ -67,9 +69,10 @@ export function VoiceSettings() {
       const res = await fetch('/api/user/voice', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(prefs),
+      body: JSON.stringify(prefs),
       });
       if (!res.ok) throw new Error('Failed to save');
+      track('voice_settings_updated');
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } catch {
