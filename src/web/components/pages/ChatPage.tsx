@@ -1089,7 +1089,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	);
 
 	const inputArea = (
-		<div className="relative z-40 border-t border-[var(--border)] bg-[var(--background)] p-4">
+		<div className="relative z-40 shrink-0 border-t border-[var(--border)] bg-[var(--background)] p-4">
 			{messageQueue.length > 0 && (
 				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
 					<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
@@ -1591,8 +1591,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			</div>
 		) : (
 			<>
-				<div className="flex flex-1 min-w-0 overflow-hidden">
-					{conversationView}
+<div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
+				{conversationView}
 
 					{/* Todo sidebar */}
 					{showTodos && todos.length > 0 && (

@@ -1,6 +1,24 @@
 @import "tailwindcss";
 @import "@daveyplate/better-auth-ui/css";
 
+/* Mobile Safari: prevent rubber-band bouncing and ensure proper scroll behavior */
+html, body {
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* GPU-accelerate scroll containers for smoother scrolling */
+[data-stick-to-bottom],
+.scroll-container {
+  -webkit-overflow-scrolling: touch;
+  will-change: transform;
+}
+
+/* Prevent scroll chaining on all overflow containers */
+.overscroll-contain {
+  overscroll-behavior-y: contain;
+}
+
 @theme {
   /* Agentuity Brand Colors (Cyan) */
   --color-cyan-50: oklch(0.9812 0.027 196.72);

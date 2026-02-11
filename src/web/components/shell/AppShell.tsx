@@ -70,7 +70,7 @@ export function AppShell({
   }, []);
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
+    <div className="flex h-[100dvh] bg-[var(--background)]">
 		{isSidebarOpen && (
 			<button
 				type="button"
@@ -112,7 +112,7 @@ export function AppShell({
             <Menu className="h-5 w-5" />
           </Button>
         </div>
-        <div className="flex-1 min-h-0 overflow-auto">
+        <div className="flex-1 min-h-0 overflow-hidden">
           {children}
         </div>
       </main>
