@@ -65,6 +65,8 @@ import { Loader } from '../ai-elements/loader';
 import { useToast } from '../ui/toast';
 import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
+import { useVoiceInput } from '../../hooks/useVoiceInput';
+import { MicButton } from '../ui/MicButton';
 import { cn } from '../../lib/utils';
 import { useUrlState } from '../../hooks/useUrlState';
 
@@ -309,6 +311,24 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+	const handleVoiceTranscript = useCallback((text: string) => {
+		setInputText((prev) => (prev ? `${prev} ${text}` : text));
+	}, []);
+
+	const {
+		isListening,
+		isProcessing,
+		isSupported: voiceSupported,
+		toggleListening,
+		error: voiceError,
+	} = useVoiceInput({ onTranscript: handleVoiceTranscript });
+
+	useEffect(() => {
+		if (voiceError) {
+			toast({ type: 'error', message: voiceError });
+		}
+	}, [voiceError, toast]);
 
 	const formatFileSize = useCallback((size: number) => {
 		if (size < 1024) return `${size} B`;
@@ -1177,6 +1197,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 							>
 								<Paperclip className="h-4 w-4" />
 							</Button>
+							{session.status === 'active' && (
+								<MicButton
+									isListening={isListening}
+									isProcessing={isProcessing}
+									isSupported={voiceSupported}
+									onClick={toggleListening}
+								/>
+							)}
 							<PromptInputSubmit
 								disabled={submitDisabled}
 								status={isBusy ? 'streaming' : 'ready'}
@@ -1579,6 +1607,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 								>
 									<Paperclip className="h-4 w-4" />
 								</Button>
+								{session.status === 'active' && (
+									<MicButton
+										isListening={isListening}
+										isProcessing={isProcessing}
+										isSupported={voiceSupported}
+										onClick={toggleListening}
+									/>
+								)}
 								<PromptInputSubmit
 									disabled={submitDisabled}
 									status={isBusy ? 'streaming' : 'ready'}
