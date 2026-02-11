@@ -67,14 +67,9 @@ import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { useAudioPlayback } from '../../hooks/useAudioPlayback';
-import { useVoiceSession } from '../../hooks/useVoiceSession';
 import { MicButton } from '../ui/MicButton';
-import { LeadPersonaView } from '../voice/LeadPersonaView';
 import { cn } from '../../lib/utils';
 import { useUrlState } from '../../hooks/useUrlState';
-import { useEventAccumulator } from '../../hooks/useEventAccumulator';
-import type { AccumulatedEvent } from '../../hooks/useEventAccumulator';
-import { useNarrator } from '../../hooks/useNarrator';
 
 interface ChatPageProps {
   sessionId: string;
@@ -318,24 +313,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-	// Refs to bridge ordering: handleVoiceTranscript is created before sendMessage,
-	// so we use refs to let the callback reach sendMessage/addTranscript later.
-	const viewModeRef = useRef(viewMode);
-	useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
-
-	const leadSendRef = useRef<((text: string) => void) | null>(null);
-
 	const handleVoiceTranscript = useCallback((text: string) => {
-		if (viewModeRef.current === 'lead' && leadSendRef.current) {
-			// Lead mode: show in transcript + auto-send as a message
-			leadSendRef.current(text);
-		} else {
-			// Chat/IDE mode: append to text input (dictation)
-			setInputText((prev) => (prev ? `${prev} ${text}` : text));
-		}
+		setInputText((prev) => (prev ? `${prev} ${text}` : text));
 	}, []);
-
-	const isLeadModeForVoice = viewMode === 'lead';
 
 	const {
 		isListening,
@@ -345,7 +325,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		error: voiceError,
 	} = useVoiceInput({
 		onTranscript: handleVoiceTranscript,
-		continuous: !isLeadModeForVoice,
+		continuous: true,
 	});
 
 	useEffect(() => {
@@ -354,32 +334,31 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		}
 	}, [voiceError, toast]);
 
-	const { isSpeaking, enqueue: enqueueAudio, clearQueue: clearAudioQueue } = useAudioPlayback();
+	const { enqueue: enqueueAudio, clearQueue: clearAudioQueue } = useAudioPlayback();
 
-	const {
-		personaState,
-		lastSpokenText,
-		transcript: voiceTranscript,
-		addTranscript,
-		speakText,
-	} = useVoiceSession(
-		{
-			sessionId,
-			isSessionBusy: sessionStatus.type === 'busy',
-			isListening,
-			isProcessing,
-			isSpeaking,
-		},
-		{ enqueue: enqueueAudio }
-	);
+	// Narrator toggle
+	const [narratorEnabled, setNarratorEnabled] = useState(false);
 
-	const lastSpokenMessageIdRef = useRef<string | null>(null);
+	const speakTextRef = useRef<(text: string) => Promise<void>>(undefined);
+	speakTextRef.current = async (text: string) => {
+		if (!text.trim()) return;
+		try {
+			const res = await fetch('/api/voice/speech', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ text, voice: 'alloy' }),
+			});
+			if (!res.ok) return;
+			const data = await res.json() as { audio?: { base64: string; mimeType: string } };
+			if (data.audio) enqueueAudio(data.audio);
+		} catch {
+			// Silent fail
+		}
+	};
 
 	// Stop audio playback when user starts speaking (interruption)
 	useEffect(() => {
-		if (isListening) {
-			clearAudioQueue();
-		}
+		if (isListening) clearAudioQueue();
 	}, [isListening, clearAudioQueue]);
 
 	const formatFileSize = useCallback((size: number) => {
@@ -606,17 +585,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		void sendMessage(next);
 	}, [isBusy, isSending, messageQueue, sendMessage]);
 
-	// Wire up Lead mode voice → auto-send. This runs after sendMessage and
-	// addTranscript are defined, updating the ref that handleVoiceTranscript reads.
-	useEffect(() => {
-		leadSendRef.current = (text: string) => {
-			addTranscript('user', text);
-			void sendMessage({
-				text,
-				model: selectedModel,
-			});
-		};
-	}, [addTranscript, sendMessage, selectedModel]);
+
 
   const handleFork = async () => {
     if (isForking) return;
@@ -727,137 +696,87 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		|| isSending
 		|| (!inputText.trim() && attachments.length === 0);
 
-	// Narrator pipeline: events -> narrate -> TTS (Lead mode only)
-	const isLeadMode = viewMode === 'lead';
+	// Narrator: on busy→idle transition, speak the assistant's response
+	const wasBusyRef = useRef(false);
+	const lastNarratedMessageIdRef = useRef<string | null>(null);
 
-	const handleNarration = useCallback((text: string) => {
-		void speakText(text);
-	}, [speakText]);
-
-	const { narrate, clearHistory: clearNarratorHistory } = useNarrator({
-		enabled: isLeadMode,
-		onNarration: handleNarration,
-	});
-
-	const handleEventBatch = useCallback((events: AccumulatedEvent[]) => {
-		const midTaskEvents = events.filter(e => e.type !== 'complete');
-		if (midTaskEvents.length === 0) return;
-
-		// Send to narrator agent (Haiku) for a natural mid-task phrase
-		void narrate(midTaskEvents);
-	}, [narrate]);
-
-	// Get parts of the current streaming assistant message for accumulation
-	// Memoize to prevent useEventAccumulator from re-running on every render
-	const currentParts = useMemo(
-		() => lastAssistantMessage ? getDisplayParts(lastAssistantMessage.id) : [],
-		[lastAssistantMessage, getDisplayParts]
-	);
-
-	useEventAccumulator({
-		enabled: isLeadMode && session.status === 'active',
-		parts: currentParts,
-		isBusy,
-		onBatch: handleEventBatch,
-	});
-
-	// Lead mode: speak the assistant's actual text when session completes
 	useEffect(() => {
-		if (!isLeadMode || isBusy) return;
+		if (!narratorEnabled) {
+			wasBusyRef.current = isBusy;
+			return;
+		}
 
-		// Find the last assistant message
-		const lastAssistant = displayMessages.length > 0
-			? [...displayMessages].reverse().find(m => m.role === 'assistant')
-			: null;
+		// Detect busy → idle transition
+		if (wasBusyRef.current && !isBusy) {
+			const lastAssistant = displayMessages.length > 0
+				? [...displayMessages].reverse().find(m => m.role === 'assistant')
+				: null;
 
-		if (!lastAssistant || lastAssistant.id === lastSpokenMessageIdRef.current) return;
+			if (lastAssistant && lastAssistant.id !== lastNarratedMessageIdRef.current) {
+				lastNarratedMessageIdRef.current = lastAssistant.id;
 
-		// Mark as spoken immediately to prevent double-speak
-		lastSpokenMessageIdRef.current = lastAssistant.id;
+				const parts = getDisplayParts(lastAssistant.id);
+				const textContent = parts
+					.filter(p => p.type === 'text')
+					.map(p => (p as { text: string }).text || '')
+					.join('\n')
+					.replace(/```[\s\S]*?```/g, '')
+					.replace(/\*\*([^*]+)\*\*/g, '$1')
+					.replace(/`([^`]+)`/g, '$1')
+					.replace(/#{1,6}\s/g, '')
+					.replace(/\n{2,}/g, '. ')
+					.replace(/\s{2,}/g, ' ')
+					.trim();
 
-		// Small delay to ensure all text parts are received
-		const timer = setTimeout(() => {
-			const parts = getDisplayParts(lastAssistant.id);
-			const textContent = parts
-				.filter(p => p.type === 'text')
-				.map(p => (p as { text: string }).text || '')
-				.join('\n')
-				.replace(/```[\s\S]*?```/g, '') // Strip code blocks
-				.replace(/\*\*([^*]+)\*\*/g, '$1') // Strip bold markdown
-				.replace(/`([^`]+)`/g, '$1') // Strip inline code backticks
-				.replace(/#{1,6}\s/g, '') // Strip heading markers
-				.replace(/\n{2,}/g, '. ') // Collapse multiple newlines into sentence breaks
-				.replace(/\s{2,}/g, ' ') // Collapse whitespace
-				.trim();
+				if (!textContent) {
+					wasBusyRef.current = isBusy;
+					return;
+				}
 
-			if (textContent) {
-				// Build conversation context for the agent
-				const recentChat = displayMessages.slice(-6).map(m => {
-					const msgParts = getDisplayParts(m.id);
-					const msgText = msgParts
-						.filter(p => p.type === 'text')
-						.map(p => (p as { text: string }).text || '')
-						.join('\n')
-						.replace(/```[\s\S]*?```/g, '')
-						.trim()
-						.slice(0, 500);
-					return { role: m.role, text: msgText };
-				}).filter(m => m.text.length > 0);
-
-				// Short responses: speak directly. Long responses: condense via LLM first.
 				if (textContent.length < 200) {
-					void speakText(textContent);
+					void speakTextRef.current?.(textContent);
 				} else {
-					// Condense for speech with conversation awareness
+					const recentChat = displayMessages.slice(-6).map(m => {
+						const msgParts = getDisplayParts(m.id);
+						const msgText = msgParts
+							.filter(p => p.type === 'text')
+							.map(p => (p as { text: string }).text || '')
+							.join('\n')
+							.replace(/```[\s\S]*?```/g, '')
+							.trim()
+							.slice(0, 500);
+						return { role: m.role, text: msgText };
+					}).filter(m => m.text.length > 0);
+
 					fetch('/api/voice/condense', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
-							text: textContent.slice(0, 3000),
+							text: textContent.slice(0, 5000),
 							conversationHistory: recentChat,
 						}),
 					})
 						.then(res => res.json())
 						.then((data: { text?: string }) => {
-							if (data.text) {
-								void speakText(data.text);
-							}
+							if (data.text) void speakTextRef.current?.(data.text);
 						})
 						.catch(() => {
-							// Fallback: speak truncated original
-							void speakText(textContent.slice(0, 400));
+							void speakTextRef.current?.(textContent.slice(0, 600));
 						});
 				}
 			}
-		}, 500);
-
-		return () => clearTimeout(timer);
-	}, [isLeadMode, isBusy, displayMessages, getDisplayParts, speakText]);
-
-	// Clear narrator history when switching away from Lead mode
-	useEffect(() => {
-		if (!isLeadMode) {
-			clearNarratorHistory();
 		}
-	}, [isLeadMode, clearNarratorHistory]);
 
-	// Keyboard shortcut: V to toggle Lead mode (only when not typing)
+		wasBusyRef.current = isBusy;
+	}, [narratorEnabled, isBusy, displayMessages, getDisplayParts]);
+
+	// Clear audio on session change
 	useEffect(() => {
-		const handleKeyDown = (e: KeyboardEvent) => {
-			// Don't trigger when typing in inputs/textareas
-			const target = e.target as HTMLElement;
-			if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
-			if (e.metaKey || e.ctrlKey || e.altKey) return;
-
-			if (e.key === 'v' || e.key === 'V') {
-				e.preventDefault();
-				setUrlState({ v: viewMode === 'lead' ? 'chat' : 'lead' });
-			}
-		};
-
-		window.addEventListener('keydown', handleKeyDown);
-		return () => window.removeEventListener('keydown', handleKeyDown);
-	}, [viewMode, setUrlState]);
+		if (sessionId) {
+			clearAudioQueue();
+			lastNarratedMessageIdRef.current = null;
+		}
+	}, [sessionId, clearAudioQueue]);
 
 	const copyMessage = useCallback(
 		(message: ChatMessage) => {
@@ -1394,6 +1313,24 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 								<Paperclip className="h-4 w-4" />
 							</Button>
 							{session.status === 'active' && (
+								<Button
+									variant="ghost"
+									size="icon"
+									type="button"
+									onClick={() => setNarratorEnabled(prev => !prev)}
+									className={cn("h-9 w-9", narratorEnabled && "text-[var(--primary)]")}
+									aria-label={narratorEnabled ? 'Disable voice narrator' : 'Enable voice narrator'}
+									title={narratorEnabled ? 'Voice narrator on' : 'Voice narrator off'}
+								>
+									<span className={cn(
+										"block h-2.5 w-2.5 rounded-full border-2 transition-colors",
+										narratorEnabled
+											? "border-[var(--primary)] bg-[var(--primary)]"
+											: "border-[var(--muted-foreground)] bg-transparent"
+									)} />
+								</Button>
+							)}
+							{session.status === 'active' && (
 								<MicButton
 									isListening={isListening}
 									isProcessing={isProcessing}
@@ -1640,14 +1577,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={() => setUrlState({ v: 'lead' })}
-						className={`h-7 px-2 text-xs ${viewMode === 'lead' ? 'bg-[var(--background)] shadow-sm' : ''}`}
-					>
-						Lead
-					</Button>
-					<Button
-						variant="ghost"
-						size="sm"
 						onClick={() => setUrlState({ v: 'ide' })}
 						className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
 					>
@@ -1812,6 +1741,24 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									<Paperclip className="h-4 w-4" />
 								</Button>
 								{session.status === 'active' && (
+									<Button
+										variant="ghost"
+										size="icon"
+										type="button"
+										onClick={() => setNarratorEnabled(prev => !prev)}
+										className={cn("h-9 w-9", narratorEnabled && "text-[var(--primary)]")}
+										aria-label={narratorEnabled ? 'Disable voice narrator' : 'Enable voice narrator'}
+										title={narratorEnabled ? 'Voice narrator on' : 'Voice narrator off'}
+									>
+										<span className={cn(
+											"block h-2.5 w-2.5 rounded-full border-2 transition-colors",
+											narratorEnabled
+												? "border-[var(--primary)] bg-[var(--primary)]"
+												: "border-[var(--muted-foreground)] bg-transparent"
+										)} />
+									</Button>
+								)}
+								{session.status === 'active' && (
 									<MicButton
 										isListening={isListening}
 										isProcessing={isProcessing}
@@ -1829,15 +1776,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					</PromptInputProvider>
 				</div>
 			</div>
-		) : viewMode === 'lead' ? (
-			<LeadPersonaView
-				personaState={personaState}
-				isListening={isListening}
-				isProcessing={isProcessing}
-				isSupported={voiceSupported}
-				onToggleListening={toggleListening}
-				sessionActive={session.status === 'active'}
-			/>
 		) : (
 			<>
 <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">

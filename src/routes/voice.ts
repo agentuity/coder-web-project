@@ -37,7 +37,7 @@ router.post('/speech', async (c) => {
 	}
 });
 
-// POST /api/voice/condense - Generate spoken response with conversation awareness
+// POST /api/voice/condense - Generate spoken version of assistant response
 router.post('/condense', async (c) => {
 	try {
 		const body = (await c.req.json().catch(() => ({}))) as {
@@ -55,23 +55,6 @@ router.post('/condense', async (c) => {
 		return c.json(result);
 	} catch (error) {
 		c.var.logger.error('Voice condense failed', { error });
-		return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);
-	}
-});
-
-// POST /api/voice/narrate - Accept events, return conversational text
-router.post('/narrate', async (c) => {
-	try {
-		const body = (await c.req.json().catch(() => ({}))) as {
-			events?: unknown[];
-		};
-		const result = await leadNarrator.run({
-			action: 'narrate',
-			events: body.events,
-		});
-		return c.json(result);
-	} catch (error) {
-		c.var.logger.error('Voice narrate failed', { error });
 		return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);
 	}
 });

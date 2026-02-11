@@ -154,7 +154,7 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 	}
 
 	return (
-		<div className="p-6 max-w-2xl">
+		<div className="h-full overflow-y-auto p-6 max-w-2xl">
 			{/* Header */}
 			<div className="flex items-center gap-2 mb-6">
 				<Settings className="h-5 w-5 text-[var(--primary)]" />
@@ -321,9 +321,9 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 
 			{/* Voice */}
 			<Card className="p-4 mb-6">
-				<h3 className="text-sm font-medium text-[var(--foreground)] mb-4">Voice (Lead Mode)</h3>
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-4">Voice (Narrator)</h3>
 				<p className="text-xs text-[var(--muted-foreground)] mb-4">
-					Configure voice input and text-to-speech for Lead mode conversations.
+					Configure voice input and text-to-speech for narrator conversations.
 				</p>
 				<VoiceSettings />
 			</Card>

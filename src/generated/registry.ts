@@ -10,31 +10,31 @@ import type { InferInput, InferOutput } from '@agentuity/core';
 
 /**
  * Input type for LeadNarrator agent
- * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
+ * Voice agent — generates spoken responses from assistant text
  */
 export type LeadNarratorInput = InferInput<typeof leadNarrator['inputSchema']>;
 
 /**
  * Output type for LeadNarrator agent
- * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
+ * Voice agent — generates spoken responses from assistant text
  */
 export type LeadNarratorOutput = InferOutput<typeof leadNarrator['outputSchema']>;
 
 /**
  * Input schema type for LeadNarrator agent
- * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
+ * Voice agent — generates spoken responses from assistant text
  */
 export type LeadNarratorInputSchema = typeof leadNarrator['inputSchema'];
 
 /**
  * Output schema type for LeadNarrator agent
- * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
+ * Voice agent — generates spoken responses from assistant text
  */
 export type LeadNarratorOutputSchema = typeof leadNarrator['outputSchema'];
 
 /**
  * Agent type for LeadNarrator
- * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
+ * Voice agent — generates spoken responses from assistant text
  */
 export type LeadNarratorAgent = AgentRunner<
 	LeadNarratorInputSchema,
@@ -71,7 +71,7 @@ export type LeadNarratorAgent = AgentRunner<
 export const AgentDefinitions = {
 	/**
 	 * LeadNarrator
-	 * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
+	 * Voice agent — generates spoken responses from assistant text
 	 * @type {LeadNarratorAgent}
 	 */
 	leadNarrator,

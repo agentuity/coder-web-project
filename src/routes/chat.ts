@@ -173,17 +173,40 @@ api.post('/:id/messages', async (c) => {
 	}
 
 	try {
-		if (body.command) {
-			// Slash command → use the command endpoint (POST /session/:id/command)
+		// Determine the agent name from the command (e.g., "/agentuity-coder" → "agentuity-coder")
+		const agentName = body.command ? body.command.replace(/^\//, '') : null;
+
+		// Check if this session already has an active agent (stored in DB)
+		const sessionAgent = session.agent;
+
+		if (agentName && agentName !== sessionAgent) {
+			// First time using this agent in this session → use command endpoint to initialize
 			await client.session.command({
 				path: { id: session.opencodeSessionId },
 				body: {
-					command: body.command.replace(/^\//, ''),
+					command: agentName,
 					arguments: body.text,
 				},
 			});
+
+			// Store the agent on the session so subsequent messages use promptAsync
+			await db
+				.update(chatSessions)
+				.set({ agent: agentName, updatedAt: new Date() })
+				.where(eq(chatSessions.id, session.id));
+		} else if (sessionAgent && (agentName === sessionAgent || agentName)) {
+			// Agent already initialized → use promptAsync with agent field (no preamble repeat)
+			const [providerID, modelID] = body.model ? body.model.split('/') : [];
+			await client.session.promptAsync({
+				path: { id: session.opencodeSessionId },
+				body: {
+					parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
+					...(providerID && modelID ? { model: { providerID, modelID } } : {}),
+					agent: sessionAgent,
+				},
+			});
 		} else {
-			// Regular chat → use promptAsync
+			// No command, no session agent → regular chat via promptAsync
 			const [providerID, modelID] = body.model ? body.model.split('/') : [];
 			await client.session.promptAsync({
 				path: { id: session.opencodeSessionId },

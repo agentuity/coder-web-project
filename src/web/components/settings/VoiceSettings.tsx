@@ -131,7 +131,7 @@ export function VoiceSettings() {
           onChange={e => setPrefs(p => ({ ...p, voiceAutoSpeak: e.target.checked }))}
           className="rounded border-[var(--border)]"
         />
-        <span className="text-sm text-[var(--foreground)]">Auto-speak in Lead mode</span>
+        <span className="text-sm text-[var(--foreground)]">Auto-speak in narrator mode</span>
       </label>
 
       {/* Voice selection */}
