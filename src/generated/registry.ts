@@ -4,6 +4,9 @@ import leadNarrator from '../agent/lead-narrator.js';
 import type { AgentRunner } from '@agentuity/runtime';
 import type { InferInput, InferOutput } from '@agentuity/core';
 
+// Eval file imports (side-effect imports to register evals via createEval)
+import '../agent/eval.js';
+
 // ============================================================================
 // Schema Type Exports
 // ============================================================================

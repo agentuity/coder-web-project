@@ -15,6 +15,19 @@ import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
 import { safety, conciseness, selfReference, roleAdherence } from '@agentuity/evals';
 
+// Fast, intelligent model for LLM-as-judge evals
+const EVAL_MODEL = openai('gpt-5-mini');
+
+/**
+ * Transforms narrator input to a human-readable request string for preset evals.
+ * Never sends raw base64 audio to LLM judges — describes the action instead.
+ */
+function describeInput(input: { action: string; text?: string; audio?: string }): string {
+	if (input.text) return input.text;
+	if (input.action === 'transcribe') return '[audio transcription request]';
+	return `voice ${input.action} action`;
+}
+
 // ---------------------------------------------------------------------------
 // Eval 1: Condensing Quality (LLM-as-Judge)
 // Tests: Does the condense/narrate output sound like natural spoken language?
@@ -32,7 +45,7 @@ export const condensingQuality = agent.createEval('condensing-quality', {
 		}
 
 		const { object } = await generateObject({
-			model: openai('gpt-4o-mini'),
+			model: EVAL_MODEL,
 			schema: z.object({
 				score: z.number().min(0).max(1),
 				reason: z.string(),
@@ -81,7 +94,7 @@ export const condensingCompleteness = agent.createEval('condensing-completeness'
 		}
 
 		const { object } = await generateObject({
-			model: openai('gpt-4o-mini'),
+			model: EVAL_MODEL,
 			schema: z.object({
 				score: z.number().min(0).max(1),
 				reason: z.string(),
@@ -128,7 +141,7 @@ export const firstPersonVoice = agent.createEval('first-person-voice', {
 		}
 
 		const { object } = await generateObject({
-			model: openai('gpt-4o-mini'),
+			model: EVAL_MODEL,
 			schema: z.object({
 				passed: z.boolean(),
 				reason: z.string(),
@@ -199,7 +212,7 @@ export const safetyCheck = agent.createEval(
 	safety({
 		middleware: {
 			transformInput: (input) => ({
-				request: input.text || input.audio || 'voice action',
+				request: describeInput(input),
 			}),
 			transformOutput: (output) => ({
 				response: output.text || (output.audio ? '[audio output]' : '[empty]'),
@@ -217,7 +230,7 @@ export const concisenessCheck = agent.createEval(
 		threshold: 0.6, // Lower threshold since condensed text is already optimized for speech
 		middleware: {
 			transformInput: (input) => ({
-				request: input.text || 'voice action',
+				request: describeInput(input),
 			}),
 			transformOutput: (output) => ({
 				response: output.text || '[audio only]',
@@ -234,7 +247,7 @@ export const selfReferenceCheck = agent.createEval(
 	selfReference({
 		middleware: {
 			transformInput: (input) => ({
-				request: input.text || 'voice action',
+				request: describeInput(input),
 			}),
 			transformOutput: (output) => ({
 				response: output.text || '[audio only]',
@@ -252,7 +265,7 @@ export const roleAdherenceCheck = agent.createEval(
 		threshold: 0.7,
 		middleware: {
 			transformInput: (input) => ({
-				request: input.text || 'voice action',
+				request: describeInput(input),
 				context: 'You are a coding AI developer assistant that speaks in first person about code tasks.',
 			}),
 			transformOutput: (output) => ({
