@@ -734,6 +734,24 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		}
 	}, [isLeadMode, clearNarratorHistory]);
 
+	// Keyboard shortcut: V to toggle Lead mode (only when not typing)
+	useEffect(() => {
+		const handleKeyDown = (e: KeyboardEvent) => {
+			// Don't trigger when typing in inputs/textareas
+			const target = e.target as HTMLElement;
+			if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+			if (e.metaKey || e.ctrlKey || e.altKey) return;
+
+			if (e.key === 'v' || e.key === 'V') {
+				e.preventDefault();
+				setUrlState({ v: viewMode === 'lead' ? 'chat' : 'lead' });
+			}
+		};
+
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [viewMode, setUrlState]);
+
 	const copyMessage = useCallback(
 		(message: ChatMessage) => {
 			const parts = getDisplayParts(message.id);

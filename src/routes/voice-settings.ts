@@ -15,12 +15,14 @@ const DEFAULT_VOICE_SETTINGS = {
 };
 
 function normalizeVoiceSettings(settings?: typeof userSettings.$inferSelect) {
+	const rawSpeed = settings?.voiceSpeed ?? DEFAULT_VOICE_SETTINGS.voiceSpeed;
+	const speed = typeof rawSpeed === 'string' ? parseFloat(rawSpeed) : rawSpeed;
 	return {
 		voiceEnabled: settings?.voiceEnabled ?? DEFAULT_VOICE_SETTINGS.voiceEnabled,
 		voiceModel: settings?.voiceModel ?? DEFAULT_VOICE_SETTINGS.voiceModel,
 		voiceName: settings?.voiceName ?? DEFAULT_VOICE_SETTINGS.voiceName,
 		voiceAutoSpeak: settings?.voiceAutoSpeak ?? DEFAULT_VOICE_SETTINGS.voiceAutoSpeak,
-		voiceSpeed: settings?.voiceSpeed ?? DEFAULT_VOICE_SETTINGS.voiceSpeed,
+		voiceSpeed: Number.isFinite(speed) ? speed : 1.0,
 		preferredMic: settings?.preferredMic ?? DEFAULT_VOICE_SETTINGS.preferredMic,
 	};
 }
@@ -49,7 +51,7 @@ router.put('/', async (c) => {
 	if (typeof body.voiceModel === 'string') updates.voiceModel = body.voiceModel;
 	if (typeof body.voiceName === 'string') updates.voiceName = body.voiceName;
 	if (typeof body.voiceAutoSpeak === 'boolean') updates.voiceAutoSpeak = body.voiceAutoSpeak;
-	if (typeof body.voiceSpeed === 'string') updates.voiceSpeed = body.voiceSpeed;
+	if (body.voiceSpeed !== undefined) updates.voiceSpeed = String(body.voiceSpeed);
 	if (typeof body.preferredMic === 'string' || body.preferredMic === null) {
 		updates.preferredMic = body.preferredMic;
 	}

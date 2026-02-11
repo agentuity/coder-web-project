@@ -1,5 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+// iOS Safari requires AudioContext to be resumed on user gesture
+let audioContextResumed = false;
+
+function ensureAudioContext() {
+  if (audioContextResumed) return;
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    if (ctx.state === 'suspended') {
+      ctx.resume();
+    }
+    audioContextResumed = true;
+  } catch {
+    // Not available
+  }
+}
+
+// Resume on first user interaction
+if (typeof window !== 'undefined') {
+  const resumeOnGesture = () => {
+    ensureAudioContext();
+    window.removeEventListener('click', resumeOnGesture);
+    window.removeEventListener('touchstart', resumeOnGesture);
+  };
+  window.addEventListener('click', resumeOnGesture, { once: true });
+  window.addEventListener('touchstart', resumeOnGesture, { once: true });
+}
+
 interface AudioSegment {
   base64: string;
   mimeType: string;
@@ -38,6 +65,7 @@ export function useAudioPlayback(): UseAudioPlaybackReturn {
     const blob = new Blob([byteArray], { type: next.mimeType });
     const url = URL.createObjectURL(blob);
 
+    ensureAudioContext();
     const audio = new Audio(url);
     currentAudioRef.current = audio;
 

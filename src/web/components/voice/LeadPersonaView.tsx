@@ -41,25 +41,28 @@ export const LeadPersonaView = memo(function LeadPersonaView({
   return (
     <div className="flex flex-1 flex-col items-center min-h-0 overflow-hidden bg-[var(--background)]">
       {/* Persona area -- centered, takes most space */}
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 p-6 min-h-0">
+      <section className="flex flex-1 flex-col items-center justify-center gap-4 p-6 min-h-0" aria-label="Lead AI persona">
         <Persona
           state={personaState}
           variant="command"
           className="size-40 md:size-52"
         />
-        <p className="text-xs text-[var(--muted-foreground)] tracking-wide uppercase">
+        <output 
+          className="text-xs text-[var(--muted-foreground)] tracking-wide uppercase"
+          aria-live="polite"
+        >
           {stateLabel}
-        </p>
+        </output>
         {lastSpokenText && (
           <p className="max-w-sm text-center text-sm text-[var(--foreground)] leading-relaxed">
             "{lastSpokenText}"
           </p>
         )}
-      </div>
+      </section>
 
       {/* Transcript -- scrollable, compact */}
       {transcript.length > 0 && (
-        <div className="w-full max-w-md px-4 pb-2 max-h-32 overflow-y-auto">
+        <div className="w-full max-w-md px-4 pb-2 max-h-32 overflow-y-auto" role="log" aria-label="Voice conversation transcript">
           <div className="space-y-1">
             {transcript.map((line, i) => (
               <p

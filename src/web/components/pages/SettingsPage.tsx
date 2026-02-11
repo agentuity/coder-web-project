@@ -3,6 +3,7 @@ import { Settings, Save, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { GitHubSettings } from '../settings/GitHubSettings';
+import { VoiceSettings } from '../settings/VoiceSettings';
 
 interface Workspace {
 	id: string;
@@ -317,6 +318,15 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 					{settingsError}
 				</div>
 			)}
+
+			{/* Voice */}
+			<Card className="p-4 mb-6">
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-4">Voice (Lead Mode)</h3>
+				<p className="text-xs text-[var(--muted-foreground)] mb-4">
+					Configure voice input and text-to-speech for Lead mode conversations.
+				</p>
+				<VoiceSettings />
+			</Card>
 
 			{/* GitHub */}
 			<Card className="p-4 mt-8 mb-6">

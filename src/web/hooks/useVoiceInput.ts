@@ -87,6 +87,8 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputRetur
 		recognition.onerror = (event: Event & { error: string }) => {
 			if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
 				setError('Microphone access denied. Please allow microphone access in your browser settings.');
+			} else if (event.error === 'no-speech') {
+				// Silence detected — not an error, just stop
 			} else if (event.error !== 'aborted') {
 				setError('Voice recognition error. Please try again.');
 			}
@@ -191,7 +193,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputRetur
 			const message =
 				err instanceof DOMException && err.name === 'NotAllowedError'
 					? 'Microphone access denied. Please allow microphone access in your browser settings.'
-					: 'Failed to access microphone.';
+					: 'Failed to access microphone. Check that your device has a working microphone.';
 			setError(message);
 		}
 	}, [mediaRecorderMime]);
