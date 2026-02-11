@@ -72,6 +72,9 @@ import { MicButton } from '../ui/MicButton';
 import { LeadPersonaView } from '../voice/LeadPersonaView';
 import { cn } from '../../lib/utils';
 import { useUrlState } from '../../hooks/useUrlState';
+import { useEventAccumulator } from '../../hooks/useEventAccumulator';
+import type { AccumulatedEvent } from '../../hooks/useEventAccumulator';
+import { useNarrator } from '../../hooks/useNarrator';
 
 interface ChatPageProps {
   sessionId: string;
@@ -692,31 +695,40 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		|| isSending
 		|| (!inputText.trim() && attachments.length === 0);
 
-	// Auto-speak new assistant messages in Lead mode
-	const lastSpokenMessageRef = useRef<string | null>(null);
+	// Narrator pipeline: events -> narrate -> TTS (Lead mode only)
+	const isLeadMode = viewMode === 'lead';
 
+	const handleNarration = useCallback((text: string) => {
+		void speakText(text);
+	}, [speakText]);
+
+	const { narrate, clearHistory: clearNarratorHistory } = useNarrator({
+		enabled: isLeadMode,
+		onNarration: handleNarration,
+	});
+
+	const handleEventBatch = useCallback((events: AccumulatedEvent[]) => {
+		void narrate(events);
+	}, [narrate]);
+
+	// Get parts of the current streaming assistant message for accumulation
+	const currentParts = lastAssistantMessage
+		? getDisplayParts(lastAssistantMessage.id)
+		: [];
+
+	useEventAccumulator({
+		enabled: isLeadMode && session.status === 'active',
+		parts: currentParts,
+		isBusy,
+		onBatch: handleEventBatch,
+	});
+
+	// Clear narrator history when switching away from Lead mode
 	useEffect(() => {
-		if (viewMode !== 'lead') return;
-		if (!lastAssistantMessage) return;
-		if (lastAssistantMessage.id === lastSpokenMessageRef.current) return;
-		if (isBusy) return; // Wait for message to complete
-
-		// Get the text content of the last assistant message
-		const parts = getDisplayParts(lastAssistantMessage.id);
-		const textContent = parts
-			.filter((p) => p.type === 'text')
-			.map((p) => (p as { text: string }).text)
-			.join(' ')
-			.trim();
-
-		if (!textContent) return;
-
-		lastSpokenMessageRef.current = lastAssistantMessage.id;
-
-		// Truncate for TTS (keep it conversational, not reading entire responses)
-		const toSpeak = textContent.length > 500 ? textContent.slice(0, 497) + '...' : textContent;
-		void speakText(toSpeak);
-	}, [viewMode, lastAssistantMessage, isBusy, getDisplayParts, speakText]);
+		if (!isLeadMode) {
+			clearNarratorHistory();
+		}
+	}, [isLeadMode, clearNarratorHistory]);
 
 	const copyMessage = useCallback(
 		(message: ChatMessage) => {
