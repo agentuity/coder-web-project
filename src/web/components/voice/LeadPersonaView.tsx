@@ -92,7 +92,7 @@ export const LeadPersonaView = memo(function LeadPersonaView({
         {isSupported && sessionActive && (
           <div className="relative">
             {isListening && (
-              <div className="absolute inset-0 rounded-full animate-ping bg-red-500/20" />
+              <div className="absolute inset-0 rounded-full animate-ping bg-red-500/20 pointer-events-none" />
             )}
             <Button
               variant={isListening ? 'destructive' : 'default'}

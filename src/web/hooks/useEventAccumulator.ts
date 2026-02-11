@@ -127,6 +127,19 @@ export function useEventAccumulator(options: UseEventAccumulatorOptions) {
             timerRef.current = setTimeout(flush, 3000);
           }
         }
+      } else if (part.type === 'text') {
+        // Extract text content for narrator context
+        if (!processedPartsRef.current.has(part.id) && (part as { text?: string }).text) {
+          processedPartsRef.current.add(part.id);
+          const textContent = ((part as { text?: string }).text || '').slice(0, 300);
+          if (textContent.length > 0) {
+            accumulatorRef.current.push({
+              type: 'text',
+              summary: textContent,
+              timestamp: Date.now(),
+            });
+          }
+        }
       }
     }
   }, [enabled, parts, flush]);

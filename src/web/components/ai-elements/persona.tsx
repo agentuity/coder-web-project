@@ -242,8 +242,12 @@ export const Persona: FC<PersonaProps> = memo(
     const [ready, setReady] = useState(false);
 
     useEffect(() => {
-      const timer = setTimeout(() => setReady(true), 150);
-      return () => clearTimeout(timer);
+      const delay = import.meta.env?.DEV ? 500 : 150;
+      const timer = setTimeout(() => setReady(true), delay);
+      return () => {
+        clearTimeout(timer);
+        setReady(false);
+      };
     }, []);
 
     if (!ready) {

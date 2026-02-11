@@ -11,20 +11,26 @@ import { z } from 'zod';
 const NARRATOR_SYSTEM_PROMPT = `You are "Lead" — the Lead Developer on the Agentuity Coder team.
 You're working directly with the user on their coding project. You watch a coding AI work in real-time and translate what's happening into natural conversation.
 
+You have access to:
+- Tool events: what the coding AI is doing (file edits, commands, builds, tests)
+- The actual conversation: what the user asked and what the AI replied
+
 Your job is to:
 - Give brief, natural voice updates on what's happening
-- Summarize technical changes in plain language  
-- Ask the user questions when clarification is needed
+- Answer the user's questions based on the conversation context
+- Summarize technical changes in plain language
 - Celebrate wins and explain problems
 - Keep updates SHORT (1-2 sentences max) for natural conversation flow
 - Sound like a friendly, competent colleague — not a robot
+- When the user asks you to explain something, reference the actual code changes and assistant responses
 
 You do NOT:
 - Read code verbatim
 - Give long technical explanations unless asked
 - Repeat yourself
 - Use filler words excessively
-- Sound overly enthusiastic or corporate`;
+- Sound overly enthusiastic or corporate
+- Say generic things like "we're done" when the user asked a specific question`;
 
 const agent = createAgent('LeadNarrator', {
 	description:
@@ -34,15 +40,19 @@ const agent = createAgent('LeadNarrator', {
 			action: z.enum(['narrate', 'transcribe', 'speak']),
 			events: z.array(z.any()).optional(),
 			context: z.string().optional(),
-			conversationHistory: z
-				.array(
-					z.object({
-						role: z.enum(['user', 'assistant']),
-						content: z.string(),
-					})
-				)
-				.optional(),
-			audio: z.string().optional(),
+		conversationHistory: z
+			.array(
+				z.object({
+					role: z.enum(['user', 'assistant']),
+					content: z.string(),
+				})
+			)
+			.optional(),
+		chatMessages: z.array(z.object({
+			role: z.string(),
+			text: z.string(),
+		})).optional(),
+		audio: z.string().optional(),
 			text: z.string().optional(),
 			voice: z.string().optional(),
 		}),
@@ -89,20 +99,28 @@ const agent = createAgent('LeadNarrator', {
 				};
 			}
 
-			case 'narrate': {
-				if (!input.events || input.events.length === 0) {
-					return { text: '', action: 'update' as const };
-				}
+		case 'narrate': {
+			if (!input.events || input.events.length === 0) {
+				return { text: '', action: 'update' as const };
+			}
 
-				const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
-					...(input.conversationHistory || []),
-					{
-						role: 'user' as const,
-						content: `Here are the latest coding events:\n${JSON.stringify(input.events, null, 2)}${
-							input.context ? `\n\nContext: ${input.context}` : ''
-						}`,
-					},
-				];
+			// Build context from actual chat messages
+			let chatContext = '';
+			if (input.chatMessages && input.chatMessages.length > 0) {
+				chatContext = '\n\nRecent conversation:\n' + input.chatMessages
+					.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
+					.join('\n');
+			}
+
+			const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
+				...(input.conversationHistory || []),
+				{
+					role: 'user' as const,
+					content: `Here are the latest coding events:\n${JSON.stringify(input.events, null, 2)}${chatContext}${
+						input.context ? `\n\nAdditional context: ${input.context}` : ''
+					}`,
+				},
+			];
 
 				const { text } = await generateText({
 					model: anthropic('claude-sonnet-4-5'),

@@ -20,7 +20,7 @@ export function useNarrator(options: UseNarratorOptions) {
   // Keep ref in sync
   onNarrationRef.current = onNarration;
 
-  const narrate = useCallback(async (events: AccumulatedEvent[]) => {
+  const narrate = useCallback(async (events: AccumulatedEvent[], chatMessages?: Array<{role: string; text: string}>) => {
     if (!enabled || isNarratingRef.current || events.length === 0) return;
 
     isNarratingRef.current = true;
@@ -45,6 +45,7 @@ export function useNarrator(options: UseNarratorOptions) {
             role: m.role,
             content: m.content,
           })),
+          chatMessages: chatMessages,
         }),
       });
 

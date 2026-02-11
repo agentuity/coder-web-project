@@ -44,12 +44,14 @@ router.post('/narrate', async (c) => {
 			events?: unknown[];
 			context?: string;
 			conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+			chatMessages?: Array<{ role: string; text: string }>;
 		};
 		const result = await leadNarrator.run({
 			action: 'narrate',
 			events: body.events,
 			context: body.context,
 			conversationHistory: body.conversationHistory,
+			chatMessages: body.chatMessages,
 		});
 		return c.json(result);
 	} catch (error) {

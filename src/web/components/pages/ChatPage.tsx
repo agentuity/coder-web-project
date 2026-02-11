@@ -740,8 +740,21 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	});
 
 	const handleEventBatch = useCallback((events: AccumulatedEvent[]) => {
-		void narrate(events);
-	}, [narrate]);
+		// Extract recent chat context for the narrator
+		const recentMessages = displayMessages.slice(-6).map(m => {
+			const parts = getDisplayParts(m.id);
+			const textContent = parts
+				.filter(p => p.type === 'text')
+				.map(p => (p as { text: string }).text)
+				.join('');
+			return {
+				role: m.role,
+				text: textContent.slice(0, 500), // Truncate for brevity
+			};
+		}).filter(m => m.text.length > 0);
+
+		void narrate(events, recentMessages);
+	}, [narrate, displayMessages, getDisplayParts]);
 
 	// Get parts of the current streaming assistant message for accumulation
 	// Memoize to prevent useEventAccumulator from re-running on every render

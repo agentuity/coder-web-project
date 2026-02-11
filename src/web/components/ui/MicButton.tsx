@@ -26,7 +26,7 @@ export function MicButton({
 	return (
 		<div className="relative inline-flex items-center justify-center">
 			{isListening && (
-				<div className="absolute inset-0 rounded-md animate-ping bg-red-500/20" />
+				<div className="absolute inset-0 rounded-md animate-ping bg-red-500/20 pointer-events-none" />
 			)}
 			<Button
 				variant="ghost"
