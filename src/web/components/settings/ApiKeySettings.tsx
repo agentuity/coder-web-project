@@ -111,6 +111,8 @@ export function ApiKeySettings() {
 			const key = data?.key;
 			if (key) {
 				setNewlyCreatedKey(key);
+			} else {
+				setError('Key was created but could not be retrieved. Check your keys list.');
 			}
 			setNewKeyName('');
 			setShowCreate(false);
@@ -152,7 +154,9 @@ export function ApiKeySettings() {
 			setCopied(true);
 			setTimeout(() => setCopied(false), 2000);
 		} catch {
-			// Fallback: select text
+			// Clipboard API unavailable — the code element has select-all styling
+			// so users can manually select and copy
+			console.warn('Clipboard access denied, user can manually select and copy');
 		}
 	};
 
@@ -206,8 +210,8 @@ export function ApiKeySettings() {
 			)}
 
 			{/* Key list */}
-			{keys.length === 0 ? (
-				<div className="rounded-lg border border-dashed border-[var(--border)] p-6 text-center">
+		{keys.length === 0 && !error ? (
+			<div className="rounded-lg border border-dashed border-[var(--border)] p-6 text-center">
 					<Key className="h-8 w-8 mx-auto text-[var(--muted-foreground)] mb-3 opacity-50" />
 					<p className="text-sm text-[var(--muted-foreground)] mb-1">No API keys yet</p>
 					<p className="text-xs text-[var(--muted-foreground)] mb-4">

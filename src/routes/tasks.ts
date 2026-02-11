@@ -28,6 +28,7 @@ import {
 import type { SandboxContext } from '../opencode';
 import { decrypt } from '../lib/encryption';
 import { parseMetadata } from '../lib/parse-metadata';
+import { handleSessionCompletionEvent } from './chat';
 
 const api = createRouter();
 
@@ -58,9 +59,18 @@ async function getOrCreateApiWorkspace(userId: string) {
 			name: API_WORKSPACE_NAME,
 			description: 'Auto-created workspace for API-initiated tasks',
 		})
+		.onConflictDoNothing()
 		.returning();
 
-	return workspace!;
+	if (workspace) return workspace;
+
+	// Re-fetch if conflict occurred (concurrent creation race)
+	const [created] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.organizationId, userId), eq(workspaces.name, API_WORKSPACE_NAME)))
+		.limit(1);
+	return created!;
 }
 
 /**
@@ -173,6 +183,9 @@ api.post('/', async (c) => {
 			.where(eq(chatSessions.id, sessionId))
 			.limit(1);
 		session = existing;
+	}
+	if (!session) {
+		return c.json({ error: 'Failed to create task' }, 500);
 	}
 
 	// Capture context variables before async block
@@ -393,6 +406,11 @@ api.get(
 								continue;
 							}
 
+							// Detect session completion and trigger webhook (fire-and-forget)
+							handleSessionCompletionEvent(event, session.id, session.opencodeSessionId!).catch(
+								(err) => console.error('[webhook] Completion event handling failed:', err),
+							);
+
 							await stream.writeSSE({ data: JSON.stringify(event) });
 						} catch {
 							// Skip malformed events
@@ -429,7 +447,14 @@ api.delete('/:id', async (c) => {
 			sandbox: c.var.sandbox,
 			logger: c.var.logger,
 		};
-		await destroySandbox(sandboxCtx, session.sandboxId);
+		try {
+			await destroySandbox(sandboxCtx, session.sandboxId);
+		} catch (err) {
+			c.var.logger.warn('Failed to destroy sandbox, proceeding with task deletion', {
+				sandboxId: session.sandboxId,
+				error: err,
+			});
+		}
 		removeOpencodeClient(session.sandboxId);
 	}
 

@@ -7,7 +7,7 @@
 import { createRouter, sse } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
@@ -83,7 +83,7 @@ const api = createRouter();
  * Detect whether an SSE event signals session completion (session.idle).
  * When detected, update DB status to 'completed' and fire webhook if configured.
  */
-async function handleSessionCompletionEvent(
+export async function handleSessionCompletionEvent(
 	event: any,
 	sessionId: string,
 	opencodeSessionId: string,
@@ -108,12 +108,13 @@ async function handleSessionCompletionEvent(
 
 	const metadata = parseMetadata(current);
 	if (metadata.source !== 'api') return;
+	if (current.status === 'completed') return; // Already processed — prevent duplicate webhooks
 
-	// Update session status to 'completed'
+	// Update session status to 'completed' (only if still active, to win the race)
 	const [updated] = await db
 		.update(chatSessions)
 		.set({ status: 'completed', updatedAt: new Date() })
-		.where(eq(chatSessions.id, sessionId))
+		.where(and(eq(chatSessions.id, sessionId), eq(chatSessions.status, 'active')))
 		.returning();
 
 	if (!updated) return;
@@ -347,7 +348,7 @@ api.get(
 
 						// Detect session completion and trigger webhook (fire-and-forget)
 						handleSessionCompletionEvent(event, session.id, session.opencodeSessionId!).catch(
-							() => {},
+							(err) => console.error('[webhook] Completion event handling failed:', err),
 						);
 
 						await stream.writeSSE({ data: JSON.stringify(event) });
