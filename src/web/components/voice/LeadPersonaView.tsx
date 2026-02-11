@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import { Mic, MicOff, Loader2, MessageSquare } from 'lucide-react';
 import { Persona } from '../ai-elements/persona';
 import type { PersonaState } from '../ai-elements/persona';
@@ -16,7 +17,7 @@ interface LeadPersonaViewProps {
   sessionActive: boolean;
 }
 
-export function LeadPersonaView({
+export const LeadPersonaView = memo(function LeadPersonaView({
   personaState,
   isListening,
   isProcessing,
@@ -116,4 +117,4 @@ export function LeadPersonaView({
       </div>
     </div>
   );
-}
+});

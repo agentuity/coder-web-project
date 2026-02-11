@@ -698,6 +698,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	// Narrator pipeline: events -> narrate -> TTS (Lead mode only)
 	const isLeadMode = viewMode === 'lead';
 
+	const switchToChat = useCallback(() => setUrlState({ v: 'chat' }), [setUrlState]);
+
 	const handleNarration = useCallback((text: string) => {
 		void speakText(text);
 	}, [speakText]);
@@ -712,9 +714,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	}, [narrate]);
 
 	// Get parts of the current streaming assistant message for accumulation
-	const currentParts = lastAssistantMessage
-		? getDisplayParts(lastAssistantMessage.id)
-		: [];
+	// Memoize to prevent useEventAccumulator from re-running on every render
+	const currentParts = useMemo(
+		() => lastAssistantMessage ? getDisplayParts(lastAssistantMessage.id) : [],
+		[lastAssistantMessage, getDisplayParts]
+	);
 
 	useEventAccumulator({
 		enabled: isLeadMode && session.status === 'active',
@@ -1709,7 +1713,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				lastSpokenText={lastSpokenText}
 				transcript={voiceTranscript}
 				onToggleListening={toggleListening}
-				onSwitchToChat={() => setUrlState({ v: 'chat' })}
+				onSwitchToChat={switchToChat}
 				sessionActive={session.status === 'active'}
 			/>
 		) : (

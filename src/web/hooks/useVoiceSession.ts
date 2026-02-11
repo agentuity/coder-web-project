@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import type { PersonaState } from '../components/ai-elements/persona';
 
 interface UseVoiceSessionOptions {
@@ -7,6 +7,10 @@ interface UseVoiceSessionOptions {
   isListening: boolean;
   isProcessing: boolean;
   isSpeaking: boolean;
+}
+
+interface AudioCallbacks {
+  enqueue: (segment: { base64: string; mimeType: string }) => void;
 }
 
 interface UseVoiceSessionReturn {
@@ -19,14 +23,16 @@ interface UseVoiceSessionReturn {
 
 export function useVoiceSession(
   options: UseVoiceSessionOptions,
-  audioCallbacks?: {
-    enqueue: (segment: { base64: string; mimeType: string }) => void;
-  }
+  audioCallbacks?: AudioCallbacks
 ): UseVoiceSessionReturn {
   const { isSessionBusy, isListening, isProcessing, isSpeaking } = options;
   const [lastSpokenText, setLastSpokenText] = useState<string | null>(null);
   const [transcript, setTranscript] = useState<Array<{ role: 'user' | 'lead'; text: string }>>([]);
   const speakingRef = useRef(false);
+
+  // Stable ref for audio callbacks — prevents speakText from getting new identity
+  const audioCallbacksRef = useRef(audioCallbacks);
+  audioCallbacksRef.current = audioCallbacks;
 
   // Determine persona state based on priorities:
   // speaking > listening > thinking > idle
@@ -48,6 +54,7 @@ export function useVoiceSession(
     }
   }, []);
 
+  // speakText now uses ref for audioCallbacks — stable identity
   const speakText = useCallback(async (text: string) => {
     if (!text.trim() || speakingRef.current) return;
     speakingRef.current = true;
@@ -59,21 +66,27 @@ export function useVoiceSession(
       });
       if (!res.ok) throw new Error('TTS failed');
       const data = await res.json() as { audio?: { base64: string; mimeType: string } };
-      if (data.audio && audioCallbacks?.enqueue) {
-        audioCallbacks.enqueue(data.audio);
+      if (data.audio && audioCallbacksRef.current?.enqueue) {
+        audioCallbacksRef.current.enqueue(data.audio);
         addTranscript('lead', text);
       }
     } catch {
-      // Silent fail for TTS -- non-critical
+      // Silent fail for TTS
     } finally {
       speakingRef.current = false;
     }
-  }, [audioCallbacks, addTranscript]);
+  }, [addTranscript]);
+
+  // Memoize transcript strings — prevent new array identity every render
+  const transcriptStrings = useMemo(
+    () => transcript.map(t => `${t.role === 'user' ? 'You' : 'Lead'}: ${t.text}`),
+    [transcript]
+  );
 
   return {
     personaState,
     lastSpokenText,
-    transcript: transcript.map(t => `${t.role === 'user' ? 'You' : 'Lead'}: ${t.text}`),
+    transcript: transcriptStrings,
     addTranscript,
     speakText,
   };
