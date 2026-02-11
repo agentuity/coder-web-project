@@ -154,7 +154,7 @@ const PersonaWithoutModel = memo(
 
 PersonaWithoutModel.displayName = "PersonaWithoutModel";
 
-export const Persona: FC<PersonaProps> = memo(
+const PersonaInner: FC<PersonaProps> = memo(
   ({
     variant = "obsidian",
     state = "idle",
@@ -206,6 +206,13 @@ export const Persona: FC<PersonaProps> = memo(
       stateMachines: stateMachine,
     });
 
+    // Clean up Rive WebGL context and animation loop on unmount
+    useEffect(() => {
+      return () => {
+        rive?.cleanup();
+      };
+    }, [rive]);
+
     const listeningInput = useStateMachineInput(rive, stateMachine, "listening");
     const thinkingInput = useStateMachineInput(rive, stateMachine, "thinking");
     const speakingInput = useStateMachineInput(rive, stateMachine, "speaking");
@@ -225,6 +232,25 @@ export const Persona: FC<PersonaProps> = memo(
         <RiveComponent className={cn("size-16 shrink-0", className)} />
       </Component>
     );
+  }
+);
+
+PersonaInner.displayName = "PersonaInner";
+
+export const Persona: FC<PersonaProps> = memo(
+  ({ className, ...props }) => {
+    const [ready, setReady] = useState(false);
+
+    useEffect(() => {
+      const timer = setTimeout(() => setReady(true), 150);
+      return () => clearTimeout(timer);
+    }, []);
+
+    if (!ready) {
+      return <div className={cn("size-16 shrink-0", className)} />;
+    }
+
+    return <PersonaInner className={className} {...props} />;
   }
 );
 

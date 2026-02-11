@@ -1,9 +1,12 @@
-import { memo } from 'react';
+import { lazy, memo, Suspense } from 'react';
 import { Mic, MicOff, Loader2, MessageSquare } from 'lucide-react';
-import { Persona } from '../ai-elements/persona';
 import type { PersonaState } from '../ai-elements/persona';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
+
+const Persona = lazy(() =>
+  import('../ai-elements/persona').then((m) => ({ default: m.Persona }))
+);
 
 interface LeadPersonaViewProps {
   personaState: PersonaState;
@@ -42,11 +45,13 @@ export const LeadPersonaView = memo(function LeadPersonaView({
     <div className="flex flex-1 flex-col items-center min-h-0 overflow-hidden bg-[var(--background)]">
       {/* Persona area -- centered, takes most space */}
       <section className="flex flex-1 flex-col items-center justify-center gap-4 p-6 min-h-0" aria-label="Lead AI persona">
-        <Persona
-          state={personaState}
-          variant="command"
-          className="size-40 md:size-52"
-        />
+        <Suspense fallback={<div className="size-40 md:size-52" />}>
+          <Persona
+            state={personaState}
+            variant="command"
+            className="size-40 md:size-52"
+          />
+        </Suspense>
         <output 
           className="text-xs text-[var(--muted-foreground)] tracking-wide uppercase"
           aria-live="polite"
