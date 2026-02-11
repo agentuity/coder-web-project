@@ -87,6 +87,7 @@ export function ApiKeySettings() {
 			}
 			const data = await res.json();
 			setKeys(Array.isArray(data) ? data : []);
+			setError(null);
 		} catch {
 			setError('Failed to load API keys');
 		} finally {

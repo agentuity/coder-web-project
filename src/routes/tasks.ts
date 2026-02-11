@@ -330,7 +330,14 @@ api.post('/:id/messages', async (c) => {
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
 
 	try {
-		const [providerID, modelID] = body.model ? body.model.split('/') : [];
+		let providerID: string | undefined;
+		let modelID: string | undefined;
+		if (body.model) {
+			if (!body.model.includes('/')) {
+				return c.json({ error: 'model must be in format "provider/model"' }, 400);
+			}
+			[providerID, modelID] = body.model.split('/');
+		}
 		await client.session.promptAsync({
 			path: { id: session.opencodeSessionId },
 			body: {
@@ -370,7 +377,9 @@ api.get(
 		}
 
 		try {
-			const eventResponse = await fetch(`${session.sandboxUrl}/event`);
+			const eventResponse = await fetch(`${session.sandboxUrl}/event`, {
+				signal: AbortSignal.timeout(30_000), // 30s connection timeout
+			});
 			if (!eventResponse.ok || !eventResponse.body) {
 				await stream.writeSSE({
 					data: JSON.stringify({ type: 'error', message: 'No event stream' }),
