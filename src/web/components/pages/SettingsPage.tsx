@@ -3,6 +3,7 @@ import { Settings, Save, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { GitHubSettings } from '../settings/GitHubSettings';
+import { ApiKeySettings } from '../settings/ApiKeySettings';
 
 interface Workspace {
 	id: string;
@@ -325,6 +326,15 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 					Connect a GitHub personal access token for repository access in coding sessions.
 				</p>
 				<GitHubSettings />
+			</Card>
+
+			{/* API Keys */}
+			<Card className="p-4 mt-8 mb-6">
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-2">API Keys</h3>
+				<p className="text-xs text-[var(--muted-foreground)] mb-4">
+					Manage API keys for programmatic access to the Tasks API.
+				</p>
+				<ApiKeySettings />
 			</Card>
 
 			{/* Danger Zone */}
