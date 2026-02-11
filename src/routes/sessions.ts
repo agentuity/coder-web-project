@@ -4,7 +4,7 @@
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions, skills, sources, userSettings } from '../db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc } from '@agentuity/drizzle';
 import {
 	createSandbox,
 	generateOpenCodeConfig,

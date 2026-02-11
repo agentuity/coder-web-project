@@ -1,9 +1,10 @@
 /**
  * Database schema — used by both the application at runtime and drizzle-kit
- * for migrations. Imports from drizzle-orm/pg-core so both Bun and Node
- * (drizzle-kit) can resolve it.
+ * for migrations. Imports from @agentuity/drizzle/schema which re-exports
+ * drizzle-orm/pg-core types without Bun-specific runtime deps, so both
+ * Bun and Node (drizzle-kit) can resolve it.
  */
-import { pgTable, uuid, text, timestamp, jsonb, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, boolean } from '@agentuity/drizzle/schema';
 
 /**
  * Workspaces group sessions, skills, and sources for a single user today.

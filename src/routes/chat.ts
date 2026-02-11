@@ -7,7 +7,7 @@
 import { createRouter, sse } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq } from '@agentuity/drizzle';
 import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';

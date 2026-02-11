@@ -1,5 +1,5 @@
 import { createRouter } from '@agentuity/runtime';
-import { eq } from 'drizzle-orm';
+import { eq } from '@agentuity/drizzle';
 import { db } from '../db';
 import { userSettings } from '../db/schema';
 

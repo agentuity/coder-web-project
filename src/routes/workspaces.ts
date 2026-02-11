@@ -9,7 +9,7 @@
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { workspaces } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq } from '@agentuity/drizzle';
 
 const api = createRouter();
 

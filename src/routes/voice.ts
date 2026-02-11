@@ -2,7 +2,7 @@ import { createRouter } from '@agentuity/runtime';
 import leadNarrator from '@agent/lead-narrator';
 import { db } from '../db';
 import { userSettings } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq } from '@agentuity/drizzle';
 
 const router = createRouter();
 
