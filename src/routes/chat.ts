@@ -11,6 +11,7 @@ import { eq } from '@agentuity/drizzle';
 import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
+import { SpanStatusCode } from '@opentelemetry/api';
 
 /** Map slash-command slugs to the OpenCode agent display names used by promptAsync. */
 const COMMAND_TO_AGENT: Record<string, string> = {
@@ -95,6 +96,9 @@ api.get('/:id/messages', async (c) => {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
 	}
 
+	c.var.session.metadata.action = 'get-messages';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
 	try {
 		const result = await client.session.messages({
@@ -118,6 +122,9 @@ api.post('/:id/messages', async (c) => {
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
 	}
+
+	c.var.session.metadata.action = 'send-message';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const body = await c.req.json<{
 		text: string;
@@ -182,58 +189,69 @@ api.post('/:id/messages', async (c) => {
 		});
 	}
 
-	try {
-		// Determine the agent name from the command (e.g., "/agentuity-coder" → "agentuity-coder")
-		const commandSlug = body.command ? body.command.replace(/^\//, '') : null;
+	return c.var.tracer.startActiveSpan('chat.send-message', async (span) => {
+		span.setAttribute('sessionDbId', session.id);
+		span.setAttribute('hasAttachments', attachments.length > 0);
+		span.setAttribute('hasCommand', !!body.command);
+		try {
+			// Determine the agent name from the command (e.g., "/agentuity-coder" → "agentuity-coder")
+			const commandSlug = body.command ? body.command.replace(/^\//, '') : null;
 
-		// Resolve to OpenCode agent display name.
-		// If it's in our mapping, use that. Otherwise pass the slug directly
-		// (for built-in OpenCode commands like "review" that OpenCode resolves itself).
-		const agentName = commandSlug
-			? (COMMAND_TO_AGENT[commandSlug] || commandSlug)
-			: session.agent ? (COMMAND_TO_AGENT[session.agent] || session.agent) : undefined;
+			// Resolve to OpenCode agent display name.
+			// If it's in our mapping, use that. Otherwise pass the slug directly
+			// (for built-in OpenCode commands like "review" that OpenCode resolves itself).
+			const agentName = commandSlug
+				? (COMMAND_TO_AGENT[commandSlug] || commandSlug)
+				: session.agent ? (COMMAND_TO_AGENT[session.agent] || session.agent) : undefined;
 
-		const [providerID, modelID] = body.model ? body.model.split('/') : [];
+			const [providerID, modelID] = body.model ? body.model.split('/') : [];
 
-		await client.session.promptAsync({
-			path: { id: session.opencodeSessionId },
-			body: {
-				parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
-				...(agentName ? { agent: agentName } : {}),
-				...(providerID && modelID ? { model: { providerID, modelID } } : {}),
-			},
-		});
+			await client.session.promptAsync({
+				path: { id: session.opencodeSessionId! },
+				body: {
+					parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
+					...(agentName ? { agent: agentName } : {}),
+					...(providerID && modelID ? { model: { providerID, modelID } } : {}),
+				},
+			});
 
-		// Store the command slug on the session for reference
-		if (commandSlug && commandSlug !== session.agent) {
-			await db
-				.update(chatSessions)
-				.set({ agent: commandSlug, updatedAt: new Date() })
-				.where(eq(chatSessions.id, session.id));
+			// Store the command slug on the session for reference
+			if (commandSlug && commandSlug !== session.agent) {
+				await db
+					.update(chatSessions)
+					.set({ agent: commandSlug, updatedAt: new Date() })
+					.where(eq(chatSessions.id, session.id));
+			}
+
+			// Auto-title from first message if untitled
+			if (!session.title && messageText) {
+				const title = messageText.length > 60 ? messageText.slice(0, 57) + '...' : messageText;
+				await db
+					.update(chatSessions)
+					.set({ title, updatedAt: new Date() })
+					.where(eq(chatSessions.id, session.id));
+			}
+
+			// Update thread context with latest activity
+			const { updateThreadContext } = await import('../lib/thread-context');
+			await updateThreadContext(c.var.thread, {
+				sessionDbId: session.id,
+				title: session.title ?? null,
+				lastActivityAt: new Date().toISOString(),
+				lastMessagePreview: messageText.length > 200 ? messageText.slice(0, 200) : messageText,
+			});
+
+			// Tag thread metadata
+			const existingMeta = await c.var.thread.getMetadata();
+			await c.var.thread.setMetadata({ ...existingMeta, sessionDbId: session.id });
+
+			span.setStatus({ code: SpanStatusCode.OK });
+			return c.json({ success: true });
+		} catch (error) {
+			span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+			return c.json({ error: 'Failed to send message', details: String(error) }, 500);
 		}
-
-		// Auto-title from first message if untitled
-		if (!session.title && messageText) {
-			const title = messageText.length > 60 ? messageText.slice(0, 57) + '...' : messageText;
-			await db
-				.update(chatSessions)
-				.set({ title, updatedAt: new Date() })
-				.where(eq(chatSessions.id, session.id));
-		}
-
-		// Track in thread state
-		const thread = c.var.thread;
-		if (thread?.state) {
-			const count = (await thread.state.get<number>('messageCount')) || 0;
-			await thread.state.set('messageCount', count + 1);
-			await thread.state.set('lastMessageAt', new Date().toISOString());
-			await thread.state.set('sessionId', c.req.param('id'));
-		}
-
-		return c.json({ success: true });
-	} catch (error) {
-		return c.json({ error: 'Failed to send message', details: String(error) }, 500);
-	}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -331,16 +349,12 @@ api.post('/:id/abort', async (c) => {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
 	}
 
+	c.var.session.metadata.action = 'abort-session';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
 	try {
 		await client.session.abort({ path: { id: session.opencodeSessionId } });
-
-		// Track in thread state
-		const thread = c.var.thread;
-		if (thread?.state) {
-			await thread.state.set('lastAbortAt', new Date().toISOString());
-		}
-
 		return c.json({ success: true });
 	} catch (error) {
 		return c.json({ error: 'Failed to abort', details: String(error) }, 500);
@@ -359,6 +373,9 @@ api.get('/:id/diff', async (c) => {
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
 	}
+
+	c.var.session.metadata.action = 'get-diff';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
 	try {
@@ -381,6 +398,9 @@ api.post('/:id/permissions/:reqId', async (c) => {
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
 	}
+
+	c.var.session.metadata.action = 'reply-permission';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const body = await c.req.json<{ reply: 'once' | 'always' | 'reject' }>();
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
@@ -413,6 +433,9 @@ api.post('/:id/questions/:reqId', async (c) => {
 	if (!session.sandboxId || !session.sandboxUrl) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
 	}
+
+	c.var.session.metadata.action = 'reply-question';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const body = await c.req.json<{ answers: string[][] }>();
 	const reqId = c.req.param('reqId')!;
@@ -450,6 +473,9 @@ api.post('/:id/revert', async (c) => {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
 	}
 
+	c.var.session.metadata.action = 'revert';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	const body = (await c.req.json().catch(() => ({}))) as {
 		messageID?: string;
 		partID?: string;
@@ -486,6 +512,9 @@ api.post('/:id/unrevert', async (c) => {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
 	}
 
+	c.var.session.metadata.action = 'unrevert';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
 	try {
 		const result = await client.session.unrevert({
@@ -508,6 +537,9 @@ api.get('/:id/files', async (c) => {
 		.where(eq(chatSessions.id, c.req.param('id')!));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	c.var.session.metadata.action = 'list-files';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const rawPath = c.req.query('path') || '/';
 	const dirPath = rawPath === '/' ? SANDBOX_HOME : toAbsoluteSandboxPath(rawPath);
@@ -652,6 +684,9 @@ api.get('/:id/files/content', async (c) => {
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
 
+	c.var.session.metadata.action = 'read-file';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	const rawFilePath = c.req.query('path');
 	if (!rawFilePath) return c.json({ error: 'Missing path parameter' }, 400);
 
@@ -699,6 +734,9 @@ api.put('/:id/files/content', async (c) => {
 		.where(eq(chatSessions.id, c.req.param('id')!));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	c.var.session.metadata.action = 'write-file';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const body = await c.req
 		.json<{ path?: string; content?: string }>()

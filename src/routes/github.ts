@@ -10,6 +10,7 @@ import { chatSessions } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import { sandboxExecute } from '@agentuity/server';
 import { parseMetadata } from '../lib/parse-metadata';
+import { SpanStatusCode } from '@opentelemetry/api';
 
 const api = createRouter();
 
@@ -148,6 +149,9 @@ api.get('/:id/github/status', async (c) => {
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
+	c.var.session.metadata.action = 'git-status';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	try {
 		const apiClient = (c.var.sandbox as any).client;
 		const projectDir = getProjectDir(session);
@@ -224,6 +228,9 @@ api.get('/:id/github/log', async (c) => {
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
+	c.var.session.metadata.action = 'git-log';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	try {
 		const apiClient = (c.var.sandbox as any).client;
 		const projectDir = getProjectDir(session);
@@ -291,6 +298,9 @@ api.post('/:id/github/init', async (c) => {
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
+	c.var.session.metadata.action = 'git-init';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	const body = await c.req
 		.json<{ remoteUrl?: string }>()
 		.catch(() => ({} as { remoteUrl?: string }));
@@ -340,6 +350,9 @@ api.post('/:id/github/create-repo', async (c) => {
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
+	c.var.session.metadata.action = 'git-create-repo';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	const body = await c.req
 		.json<{ name: string; description?: string; isPrivate?: boolean }>()
 		.catch(() => ({} as { name: string; description?: string; isPrivate?: boolean }));
@@ -351,123 +364,128 @@ api.post('/:id/github/create-repo', async (c) => {
 		return c.json({ success: false, error: 'Invalid repository name' }, 400);
 	}
 
-	try {
-		const apiClient = (c.var.sandbox as any).client;
-		const projectDir = getProjectDir(session);
-		const safeName = name.replace(/'/g, "'\\''");
-		const safeDescription = description ? description.replace(/'/g, "'\\''") : '';
+	return c.var.tracer.startActiveSpan('git.create-repo', async (span) => {
+		span.setAttribute('sessionDbId', session.id);
+		span.setAttribute('repoName', name);
+		try {
+			const apiClient = (c.var.sandbox as any).client;
+			const projectDir = getProjectDir(session);
+			const safeName = name.replace(/'/g, "'\\''");
+			const safeDescription = description ? description.replace(/'/g, "'\\''") : '';
 
-		const repoCheck = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			'test -d .git && echo "YES" || echo "NO"',
-			projectDir,
-		);
-
-		if (repoCheck.stdout.trim() !== 'YES') {
-			const { stderr, exitCode } = await execInSandbox(
+			const repoCheck = await execInSandbox(
 				apiClient,
 				session.sandboxId!,
-				'git init',
-				projectDir,
-			);
-			if (exitCode !== 0) {
-				return c.json({ success: false, error: stderr.trim() || 'Failed to initialize repository' }, 400);
-			}
-		}
-
-		const commitCheck = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			'git rev-parse --verify HEAD',
-			projectDir,
-		);
-
-		if (commitCheck.exitCode !== 0) {
-			const addResult = await execInSandbox(
-				apiClient,
-				session.sandboxId!,
-				'git add -A',
-				projectDir,
-			);
-			if (addResult.exitCode !== 0) {
-				return c.json({ success: false, error: addResult.stderr.trim() || 'Failed to stage files' }, 400);
-			}
-
-			const commitResult = await execInSandbox(
-				apiClient,
-				session.sandboxId!,
-				"git commit -m 'Initial commit'",
+				'test -d .git && echo "YES" || echo "NO"',
 				projectDir,
 			);
 
-			if (commitResult.exitCode !== 0) {
-				const allowEmptyResult = await execInSandbox(
+			if (repoCheck.stdout.trim() !== 'YES') {
+				const { stderr, exitCode } = await execInSandbox(
 					apiClient,
 					session.sandboxId!,
-					"git commit --allow-empty -m 'Initial commit'",
+					'git init',
 					projectDir,
 				);
-				if (allowEmptyResult.exitCode !== 0) {
-					return c.json({
-						success: false,
-						error: allowEmptyResult.stderr.trim() || allowEmptyResult.stdout.trim() || 'Failed to commit',
-					}, 400);
+				if (exitCode !== 0) {
+					span.setStatus({ code: SpanStatusCode.ERROR, message: stderr.trim() });
+					return c.json({ success: false, error: stderr.trim() || 'Failed to initialize repository' }, 400);
 				}
 			}
+
+			const commitCheck = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				'git rev-parse --verify HEAD',
+				projectDir,
+			);
+
+			if (commitCheck.exitCode !== 0) {
+				const addResult = await execInSandbox(
+					apiClient,
+					session.sandboxId!,
+					'git add -A',
+					projectDir,
+				);
+				if (addResult.exitCode !== 0) {
+					span.setStatus({ code: SpanStatusCode.ERROR, message: addResult.stderr.trim() });
+					return c.json({ success: false, error: addResult.stderr.trim() || 'Failed to stage files' }, 400);
+				}
+
+				const commitResult = await execInSandbox(
+					apiClient,
+					session.sandboxId!,
+					"git commit -m 'Initial commit'",
+					projectDir,
+				);
+
+				if (commitResult.exitCode !== 0) {
+					const allowEmptyResult = await execInSandbox(
+						apiClient,
+						session.sandboxId!,
+						"git commit --allow-empty -m 'Initial commit'",
+						projectDir,
+					);
+					if (allowEmptyResult.exitCode !== 0) {
+						span.setStatus({ code: SpanStatusCode.ERROR, message: allowEmptyResult.stderr.trim() });
+						return c.json({
+							success: false,
+							error: allowEmptyResult.stderr.trim() || allowEmptyResult.stdout.trim() || 'Failed to commit',
+						}, 400);
+					}
+				}
+			}
+
+			const authResult = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				'gh auth setup-git',
+				projectDir,
+			);
+			if (authResult.exitCode !== 0) {
+				span.setStatus({ code: SpanStatusCode.ERROR, message: authResult.stderr.trim() });
+				return c.json({
+					success: false,
+					error: authResult.stderr.trim() || 'Failed to setup git authentication',
+				}, 400);
+			}
+
+			const visibilityFlag = isPrivate ? '--private' : '--public';
+			const descriptionFlag = safeDescription ? ` --description '${safeDescription}'` : '';
+			const createCmd = `gh repo create '${safeName}' ${visibilityFlag} --source=. --push${descriptionFlag}`;
+			const { stdout, stderr, exitCode } = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				createCmd,
+				projectDir,
+			);
+
+			if (exitCode !== 0) {
+				span.setStatus({ code: SpanStatusCode.ERROR, message: stderr.trim() });
+				return c.json({
+					success: false,
+					error: stderr.trim() || 'Failed to create GitHub repository',
+				}, 400);
+			}
+
+			const urlMatch = stdout.match(/https?:\/\/\S+/);
+			const repoUrl = urlMatch ? urlMatch[0].replace(/\.git$/, '') : undefined;
+
+			if (repoUrl) {
+				const metadata = parseMetadata(session);
+				await db
+					.update(chatSessions)
+					.set({ metadata: { ...metadata, repoUrl } })
+					.where(eq(chatSessions.id, session.id));
+			}
+
+			span.setStatus({ code: SpanStatusCode.OK });
+			return c.json({ success: true, repoUrl });
+		} catch (error) {
+			span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+			return c.json({ error: 'Failed to create GitHub repository', details: String(error) }, 500);
 		}
-
-		const authResult = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			'gh auth setup-git',
-			projectDir,
-		);
-		if (authResult.exitCode !== 0) {
-			return c.json({
-				success: false,
-				error: authResult.stderr.trim() || 'Failed to setup git authentication',
-			}, 400);
-		}
-
-		const visibilityFlag = isPrivate ? '--private' : '--public';
-		const descriptionFlag = safeDescription ? ` --description '${safeDescription}'` : '';
-		const createCmd = `gh repo create '${safeName}' ${visibilityFlag} --source=. --push${descriptionFlag}`;
-		const { stdout, stderr, exitCode } = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			createCmd,
-			projectDir,
-		);
-
-		if (exitCode !== 0) {
-			return c.json({
-				success: false,
-				error: stderr.trim() || 'Failed to create GitHub repository',
-			}, 400);
-		}
-
-		const urlMatch = stdout.match(/https?:\/\/\S+/);
-		const repoUrl = urlMatch ? urlMatch[0].replace(/\.git$/, '') : undefined;
-
-		if (repoUrl) {
-			const metadata = parseMetadata(session);
-			await db
-				.update(chatSessions)
-				.set({ metadata: { ...metadata, repoUrl } })
-				.where(eq(chatSessions.id, session.id));
-		}
-
-		// Track in thread state
-		const thread = c.var.thread;
-		if (thread?.state) {
-			await thread.state.set('repoCreatedAt', new Date().toISOString());
-		}
-
-		return c.json({ success: true, repoUrl });
-	} catch (error) {
-		return c.json({ error: 'Failed to create GitHub repository', details: String(error) }, 500);
-	}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -477,6 +495,9 @@ api.post('/:id/github/branch', async (c) => {
 	const result = await getSession(c.req.param('id')!);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
+
+	c.var.session.metadata.action = 'git-branch';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const body = await c.req.json<{ name: string }>();
 	if (!body.name || !body.name.trim()) {
@@ -525,6 +546,9 @@ api.post('/:id/github/checkout', async (c) => {
 	const result = await getSession(c.req.param('id')!);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
+
+	c.var.session.metadata.action = 'git-checkout';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const body = await c.req.json<{ name: string; startPoint?: string }>();
 	if (!body.name || !body.name.trim()) {
@@ -578,97 +602,100 @@ api.post('/:id/github/commit', async (c) => {
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
+	c.var.session.metadata.action = 'git-commit';
+	c.var.session.metadata.sessionDbId = session.id;
+
 	const body = await c.req.json<{ message: string; files?: string[] }>();
 	if (!body.message || !body.message.trim()) {
 		return c.json({ error: 'Commit message is required' }, 400);
 	}
 
-	try {
-		const apiClient = (c.var.sandbox as any).client;
-		const projectDir = getProjectDir(session);
+	return c.var.tracer.startActiveSpan('git.commit', async (span) => {
+		span.setAttribute('sessionDbId', session.id);
+		try {
+			const apiClient = (c.var.sandbox as any).client;
+			const projectDir = getProjectDir(session);
 
-		// Stage files
-		let addCmd: string;
-		if (body.files && body.files.length > 0) {
-			const normalized = body.files.map(normalizeGitFile).filter(Boolean);
-			if (normalized.length === 0) {
-				addCmd = 'git add -A';
+			// Stage files
+			let addCmd: string;
+			if (body.files && body.files.length > 0) {
+				const normalized = body.files.map(normalizeGitFile).filter(Boolean);
+				if (normalized.length === 0) {
+					addCmd = 'git add -A';
+				} else {
+					const safeFiles = normalized.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ');
+					addCmd = `git add ${safeFiles}`;
+				}
 			} else {
-				const safeFiles = normalized.map((f) => `'${f.replace(/'/g, "'\\''")}'`).join(' ');
-				addCmd = `git add ${safeFiles}`;
+				addCmd = 'git add -A';
 			}
-		} else {
-			addCmd = 'git add -A';
-		}
 
-		const { stderr: addErr, exitCode: addExit } = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			addCmd,
-			projectDir,
-		);
+			const { stderr: addErr, exitCode: addExit } = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				addCmd,
+				projectDir,
+			);
 
-		if (addExit !== 0) {
-			return c.json({
-				success: false,
-				error: addErr.trim() || 'Failed to stage files',
-			}, 400);
-		}
+			if (addExit !== 0) {
+				span.setStatus({ code: SpanStatusCode.ERROR, message: addErr.trim() });
+				return c.json({
+					success: false,
+					error: addErr.trim() || 'Failed to stage files',
+				}, 400);
+			}
 
-		// Write commit message to temp file via single-quoted heredoc (prevents all shell interpretation)
-		const writeMsgCmd = `cat > /tmp/.commit-msg <<'COMMIT_MSG_EOF'\n${body.message.trim()}\nCOMMIT_MSG_EOF`;
-		await execInSandbox(apiClient, session.sandboxId!, writeMsgCmd, projectDir);
+			// Write commit message to temp file via single-quoted heredoc (prevents all shell interpretation)
+			const writeMsgCmd = `cat > /tmp/.commit-msg <<'COMMIT_MSG_EOF'\n${body.message.trim()}\nCOMMIT_MSG_EOF`;
+			await execInSandbox(apiClient, session.sandboxId!, writeMsgCmd, projectDir);
 
-		// Commit using -F to read message from file (no shell interpretation)
-		const { stdout, stderr, exitCode } = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			'git commit -F /tmp/.commit-msg',
-			projectDir,
-		);
+			// Commit using -F to read message from file (no shell interpretation)
+			const { stdout, stderr, exitCode } = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				'git commit -F /tmp/.commit-msg',
+				projectDir,
+			);
 
-		if (exitCode !== 0) {
-			return c.json({
-				success: false,
-				error: stderr.trim() || stdout.trim() || 'Failed to commit',
-			}, 400);
-		}
+			if (exitCode !== 0) {
+				span.setStatus({ code: SpanStatusCode.ERROR, message: stderr.trim() || stdout.trim() });
+				return c.json({
+					success: false,
+					error: stderr.trim() || stdout.trim() || 'Failed to commit',
+				}, 400);
+			}
 
-		// Extract commit hash
-		const hashMatch = stdout.match(/\[[\w/.-]+ ([a-f0-9]+)\]/);
-		const hash = hashMatch ? hashMatch[1] : null;
+			// Extract commit hash
+			const hashMatch = stdout.match(/\[[\w/.-]+ ([a-f0-9]+)\]/);
+			const hash = hashMatch ? hashMatch[1] : null;
 
-		const metadata = parseMetadata(session);
-		await db
-			.update(chatSessions)
-			.set({
-				metadata: {
-					...metadata,
-					lastCommit: {
-						hash,
-						message: body.message.trim(),
-						timestamp: new Date().toISOString(),
+			const metadata = parseMetadata(session);
+			await db
+				.update(chatSessions)
+				.set({
+					metadata: {
+						...metadata,
+						lastCommit: {
+							hash,
+							message: body.message.trim(),
+							timestamp: new Date().toISOString(),
+						},
 					},
-				},
-			})
-			.where(eq(chatSessions.id, session.id));
+				})
+				.where(eq(chatSessions.id, session.id));
 
-		// Track in thread state
-		const thread = c.var.thread;
-		if (thread?.state) {
-			const count = (await thread.state.get<number>('commitCount')) || 0;
-			await thread.state.set('commitCount', count + 1);
-			await thread.state.set('lastCommitAt', new Date().toISOString());
+			span.setAttribute('commitHash', hash || 'unknown');
+			span.setStatus({ code: SpanStatusCode.OK });
+			return c.json({
+				hash,
+				message: body.message.trim(),
+				success: true,
+			});
+		} catch (error) {
+			span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+			return c.json({ error: 'Failed to commit', details: String(error) }, 500);
 		}
-
-		return c.json({
-			hash,
-			message: body.message.trim(),
-			success: true,
-		});
-	} catch (error) {
-		return c.json({ error: 'Failed to commit', details: String(error) }, 500);
-	}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -678,6 +705,9 @@ api.post('/:id/github/pr', async (c) => {
 	const result = await getSession(c.req.param('id')!);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
+
+	c.var.session.metadata.action = 'git-pr';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const body = await c.req.json<{ title: string; body?: string; base?: string }>();
 	if (!body.title || !body.title.trim()) {
@@ -689,78 +719,80 @@ api.post('/:id/github/pr', async (c) => {
 	// Sanitize base branch — only allow safe git ref characters
 	const sanitizedBase = (body.base || 'main').replace(/[^a-zA-Z0-9._\-/]/g, '-');
 
-	try {
-		const apiClient = (c.var.sandbox as any).client;
-		const projectDir = getProjectDir(session);
+	return c.var.tracer.startActiveSpan('git.create-pr', async (span) => {
+		span.setAttribute('sessionDbId', session.id);
+		try {
+			const apiClient = (c.var.sandbox as any).client;
+			const projectDir = getProjectDir(session);
 
-		// Push the branch
-		const { stderr: pushErr, exitCode: pushExit } = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			'git push -u origin HEAD',
-			projectDir,
-		);
+			// Push the branch
+			const { stderr: pushErr, exitCode: pushExit } = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				'git push -u origin HEAD',
+				projectDir,
+			);
 
-		if (pushExit !== 0) {
-			return c.json({
-				success: false,
-				error: pushErr.trim() || 'Failed to push branch',
-			}, 400);
-		}
+			if (pushExit !== 0) {
+				span.setStatus({ code: SpanStatusCode.ERROR, message: pushErr.trim() });
+				return c.json({
+					success: false,
+					error: pushErr.trim() || 'Failed to push branch',
+				}, 400);
+			}
 
-		// Write PR body to temp file via single-quoted heredoc (prevents all shell interpretation)
-		const writeBodyCmd = `cat > /tmp/.pr-body <<'PR_BODY_EOF'\n${(body.body || '').trim()}\nPR_BODY_EOF`;
-		await execInSandbox(apiClient, session.sandboxId!, writeBodyCmd, projectDir);
+			// Write PR body to temp file via single-quoted heredoc (prevents all shell interpretation)
+			const writeBodyCmd = `cat > /tmp/.pr-body <<'PR_BODY_EOF'\n${(body.body || '').trim()}\nPR_BODY_EOF`;
+			await execInSandbox(apiClient, session.sandboxId!, writeBodyCmd, projectDir);
 
-		// Create PR using --body-file for safe body handling, sanitized title and base
-		const prCmd = `gh pr create --title "${sanitizedTitle}" --body-file /tmp/.pr-body --base "${sanitizedBase}"`;
-		const { stdout, stderr, exitCode } = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			prCmd,
-			projectDir,
-		);
+			// Create PR using --body-file for safe body handling, sanitized title and base
+			const prCmd = `gh pr create --title "${sanitizedTitle}" --body-file /tmp/.pr-body --base "${sanitizedBase}"`;
+			const { stdout, stderr, exitCode } = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				prCmd,
+				projectDir,
+			);
 
-		if (exitCode !== 0) {
-			return c.json({
-				success: false,
-				error: stderr.trim() || 'Failed to create PR',
-			}, 400);
-		}
+			if (exitCode !== 0) {
+				span.setStatus({ code: SpanStatusCode.ERROR, message: stderr.trim() });
+				return c.json({
+					success: false,
+					error: stderr.trim() || 'Failed to create PR',
+				}, 400);
+			}
 
-		// The gh pr create command outputs the PR URL
-		const prUrl = stdout.trim();
-		const numberMatch = prUrl.match(/\/pull\/(\d+)/);
-		const prNumber = numberMatch ? parseInt(numberMatch[1]!, 10) : null;
+			// The gh pr create command outputs the PR URL
+			const prUrl = stdout.trim();
+			const numberMatch = prUrl.match(/\/pull\/(\d+)/);
+			const prNumber = numberMatch ? parseInt(numberMatch[1]!, 10) : null;
 
-		const metadata = parseMetadata(session);
-		await db
-			.update(chatSessions)
-			.set({
-				metadata: {
-					...metadata,
-					pullRequest: {
-						url: prUrl,
-						number: prNumber,
+			const metadata = parseMetadata(session);
+			await db
+				.update(chatSessions)
+				.set({
+					metadata: {
+						...metadata,
+						pullRequest: {
+							url: prUrl,
+							number: prNumber,
+						},
 					},
-				},
-			})
-			.where(eq(chatSessions.id, session.id));
+				})
+				.where(eq(chatSessions.id, session.id));
 
-		// Track in thread state
-		const thread = c.var.thread;
-		if (thread?.state) {
-			await thread.state.set('lastPrAt', new Date().toISOString());
+			span.setAttribute('prUrl', prUrl);
+			span.setStatus({ code: SpanStatusCode.OK });
+			return c.json({
+				url: prUrl,
+				number: prNumber,
+				success: true,
+			});
+		} catch (error) {
+			span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+			return c.json({ error: 'Failed to create PR', details: String(error) }, 500);
 		}
-
-		return c.json({
-			url: prUrl,
-			number: prNumber,
-			success: true,
-		});
-	} catch (error) {
-		return c.json({ error: 'Failed to create PR', details: String(error) }, 500);
-	}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -771,36 +803,37 @@ api.post('/:id/github/push', async (c) => {
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
-	try {
-		const apiClient = (c.var.sandbox as any).client;
-		const projectDir = getProjectDir(session);
+	c.var.session.metadata.action = 'git-push';
+	c.var.session.metadata.sessionDbId = session.id;
 
-		const { stderr, exitCode } = await execInSandbox(
-			apiClient,
-			session.sandboxId!,
-			'git push -u origin HEAD',
-			projectDir,
-		);
+	return c.var.tracer.startActiveSpan('git.push', async (span) => {
+		span.setAttribute('sessionDbId', session.id);
+		try {
+			const apiClient = (c.var.sandbox as any).client;
+			const projectDir = getProjectDir(session);
 
-		if (exitCode !== 0) {
-			return c.json({
-				success: false,
-				error: stderr.trim() || 'Failed to push branch',
-			}, 400);
+			const { stderr, exitCode } = await execInSandbox(
+				apiClient,
+				session.sandboxId!,
+				'git push -u origin HEAD',
+				projectDir,
+			);
+
+			if (exitCode !== 0) {
+				span.setStatus({ code: SpanStatusCode.ERROR, message: stderr.trim() });
+				return c.json({
+					success: false,
+					error: stderr.trim() || 'Failed to push branch',
+				}, 400);
+			}
+
+			span.setStatus({ code: SpanStatusCode.OK });
+			return c.json({ success: true });
+		} catch (error) {
+			span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+			return c.json({ error: 'Failed to push branch', details: String(error) }, 500);
 		}
-
-		// Track in thread state
-		const thread = c.var.thread;
-		if (thread?.state) {
-			const count = (await thread.state.get<number>('pushCount')) || 0;
-			await thread.state.set('pushCount', count + 1);
-			await thread.state.set('lastPushAt', new Date().toISOString());
-		}
-
-		return c.json({ success: true });
-	} catch (error) {
-		return c.json({ error: 'Failed to push branch', details: String(error) }, 500);
-	}
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -810,6 +843,9 @@ api.get('/:id/github/diff', async (c) => {
 	const result = await getSession(c.req.param('id')!);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
+
+	c.var.session.metadata.action = 'git-diff';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	try {
 		const apiClient = (c.var.sandbox as any).client;
@@ -836,6 +872,9 @@ api.get('/:id/github/diff-file', async (c) => {
 	const result = await getSession(c.req.param('id')!);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
+
+	c.var.session.metadata.action = 'git-diff-file';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	const rawPath = c.req.query('path');
 	if (!rawPath) return c.json({ error: 'path query is required' }, 400);

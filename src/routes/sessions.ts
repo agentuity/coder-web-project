@@ -20,6 +20,7 @@ import {
 } from '../lib/sandbox-health';
 import { decrypt } from '../lib/encryption';
 import { randomUUID } from 'node:crypto';
+import { SpanStatusCode } from '@opentelemetry/api';
 
 const api = createRouter();
 
@@ -35,6 +36,10 @@ interface CreateSessionBody {
 api.post('/', async (c) => {
 	const user = c.get('user')!;
 	const workspaceId = c.req.param('wid') as string;
+
+	c.var.session.metadata.action = 'create-session';
+	c.var.session.metadata.userId = user.id;
+	c.var.session.metadata.workspaceId = workspaceId;
 	const body: CreateSessionBody = await c.req.json<CreateSessionBody>().catch(() => ({}));
 
 	// Fetch workspace skills and sources for config
@@ -102,91 +107,120 @@ api.post('/', async (c) => {
 	const sandbox = c.var.sandbox;
 	const logger = c.var.logger;
 	const thread = c.var.thread;
+	const tracer = c.var.tracer;
+
+	// Tag thread metadata for dashboard querying
+	{
+		const existingMeta = await c.var.thread.getMetadata();
+		await c.var.thread.setMetadata({
+			...existingMeta,
+			userId: user.id,
+			workspaceId,
+			sessionDbId: session!.id,
+			...(body.model ? { model: body.model } : {}),
+			...(body.agent ? { agent: body.agent } : {}),
+		});
+	}
 
 	// Return session immediately so UI can show "Starting session..."
 	// Do sandbox setup in background (fire-and-forget)
 	(async () => {
-		try {
-			const sandboxCtx: SandboxContext = { sandbox, logger };
-			let githubToken: string | undefined;
+		await tracer.startActiveSpan('session.create-sandbox', async (parentSpan) => {
+			parentSpan.setAttribute('sessionDbId', session!.id);
+			parentSpan.setAttribute('workspaceId', workspaceId);
 			try {
-				const [settings] = await db
-					.select()
-					.from(userSettings)
-					.where(eq(userSettings.userId, user.id));
-				if (settings?.githubPat) {
-					githubToken = decrypt(settings.githubPat);
-				}
-			} catch {
-				logger.warn('Failed to load GitHub token for sandbox', { userId: user.id });
-			}
-			const { sandboxId, sandboxUrl } = await createSandbox(sandboxCtx, {
-				repoUrl: body.repoUrl,
-				branch: body.branch,
-				opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
-				customSkills,
-				registrySkills,
-				githubToken,
-			});
-
-			const client = getOpencodeClient(sandboxId, sandboxUrl);
-			let opencodeSessionId: string | null = null;
-			for (let attempt = 1; attempt <= 5; attempt++) {
+				const sandboxCtx: SandboxContext = { sandbox, logger };
+				let githubToken: string | undefined;
 				try {
-					const opencodeSession = await client.session.create({ body: {} });
-					opencodeSessionId =
-						(opencodeSession as any)?.data?.id || (opencodeSession as any)?.id || null;
-					if (opencodeSessionId) break;
-					logger.warn(`session.create attempt ${attempt}: no session ID returned`);
-				} catch (err) {
-					logger.warn(`session.create attempt ${attempt} failed`, { error: err });
+					const [settings] = await db
+						.select()
+						.from(userSettings)
+						.where(eq(userSettings.userId, user.id));
+					if (settings?.githubPat) {
+						githubToken = decrypt(settings.githubPat);
+					}
+				} catch {
+					logger.warn('Failed to load GitHub token for sandbox', { userId: user.id });
 				}
-				if (attempt < 5) await new Promise((r) => setTimeout(r, 2000));
-			}
+				const { sandboxId, sandboxUrl } = await createSandbox(sandboxCtx, {
+					repoUrl: body.repoUrl,
+					branch: body.branch,
+					opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
+					customSkills,
+					registrySkills,
+					githubToken,
+				});
 
-			const newStatus = opencodeSessionId ? 'active' : 'creating';
+				const client = getOpencodeClient(sandboxId, sandboxUrl);
+				let opencodeSessionId: string | null = null;
+				for (let attempt = 1; attempt <= 5; attempt++) {
+					try {
+						const opencodeSession = await client.session.create({ body: {} });
+						opencodeSessionId =
+							(opencodeSession as any)?.data?.id || (opencodeSession as any)?.id || null;
+						if (opencodeSessionId) break;
+						logger.warn(`session.create attempt ${attempt}: no session ID returned`);
+					} catch (err) {
+						logger.warn(`session.create attempt ${attempt} failed`, { error: err });
+					}
+					if (attempt < 5) await new Promise((r) => setTimeout(r, 2000));
+				}
 
-			await db
-				.update(chatSessions)
-				.set({
+				const newStatus = opencodeSessionId ? 'active' : 'creating';
+
+				await db
+					.update(chatSessions)
+					.set({
+						sandboxId,
+						sandboxUrl,
+						opencodeSessionId,
+						status: newStatus,
+						updatedAt: new Date(),
+					})
+					.where(eq(chatSessions.id, session!.id));
+
+				// Store rich session context in thread state
+				const { updateThreadContext } = await import('../lib/thread-context');
+				await updateThreadContext(thread, {
+					sessionDbId: session!.id,
+					title: title ?? null,
+					model: body.model ?? null,
+					agent: body.agent ?? null,
+					workspaceId,
+					userId: user.id,
 					sandboxId,
-					sandboxUrl,
-					opencodeSessionId,
+					repoUrl: body.repoUrl,
+					branch: body.branch,
 					status: newStatus,
-					updatedAt: new Date(),
-				})
-				.where(eq(chatSessions.id, session!.id));
+					createdAt: session!.createdAt?.toISOString() ?? new Date().toISOString(),
+					lastActivityAt: new Date().toISOString(),
+				});
 
-			// Track in thread state
-			if (thread?.state) {
-				await thread.state.set('sessionId', session!.id);
-				await thread.state.set('sandboxId', sandboxId);
-				await thread.state.set('createdAt', new Date().toISOString());
-				await thread.state.set('status', 'active');
-				await thread.state.set('workspaceId', workspaceId);
-			}
-
-			// Send initial prompt async (fire-and-forget)
-			if (body.prompt && opencodeSessionId) {
-				try {
-					await client.session.promptAsync({
-						path: { id: opencodeSessionId },
-						body: { parts: [{ type: 'text', text: body.prompt }] },
-					});
-				} catch (err) {
-					logger.warn('Failed to send initial prompt', { error: err });
+				// Send initial prompt async (fire-and-forget)
+				if (body.prompt && opencodeSessionId) {
+					try {
+						await client.session.promptAsync({
+							path: { id: opencodeSessionId },
+							body: { parts: [{ type: 'text', text: body.prompt }] },
+						});
+					} catch (err) {
+						logger.warn('Failed to send initial prompt', { error: err });
+					}
 				}
+
+				parentSpan.setStatus({ code: SpanStatusCode.OK });
+			} catch (error) {
+				parentSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+				await db
+					.update(chatSessions)
+					.set({
+						status: 'error',
+						metadata: { repoUrl: body.repoUrl, branch: body.branch, error: String(error) },
+						updatedAt: new Date(),
+					})
+					.where(eq(chatSessions.id, session!.id));
 			}
-		} catch (error) {
-			await db
-				.update(chatSessions)
-				.set({
-					status: 'error',
-					metadata: { repoUrl: body.repoUrl, branch: body.branch, error: String(error) },
-					updatedAt: new Date(),
-				})
-				.where(eq(chatSessions.id, session!.id));
-		}
+		});
 	})();
 
 	return c.json(session, 201);
@@ -195,6 +229,10 @@ api.post('/', async (c) => {
 // GET /api/workspaces/:wid/sessions — list sessions
 api.get('/', async (c) => {
 	const workspaceId = c.req.param('wid') as string;
+
+	c.var.session.metadata.action = 'list-sessions';
+	c.var.session.metadata.workspaceId = workspaceId;
+
 	const result = await db
 		.select()
 		.from(chatSessions)

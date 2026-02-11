@@ -24,6 +24,7 @@ import {
 } from '../lib/sandbox-health';
 import { decrypt } from '../lib/encryption';
 import { parseMetadata } from '../lib/parse-metadata';
+import { SpanStatusCode } from '@opentelemetry/api';
 
 const api = createRouter();
 
@@ -31,6 +32,9 @@ const api = createRouter();
 api.get('/:id', async (c) => {
 	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
+
+	c.var.session.metadata.action = 'get-session';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	let effectiveSession = session;
 	if (session.sandboxId && session.sandboxUrl && ['active', 'creating'].includes(session.status)) {
@@ -72,6 +76,9 @@ api.get('/:id', async (c) => {
 
 // PATCH /api/sessions/:id — update session
 api.patch('/:id', async (c) => {
+	c.var.session.metadata.action = 'update-session';
+	c.var.session.metadata.sessionDbId = c.req.param('id');
+
 	const body = await c.req.json<{
 		title?: string;
 		status?: string;
@@ -92,6 +99,9 @@ api.patch('/:id', async (c) => {
 api.post('/:id/retry', async (c) => {
 	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
+
+	c.var.session.metadata.action = 'retry-session';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	if (session.opencodeSessionId) {
 		return c.json({ error: 'Session already has an OpenCode session', session }, 400);
@@ -136,6 +146,10 @@ api.post('/:id/fork', async (c) => {
 		.from(chatSessions)
 		.where(eq(chatSessions.id, c.req.param('id')));
 	if (!sourceSession) return c.json({ error: 'Session not found' }, 404);
+
+	c.var.session.metadata.action = 'fork-session';
+	c.var.session.metadata.sessionDbId = sourceSession.id;
+	c.var.session.metadata.userId = user.id;
 
 	// Validate source session has an active sandbox we can snapshot
 	if (!sourceSession.sandboxId || !sourceSession.sandboxUrl) {
@@ -185,101 +199,137 @@ api.post('/:id/fork', async (c) => {
 
 	const sandbox = c.var.sandbox;
 	const logger = c.var.logger;
+	const tracer = c.var.tracer;
 
-	// Track in thread state
-	const thread = c.var.thread;
-	if (thread?.state) {
-		await thread.state.set('forkedAt', new Date().toISOString());
-		await thread.state.set('forkedToSessionId', session!.id);
+	// Update thread context for fork lineage
+	const { updateThreadContext } = await import('../lib/thread-context');
+	await updateThreadContext(c.var.thread, {
+		sessionDbId: session!.id,
+		title,
+		model: sourceSession.model ?? null,
+		agent: sourceSession.agent ?? null,
+		workspaceId: sourceSession.workspaceId,
+		userId: user.id,
+		forkedFromSessionId: sourceSession.id,
+		status: 'creating',
+		createdAt: new Date().toISOString(),
+		lastActivityAt: new Date().toISOString(),
+	});
+
+	// Tag thread metadata
+	{
+		const existingMeta = await c.var.thread.getMetadata();
+		await c.var.thread.setMetadata({
+			...existingMeta,
+			userId: user.id,
+			sessionDbId: session!.id,
+			forkedFrom: sourceSession.id,
+		});
 	}
 
 	// Async: snapshot → new sandbox → OpenCode fork → update DB
 	const sourceOpencodeSessionId = sourceSession.opencodeSessionId;
 	(async () => {
-		let snapshotId: string | undefined;
-		try {
-			const sandboxCtx: SandboxContext = { sandbox, logger };
-
-			// 1. Get GitHub token for the new sandbox
-			let githubToken: string | undefined;
+		await tracer.startActiveSpan('session.fork', async (parentSpan) => {
+			parentSpan.setAttribute('sourceSessionId', sourceSession.id);
+			parentSpan.setAttribute('forkSessionId', session!.id);
+			let snapshotId: string | undefined;
 			try {
-				const [settings] = await db
-					.select()
-					.from(userSettings)
-					.where(eq(userSettings.userId, user.id));
-				if (settings?.githubPat) {
-					githubToken = decrypt(settings.githubPat);
-				}
-			} catch {
-				logger.warn('Failed to load GitHub token for fork sandbox', { userId: user.id });
-			}
+				const sandboxCtx: SandboxContext = { sandbox, logger };
 
-			// 2. Snapshot source sandbox → create new sandbox from snapshot
-			const forkResult = await forkSandbox(sandboxCtx, {
-				sourceSandboxId: sourceSession.sandboxId!,
-				workDir,
-				githubToken,
-			});
-			snapshotId = forkResult.snapshotId;
-
-			// 3. Use OpenCode's fork API to create a new session with full message history
-			const client = getOpencodeClient(forkResult.sandboxId, forkResult.sandboxUrl);
-			let opencodeSessionId: string | null = null;
-			for (let attempt = 1; attempt <= 5; attempt++) {
+				// 1. Get GitHub token for the new sandbox
+				let githubToken: string | undefined;
 				try {
-					const forkedSession = await client.session.fork({
-						path: { id: sourceOpencodeSessionId },
-						body: {},
-					});
-					opencodeSessionId =
-						(forkedSession as any)?.data?.id || (forkedSession as any)?.id || null;
-					if (opencodeSessionId) break;
-					logger.warn(`fork session.fork attempt ${attempt}: no session ID returned`);
-				} catch (err) {
-					logger.warn(`fork session.fork attempt ${attempt} failed`, { error: err });
+					const [settings] = await db
+						.select()
+						.from(userSettings)
+						.where(eq(userSettings.userId, user.id));
+					if (settings?.githubPat) {
+						githubToken = decrypt(settings.githubPat);
+					}
+				} catch {
+					logger.warn('Failed to load GitHub token for fork sandbox', { userId: user.id });
 				}
-				if (attempt < 5) await new Promise((r) => setTimeout(r, 2000));
-			}
 
-			const newStatus = opencodeSessionId ? 'active' : 'creating';
+				// 2. Snapshot source sandbox → create new sandbox from snapshot
+				const forkResult = await tracer.startActiveSpan('session.fork.snapshot', async (snap) => {
+					snap.setAttribute('sourceSandboxId', sourceSession.sandboxId!);
+					const result = await forkSandbox(sandboxCtx, {
+						sourceSandboxId: sourceSession.sandboxId!,
+						workDir,
+						githubToken,
+					});
+					snap.setStatus({ code: SpanStatusCode.OK });
+					return result;
+				});
+				snapshotId = forkResult.snapshotId;
 
-			await db
-				.update(chatSessions)
-				.set({
-					sandboxId: forkResult.sandboxId,
-					sandboxUrl: forkResult.sandboxUrl,
-					opencodeSessionId,
-					status: newStatus,
-					updatedAt: new Date(),
-				})
-				.where(eq(chatSessions.id, session!.id));
+				// 3. Use OpenCode's fork API to create a new session with full message history
+				const client = getOpencodeClient(forkResult.sandboxId, forkResult.sandboxUrl);
+				const opencodeSessionId = await tracer.startActiveSpan('session.fork.opencode', async (oc) => {
+					let id: string | null = null;
+					for (let attempt = 1; attempt <= 5; attempt++) {
+						try {
+							const forkedSession = await client.session.fork({
+								path: { id: sourceOpencodeSessionId },
+								body: {},
+							});
+							id =
+								(forkedSession as any)?.data?.id || (forkedSession as any)?.id || null;
+							if (id) break;
+							logger.warn(`fork session.fork attempt ${attempt}: no session ID returned`);
+						} catch (err) {
+							logger.warn(`fork session.fork attempt ${attempt} failed`, { error: err });
+						}
+						if (attempt < 5) await new Promise((r) => setTimeout(r, 2000));
+					}
+					oc.setStatus({ code: SpanStatusCode.OK });
+					return id;
+				});
 
-			// 4. Clean up snapshot (it was only needed for creating the new sandbox)
-			try {
-				await sandbox.snapshot.delete(snapshotId);
-				logger.info(`Cleaned up fork snapshot: ${snapshotId}`);
-			} catch {
-				logger.warn(`Failed to clean up fork snapshot: ${snapshotId}`);
-			}
-		} catch (error) {
-			logger.error('Fork failed', { error });
-			await db
-				.update(chatSessions)
-				.set({
-					status: 'error',
-					metadata: { ...metadata, repoUrl, branch, error: String(error) },
-					updatedAt: new Date(),
-				})
-				.where(eq(chatSessions.id, session!.id));
-			// Try to clean up snapshot on failure too
-			if (snapshotId) {
+				const newStatus = opencodeSessionId ? 'active' : 'creating';
+
+				await db
+					.update(chatSessions)
+					.set({
+						sandboxId: forkResult.sandboxId,
+						sandboxUrl: forkResult.sandboxUrl,
+						opencodeSessionId,
+						status: newStatus,
+						updatedAt: new Date(),
+					})
+					.where(eq(chatSessions.id, session!.id));
+
+				// 4. Clean up snapshot (it was only needed for creating the new sandbox)
 				try {
 					await sandbox.snapshot.delete(snapshotId);
+					logger.info(`Cleaned up fork snapshot: ${snapshotId}`);
 				} catch {
-					// Ignore
+					logger.warn(`Failed to clean up fork snapshot: ${snapshotId}`);
+				}
+
+				parentSpan.setStatus({ code: SpanStatusCode.OK });
+			} catch (error) {
+				parentSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+				logger.error('Fork failed', { error });
+				await db
+					.update(chatSessions)
+					.set({
+						status: 'error',
+						metadata: { ...metadata, repoUrl, branch, error: String(error) },
+						updatedAt: new Date(),
+					})
+					.where(eq(chatSessions.id, session!.id));
+				// Try to clean up snapshot on failure too
+				if (snapshotId) {
+					try {
+						await sandbox.snapshot.delete(snapshotId);
+					} catch {
+						// Ignore
+					}
 				}
 			}
-		}
+		});
 	})();
 
 	return c.json(session, 201);
@@ -289,6 +339,9 @@ api.post('/:id/fork', async (c) => {
 api.delete('/:id', async (c) => {
 	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
+
+	c.var.session.metadata.action = 'delete-session';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	// Destroy sandbox
 	if (session.sandboxId) {
@@ -309,6 +362,9 @@ api.delete('/:id', async (c) => {
 api.post('/:id/share', async (c) => {
 	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
+
+	c.var.session.metadata.action = 'share-session';
+	c.var.session.metadata.sessionDbId = session.id;
 
 	// Fetch messages from OpenCode if sandbox is active
 	let messages: unknown[] = [];
@@ -350,45 +406,52 @@ api.post('/:id/share', async (c) => {
 		);
 	}
 
-	try {
-		const streamService = c.var.stream;
-		const shareData = {
-			session: {
-				id: session.id,
-				title: session.title || 'Untitled Session',
-				agent: session.agent,
-				model: session.model,
-				createdAt: session.createdAt,
-			},
-			messages,
-			sharedAt: new Date().toISOString(),
-		};
+	return c.var.tracer.startActiveSpan('session.share', async (span) => {
+		span.setAttribute('sessionDbId', session.id);
+		span.setAttribute('messageCount', messages.length);
+		try {
+			const streamService = c.var.stream;
+			const shareData = {
+				session: {
+					id: session.id,
+					title: session.title || 'Untitled Session',
+					agent: session.agent,
+					model: session.model,
+					createdAt: session.createdAt,
+				},
+				messages,
+				sharedAt: new Date().toISOString(),
+			};
 
-		const stream = await streamService.create('shared-sessions', {
-			contentType: 'application/json',
-			compress: true,
-			ttl: 2592000, // 30 days
-			metadata: {
-				title: session.title || 'Shared Session',
-				sessionId: session.id,
-				createdAt: new Date().toISOString(),
-			},
-		});
+			const stream = await streamService.create('shared-sessions', {
+				contentType: 'application/json',
+				compress: true,
+				ttl: 2592000, // 30 days
+				metadata: {
+					title: session.title || 'Shared Session',
+					sessionId: session.id,
+					createdAt: new Date().toISOString(),
+				},
+			});
 
-		await stream.write(shareData);
-		await stream.close();
+			await stream.write(shareData);
+			await stream.close();
 
-		// Track in thread state
-		const thread = c.var.thread;
-		if (thread?.state) {
-			await thread.state.set('sharedAt', new Date().toISOString());
+			// Update thread context with share URL
+			const { updateThreadContext } = await import('../lib/thread-context');
+			await updateThreadContext(c.var.thread, {
+				shareUrl: stream.url,
+				lastActivityAt: new Date().toISOString(),
+			});
+
+			span.setStatus({ code: SpanStatusCode.OK });
+			return c.json({ url: stream.url, id: stream.id });
+		} catch (error) {
+			span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+			c.var.logger.error('Failed to create share stream', { error });
+			return c.json({ error: 'Failed to create share link' }, 500);
 		}
-
-		return c.json({ url: stream.url, id: stream.id });
-	} catch (error) {
-		c.var.logger.error('Failed to create share stream', { error });
-		return c.json({ error: 'Failed to create share link' }, 500);
-	}
+	});
 });
 
 export default api;
