@@ -373,6 +373,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		{ enqueue: enqueueAudio }
 	);
 
+	const lastSpokenMessageIdRef = useRef<string | null>(null);
+
 	// Stop audio playback when user starts speaking (interruption)
 	useEffect(() => {
 		if (isListening) {
@@ -738,8 +740,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	});
 
 	const handleEventBatch = useCallback((events: AccumulatedEvent[]) => {
-		// Extract recent chat context for the narrator
-		const recentMessages = displayMessages.slice(-6).map(m => {
+		// Skip completion events -- handled by the speak-on-complete effect below
+		const midTaskEvents = events.filter(e => e.type !== 'complete');
+		if (midTaskEvents.length === 0) return;
+
+		// Mid-task narration: use narrator for real-time updates
+		const recentMessages = displayMessages.slice(-4).map(m => {
 			const parts = getDisplayParts(m.id);
 			const textContent = parts
 				.filter(p => p.type === 'text')
@@ -747,11 +753,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				.join('');
 			return {
 				role: m.role,
-				text: textContent.slice(0, 500), // Truncate for brevity
+				text: textContent.slice(0, 300),
 			};
 		}).filter(m => m.text.length > 0);
 
-		void narrate(events, recentMessages);
+		void narrate(midTaskEvents, recentMessages);
 	}, [narrate, displayMessages, getDisplayParts]);
 
 	// Get parts of the current streaming assistant message for accumulation
@@ -767,6 +773,49 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		isBusy,
 		onBatch: handleEventBatch,
 	});
+
+	// Lead mode: speak the assistant's actual text when session completes
+	useEffect(() => {
+		if (!isLeadMode || isBusy) return;
+
+		// Find the last assistant message
+		const lastAssistant = displayMessages.length > 0
+			? [...displayMessages].reverse().find(m => m.role === 'assistant')
+			: null;
+
+		if (!lastAssistant || lastAssistant.id === lastSpokenMessageIdRef.current) return;
+
+		// Mark as spoken immediately to prevent double-speak
+		lastSpokenMessageIdRef.current = lastAssistant.id;
+
+		// Small delay to ensure all text parts are received
+		const timer = setTimeout(() => {
+			const parts = getDisplayParts(lastAssistant.id);
+			const textContent = parts
+				.filter(p => p.type === 'text')
+				.map(p => (p as { text: string }).text || '')
+				.join('\n')
+				.replace(/```[\s\S]*?```/g, '') // Strip code blocks
+				.replace(/\*\*([^*]+)\*\*/g, '$1') // Strip bold markdown
+				.replace(/`([^`]+)`/g, '$1') // Strip inline code backticks
+				.replace(/#{1,6}\s/g, '') // Strip heading markers
+				.replace(/\n{2,}/g, '. ') // Collapse multiple newlines into sentence breaks
+				.replace(/\s{2,}/g, ' ') // Collapse whitespace
+				.trim();
+
+			if (textContent) {
+				// Take a reasonable amount for TTS (first ~800 chars, break at sentence)
+				let speechText = textContent;
+				if (speechText.length > 800) {
+					const cutoff = speechText.lastIndexOf('.', 800);
+					speechText = cutoff > 200 ? speechText.slice(0, cutoff + 1) : speechText.slice(0, 800);
+				}
+				void speakText(speechText);
+			}
+		}, 500);
+
+		return () => clearTimeout(timer);
+	}, [isLeadMode, isBusy, displayMessages, getDisplayParts, speakText]);
 
 	// Clear narrator history when switching away from Lead mode
 	useEffect(() => {

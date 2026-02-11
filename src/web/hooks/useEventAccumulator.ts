@@ -144,16 +144,10 @@ export function useEventAccumulator(options: UseEventAccumulatorOptions) {
     }
   }, [enabled, parts, flush]);
 
-  // When session transitions from busy to idle, flush remaining events and add completion
+  // When session transitions from busy to idle, flush remaining mid-task events
   useEffect(() => {
     if (!enabled) return;
     if (wasBusyRef.current && !isBusy) {
-      // Session just completed
-      accumulatorRef.current.push({
-        type: 'complete',
-        summary: 'Task completed',
-        timestamp: Date.now(),
-      });
       flush();
     }
     wasBusyRef.current = isBusy;
