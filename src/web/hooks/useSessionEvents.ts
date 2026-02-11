@@ -247,6 +247,7 @@ export function useSessionEvents(sessionId: string | undefined) {
 	const eventSourceRef = useRef<EventSource | null>(null);
 	const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const retryCountRef = useRef(0);
+	const shouldReconnectRef = useRef(true);
 
 	// -----------------------------------------------------------------------
 	// SSE connection lifecycle
@@ -256,6 +257,7 @@ export function useSessionEvents(sessionId: string | undefined) {
 
 		// Reset retry counter on fresh mount / sessionId change
 		retryCountRef.current = 0;
+		shouldReconnectRef.current = true;
 
 		// Hydrate existing messages on mount
 		fetch(`/api/sessions/${sessionId}/messages`)
@@ -295,18 +297,50 @@ export function useSessionEvents(sessionId: string | undefined) {
 		// -------------------------------------------------------------------
 		// EventSource setup with exponential-backoff reconnect
 		// -------------------------------------------------------------------
+		function scheduleReconnect(reason?: string) {
+			if (!shouldReconnectRef.current) return;
+			if (reconnectTimerRef.current) return;
+			retryCountRef.current += 1;
+			if (retryCountRef.current <= MAX_RETRIES) {
+				dispatch({ type: 'DISCONNECTED', error: reason });
+				const delay = Math.min(
+					RECONNECT_DELAY_MS * Math.pow(1.5, retryCountRef.current - 1),
+					10_000,
+				);
+				reconnectTimerRef.current = setTimeout(() => {
+					reconnectTimerRef.current = null;
+					connect();
+				}, delay);
+			} else {
+				dispatch({
+					type: 'DISCONNECTED',
+					error: reason ?? 'Max reconnection attempts reached',
+				});
+			}
+		}
+
 		function connect() {
 			const es = new EventSource(`/api/sessions/${sessionId}/events`);
 			eventSourceRef.current = es;
 
 			es.onopen = () => {
 				retryCountRef.current = 0; // Reset on successful connection
+				if (reconnectTimerRef.current) {
+					clearTimeout(reconnectTimerRef.current);
+					reconnectTimerRef.current = null;
+				}
 				dispatch({ type: 'CONNECTED' });
 			};
 
 			es.onmessage = (e: MessageEvent) => {
 				try {
 					const event = JSON.parse(e.data as string) as ChatEvent;
+					if (event.type === 'session.error') {
+						dispatchChatEvent(dispatch, event);
+						es.close();
+						scheduleReconnect(event.properties?.error ?? 'Session error');
+						return;
+					}
 					dispatchChatEvent(dispatch, event);
 				} catch {
 					// Ignore malformed SSE payloads
@@ -314,27 +348,16 @@ export function useSessionEvents(sessionId: string | undefined) {
 			};
 
 			es.onerror = () => {
+				if (eventSourceRef.current !== es) return;
 				es.close();
-				dispatch({ type: 'DISCONNECTED' });
-				retryCountRef.current += 1;
-				if (retryCountRef.current <= MAX_RETRIES) {
-					const delay = Math.min(
-						RECONNECT_DELAY_MS * Math.pow(1.5, retryCountRef.current - 1),
-						10_000,
-					);
-					reconnectTimerRef.current = setTimeout(connect, delay);
-				} else {
-					dispatch({
-						type: 'DISCONNECTED',
-						error: 'Max reconnection attempts reached',
-					});
-				}
+				scheduleReconnect('Connection lost');
 			};
 		}
 
 		connect();
 
 		return () => {
+			shouldReconnectRef.current = false;
 			eventSourceRef.current?.close();
 			eventSourceRef.current = null;
 			if (reconnectTimerRef.current) {

@@ -2,9 +2,34 @@
  * Sandbox lifecycle management for OpenCode servers.
  * Each chat session gets its own sandbox with an OpenCode server.
  */
+import { sandboxExecute } from '@agentuity/server';
 
 const OPENCODE_PORT = 4096;
 const OPENCODE_RUNTIME = 'opencode:latest';
+
+type ExecutionLike = {
+	status?: string;
+	exitCode?: number;
+	stdoutStreamUrl?: string;
+	stderrStreamUrl?: string;
+};
+
+async function readExecutionStreams(execution: ExecutionLike): Promise<{ stdout?: string; stderr?: string }> {
+	const [stdout, stderr] = await Promise.all([
+		execution.stdoutStreamUrl
+			? fetch(execution.stdoutStreamUrl)
+					.then((resp) => (resp.ok ? resp.text() : undefined))
+					.catch(() => undefined)
+			: Promise.resolve(undefined),
+		execution.stderrStreamUrl
+			? fetch(execution.stderrStreamUrl)
+					.then((resp) => (resp.ok ? resp.text() : undefined))
+					.catch(() => undefined)
+			: Promise.resolve(undefined),
+	]);
+
+	return { stdout, stderr };
+}
 
 export interface SandboxConfig {
   repoUrl?: string;
@@ -25,6 +50,8 @@ export interface SandboxContext {
       create: (sandboxId: string, opts?: { name?: string; description?: string; tag?: string }) => Promise<{ snapshotId: string }>;
       delete: (snapshotId: string) => Promise<void>;
     };
+    /** Low-level API client for sandboxExecute with timeout support */
+    client?: any;
   };
   logger: {
     info: (...args: any[]) => void;
@@ -40,7 +67,7 @@ export interface SandboxContext {
 export async function createSandbox(
   ctx: SandboxContext,
   config: SandboxConfig,
-): Promise<{ sandboxId: string; sandboxUrl: string }> {
+): Promise<{ sandboxId: string; sandboxUrl: string; cloneError?: string }> {
   ctx.logger.info('Creating sandbox with OpenCode server...');
 
   // 1. Create the sandbox with org-level secrets for provider API keys.
@@ -85,27 +112,153 @@ export async function createSandbox(
       ctx.logger.warn('gh auth setup-git failed', { error });
     }
 
-    // 3. Clone repo if specified
-    if (config.repoUrl) {
-      await sandbox.execute({
-        command: [
-          'bash', '-c',
-          `cd /home/agentuity && git clone ${config.repoUrl} ${repoName}`,
-        ],
-      });
+		// 3. Clone repo if specified
+		let cloneError: string | undefined;
+		if (config.repoUrl) {
+			let cloneSucceeded = false;
+			try {
+				// Use sandboxExecute with timeout for reliable git clone.
+				// sandbox.execute() returns immediately with status:"queued" — it does NOT
+				// wait for the command to finish. sandboxExecute with a timeout parameter
+				// waits for completion.
+				const apiClient = ctx.sandbox.client;
+				if (apiClient) {
+					const cloneExecution = await sandboxExecute(apiClient, {
+						sandboxId,
+						options: {
+							command: ['bash', '-c', `cd /home/agentuity && git clone ${config.repoUrl} ${repoName} 2>&1`],
+							timeout: '2m',
+						},
+					});
 
-      if (config.branch) {
-        const sanitizedBranch = config.branch.trim().replace(/[^a-zA-Z0-9._\-/]/g, '-');
-        if (sanitizedBranch) {
-          await sandbox.execute({
-            command: [
-              'bash', '-c',
-              `cd ${workDir} && git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}'`,
-            ],
-          });
-        }
-      }
-    } else {
+					// sandboxExecute often returns status:"queued" with null exitCode even when
+					// the command completed successfully and stdout/stderr are available.
+					// If we have a real numeric exitCode, trust it. Otherwise check for streams.
+					const cloneExitCode = typeof cloneExecution?.exitCode === 'number' ? cloneExecution.exitCode : null;
+					const hasStreams = Boolean(cloneExecution?.stdoutStreamUrl || cloneExecution?.stderrStreamUrl);
+
+					if (cloneExitCode !== null && cloneExitCode !== 0) {
+						// Definite failure
+						const { stdout, stderr } = await readExecutionStreams(cloneExecution ?? {});
+						const errorDetail = stderr || stdout || `exit code ${cloneExitCode}`;
+						cloneError = `Git clone failed for ${config.repoUrl}: ${errorDetail}`.slice(0, 500);
+						ctx.logger.warn('Git clone failed', {
+							repoUrl: config.repoUrl,
+							status: cloneExecution?.status,
+							exitCode: cloneExitCode,
+							stdout,
+							stderr,
+						});
+					} else if (cloneExecution?.status === 'completed' || (hasStreams && cloneExitCode === null)) {
+						// Success or likely success (has streams, no error exit code)
+						cloneSucceeded = true;
+					} else if (cloneExecution?.status === 'failed' || cloneExecution?.status === 'timeout') {
+						const { stdout, stderr } = await readExecutionStreams(cloneExecution ?? {});
+						cloneError = `Git clone ${cloneExecution.status} for ${config.repoUrl}: ${stderr || stdout || 'unknown error'}`.slice(0, 500);
+						ctx.logger.warn('Git clone failed', {
+							repoUrl: config.repoUrl,
+							status: cloneExecution.status,
+							stdout,
+							stderr,
+						});
+					} else {
+						// Ambiguous (queued/running but no exit code or streams) — check if dir exists
+						ctx.logger.info('Git clone returned ambiguous status, checking directory', {
+							repoUrl: config.repoUrl,
+							status: cloneExecution?.status,
+						});
+						// Give it a moment to settle, then check
+						await new Promise((r) => setTimeout(r, 3000));
+						const dirCheck = await sandbox.execute({
+							command: ['bash', '-c', `test -d ${workDir}/.git && echo "ok"`],
+						});
+						const checkOutput = dirCheck?.stdoutStreamUrl
+							? await fetch(dirCheck.stdoutStreamUrl).then((r) => r.text()).catch(() => '')
+							: '';
+						if (checkOutput.includes('ok')) {
+							cloneSucceeded = true;
+						} else {
+							cloneError = `Git clone may have failed for ${config.repoUrl}: command returned status ${cloneExecution?.status}`.slice(0, 500);
+							ctx.logger.warn('Git clone directory check failed after ambiguous status', {
+								repoUrl: config.repoUrl,
+								status: cloneExecution?.status,
+							});
+						}
+					}
+				} else {
+					// Fallback: no apiClient available, use sandbox.execute() (may return queued)
+					ctx.logger.warn('No apiClient available for sandboxExecute, using sandbox.execute() fallback');
+					const cloneExecution: ExecutionLike | null = await sandbox.execute({
+						command: ['bash', '-c', `cd /home/agentuity && git clone ${config.repoUrl} ${repoName} 2>&1`],
+					});
+					// Since sandbox.execute() may return immediately, wait and check
+					await new Promise((r) => setTimeout(r, 15000));
+					const dirCheck = await sandbox.execute({
+						command: ['bash', '-c', `test -d ${workDir}/.git && echo "ok"`],
+					});
+					const checkOutput = dirCheck?.stdoutStreamUrl
+						? await fetch(dirCheck.stdoutStreamUrl).then((r) => r.text()).catch(() => '')
+						: '';
+					if (checkOutput.includes('ok')) {
+						cloneSucceeded = true;
+					} else {
+						const { stdout, stderr } = await readExecutionStreams(cloneExecution ?? {});
+						cloneError = `Git clone failed for ${config.repoUrl}: ${stderr || stdout || 'unknown error'}`.slice(0, 500);
+						ctx.logger.warn('Git clone failed (fallback path)', {
+							repoUrl: config.repoUrl,
+							stdout,
+							stderr,
+						});
+					}
+				}
+			} catch (error) {
+				cloneError = `Git clone error for ${config.repoUrl}: ${String(error)}`.slice(0, 500);
+				ctx.logger.warn('Git clone execution error', { repoUrl: config.repoUrl, error: String(error) });
+			}
+
+			if (!cloneSucceeded) {
+				await sandbox.execute({
+					command: ['bash', '-c', `mkdir -p ${workDir}`],
+				});
+				await sandbox.execute({
+					command: ['bash', '-c', `touch ${workDir}/.opencode-clone-failed`],
+				});
+			} else {
+				ctx.logger.info('Git clone succeeded', { repoUrl: config.repoUrl, workDir });
+			}
+
+			const workDirCheck = await sandbox.execute({
+				command: ['bash', '-c', `test -d ${workDir}`],
+			});
+			if (workDirCheck?.status !== 'completed' || (workDirCheck?.exitCode ?? 0) !== 0) {
+				ctx.logger.warn('Work directory missing after clone attempt, creating empty', { workDir });
+				await sandbox.execute({
+					command: ['bash', '-c', `mkdir -p ${workDir}`],
+				});
+			}
+
+			const gitCheck = await sandbox.execute({
+				command: ['bash', '-c', `test -d ${workDir}/.git`],
+			});
+			const hasGitRepo = gitCheck?.status === 'completed' && (gitCheck?.exitCode ?? 0) === 0;
+
+			if (config.branch && hasGitRepo) {
+				const sanitizedBranch = config.branch.trim().replace(/[^a-zA-Z0-9._\-/]/g, '-');
+				if (sanitizedBranch) {
+					await sandbox.execute({
+						command: [
+							'bash', '-c',
+							`cd ${workDir} && git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}'`,
+						],
+					});
+				}
+			} else if (config.branch && !hasGitRepo) {
+				ctx.logger.warn('Skipping branch checkout because git repo is missing', {
+					workDir,
+					branch: config.branch,
+				});
+			}
+		} else {
       // Create a default project directory
       await sandbox.execute({
         command: ['bash', '-c', `mkdir -p ${workDir}`],
@@ -170,7 +323,7 @@ export async function createSandbox(
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
 
     ctx.logger.info(`OpenCode server ready at ${sandboxUrl}`);
-    return { sandboxId, sandboxUrl };
+    return { sandboxId, sandboxUrl, ...(cloneError ? { cloneError } : {}) };
   } catch (error) {
     ctx.logger.error('Failed to setup sandbox, destroying...', { error });
     try {

@@ -1178,6 +1178,15 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					)}
 				</div>
 			)}
+			{typeof (session.metadata as Record<string, unknown> | null)?.cloneError === 'string' && (
+				<div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+					<div className="font-medium">⚠️ Repository clone failed</div>
+					<p className="mt-1 text-[10px]">{(session.metadata as Record<string, string>).cloneError}</p>
+					<p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+						The session started without code. Check your GitHub PAT permissions in Profile settings, or provide the repo URL to the agent.
+					</p>
+				</div>
+			)}
 			{displayMessages.length === 0 && !isBusy ? (
 				<ConversationEmptyState>
 					{!isConnected && error ? (

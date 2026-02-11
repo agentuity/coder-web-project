@@ -235,7 +235,10 @@ api.post('/:id/fork', async (c) => {
 			parentSpan.setAttribute('forkSessionId', session!.id);
 			let snapshotId: string | undefined;
 			try {
-				const sandboxCtx: SandboxContext = { sandbox, logger };
+				const sandboxCtx: SandboxContext = {
+					sandbox: sandbox as any,
+					logger,
+				};
 
 				// 1. Get GitHub token for the new sandbox
 				let githubToken: string | undefined;

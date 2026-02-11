@@ -129,7 +129,10 @@ api.post('/', async (c) => {
 			parentSpan.setAttribute('sessionDbId', session!.id);
 			parentSpan.setAttribute('workspaceId', workspaceId);
 			try {
-				const sandboxCtx: SandboxContext = { sandbox, logger };
+				const sandboxCtx: SandboxContext = {
+					sandbox: sandbox as any,
+					logger,
+				};
 				let githubToken: string | undefined;
 				try {
 					const [settings] = await db
@@ -142,7 +145,7 @@ api.post('/', async (c) => {
 				} catch {
 					logger.warn('Failed to load GitHub token for sandbox', { userId: user.id });
 				}
-				const { sandboxId, sandboxUrl } = await createSandbox(sandboxCtx, {
+				const { sandboxId, sandboxUrl, cloneError } = await createSandbox(sandboxCtx, {
 					repoUrl: body.repoUrl,
 					branch: body.branch,
 					opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
@@ -150,6 +153,13 @@ api.post('/', async (c) => {
 					registrySkills,
 					githubToken,
 				});
+
+				if (cloneError) {
+					logger.warn('Git clone failed during session creation', {
+						sessionId: session!.id,
+						cloneError,
+					});
+				}
 
 				const client = getOpencodeClient(sandboxId, sandboxUrl);
 				let opencodeSessionId: string | null = null;
@@ -176,6 +186,15 @@ api.post('/', async (c) => {
 						opencodeSessionId,
 						status: newStatus,
 						updatedAt: new Date(),
+						...(cloneError
+							? {
+									metadata: {
+										repoUrl: body.repoUrl,
+										branch: body.branch,
+										cloneError,
+									},
+								}
+							: {}),
 					})
 					.where(eq(chatSessions.id, session!.id));
 

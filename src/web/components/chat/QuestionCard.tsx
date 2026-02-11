@@ -29,7 +29,9 @@ export function QuestionCard({ request, sessionId }: QuestionCardProps) {
 				body: JSON.stringify({ answers }),
 			});
 			if (!res.ok) {
-				setError('Failed to send answer. Try again.');
+				const detail = await res.text().catch(() => '');
+				const message = detail ? `Failed to send answer: ${detail}` : 'Failed to send answer. Try again.';
+				setError(message);
 				return;
 			}
 			setReplied(true);

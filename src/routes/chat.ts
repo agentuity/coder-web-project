@@ -272,23 +272,61 @@ api.get(
 			return;
 		}
 
+		const logger = c.var.logger;
+		let closed = false;
+		let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+		let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
+
+		const safeWrite = async (message: { data: string; event?: string }) => {
+			if (closed) return;
+			try {
+				await stream.writeSSE(message);
+			} catch (error) {
+				closed = true;
+				if (keepaliveTimer) clearInterval(keepaliveTimer);
+				logger?.warn?.('SSE write failed', { error: String(error) });
+			}
+		};
+
+		const sendSessionError = async (message: string, details?: unknown) => {
+			await safeWrite({
+				data: JSON.stringify({
+					type: 'session.error',
+					properties: {
+						sessionID: session.opencodeSessionId,
+						error: message,
+						...(details ? { details } : {}),
+					},
+				}),
+			});
+		};
+
+		stream.onAbort(() => {
+			closed = true;
+			if (keepaliveTimer) clearInterval(keepaliveTimer);
+			if (reader) {
+				reader.cancel().catch(() => undefined);
+			}
+		});
+
+		keepaliveTimer = setInterval(() => {
+			void safeWrite({ event: 'ping', data: 'ping' });
+		}, 15000);
+
 		// Use raw fetch to sandbox event stream for reliable SSE proxying
 		try {
 			const eventResponse = await fetch(`${session.sandboxUrl}/event`);
 			if (!eventResponse.ok || !eventResponse.body) {
-				await stream.writeSSE({
-					data: JSON.stringify({ type: 'error', message: 'No event stream' }),
-				});
-				stream.close();
+				await sendSessionError('No event stream', { status: eventResponse.status });
 				return;
 			}
 
-			const reader = eventResponse.body.getReader();
+			reader = eventResponse.body.getReader();
 			const decoder = new TextDecoder();
 			let buffer = '';
 
 			try {
-				while (true) {
+				while (!closed) {
 					const { done, value } = await reader.read();
 					if (done) break;
 
@@ -315,24 +353,31 @@ api.get(
 								continue;
 							}
 
-							await stream.writeSSE({ data: JSON.stringify(event) });
+							await safeWrite({ data: JSON.stringify(event) });
 						} catch {
 							// Skip malformed events
 						}
 					}
 				}
-			} catch {
-				// Stream ended
+				if (!closed) {
+					await sendSessionError('Event stream ended');
+				}
+			} catch (error) {
+				if (!closed) {
+					await sendSessionError('Event stream disconnected', { error: String(error) });
+				}
 			} finally {
 				reader.releaseLock();
 			}
 		} catch (error) {
-			await stream.writeSSE({
-				data: JSON.stringify({ type: 'error', message: String(error) }),
-			});
+			if (!closed) {
+				await sendSessionError('Failed to proxy event stream', { error: String(error) });
+			}
+		} finally {
+			closed = true;
+			if (keepaliveTimer) clearInterval(keepaliveTimer);
+			stream.close();
 		}
-
-		stream.close();
 	}),
 );
 
