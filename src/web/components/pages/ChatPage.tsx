@@ -1630,7 +1630,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						onClick={() => setUrlState({ v: 'ide' })}
 						className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
 					>
-						IDE
+						{'</>'}
 					</Button>
 				</div>
 				<div

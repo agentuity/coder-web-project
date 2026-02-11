@@ -533,16 +533,16 @@ function StatusSection({
 			)}
 			{status && status.branch && (
 				<div className="mt-2 space-y-1.5">
-					<div className="flex items-center gap-2">
-						<Badge variant="secondary" className="text-[10px] font-mono">
+					<div className="flex items-center gap-2 min-w-0">
+						<Badge variant="secondary" className="text-[10px] font-mono truncate min-w-0 shrink">
 							{status.branch}
 						</Badge>
 						{status.isDirty ? (
-							<Badge variant="destructive" className="text-[10px]">
+							<Badge variant="destructive" className="text-[10px] shrink-0 whitespace-nowrap">
 								{status.changedFiles.length} changed
 							</Badge>
 						) : (
-							<Badge variant="outline" className="text-[10px]">
+							<Badge variant="outline" className="text-[10px] shrink-0 whitespace-nowrap">
 								Clean
 							</Badge>
 						)}

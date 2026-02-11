@@ -63,11 +63,13 @@ export async function createSandbox(
   const workDir = `/home/agentuity/${repoName}`;
 
   try {
-    // 2. Write opencode.json config
+    // 2. Write opencode.json to the global config location (~/.config/opencode/)
+    //    so it doesn't appear as a new file in the cloned repo's git status.
+    //    OpenCode reads global config from ~/.config/opencode/opencode.json.
     await sandbox.execute({
       command: [
         'bash', '-c',
-        `cat > /home/agentuity/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
+        `mkdir -p ~/.config/opencode && cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
       ],
     });
 
@@ -146,7 +148,7 @@ export async function createSandbox(
     await sandbox.execute({
       command: [
         'bash', '-c',
-        `cd ${workDir} && cp /home/agentuity/opencode.json . && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
+        `cd ${workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
       ],
     });
 
