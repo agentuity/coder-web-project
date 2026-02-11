@@ -233,7 +233,10 @@ api.post('/', async (c) => {
 				if (attempt < 5) await new Promise((r) => setTimeout(r, 2000));
 			}
 
-			const newStatus = opencodeSessionId ? 'active' : 'creating';
+			const newStatus = opencodeSessionId ? 'active' : 'error';
+			const nextMetadata = opencodeSessionId
+				? metadata
+				: { ...metadata, error: 'Failed to create OpenCode session after 5 attempts' };
 
 			await db
 				.update(chatSessions)
@@ -242,6 +245,7 @@ api.post('/', async (c) => {
 					sandboxUrl,
 					opencodeSessionId,
 					status: newStatus,
+					metadata: nextMetadata,
 					updatedAt: new Date(),
 				})
 				.where(eq(chatSessions.id, session!.id));

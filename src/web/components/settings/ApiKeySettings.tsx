@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, Check, Plus, Trash2, Key, Eye, EyeOff } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -66,6 +66,14 @@ export function ApiKeySettings() {
 
 	// Visibility toggle for key prefixes
 	const [showPrefixes, setShowPrefixes] = useState(false);
+
+	// Cleanup timeout on unmount to avoid React state update warnings
+	const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => {
+		return () => {
+			if (copyTimeoutRef.current) clearTimeout(copyTimeoutRef.current);
+		};
+	}, []);
 
 	const fetchKeys = useCallback(async () => {
 		try {
@@ -152,7 +160,7 @@ export function ApiKeySettings() {
 		try {
 			await navigator.clipboard.writeText(text);
 			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
+			copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
 		} catch {
 			// Clipboard API unavailable — the code element has select-all styling
 			// so users can manually select and copy
