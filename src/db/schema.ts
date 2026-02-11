@@ -69,7 +69,7 @@ export const userSettings = pgTable('user_settings', {
   githubPat: text('github_pat'),
   voiceEnabled: boolean('voice_enabled').default(false),
   voiceModel: text('voice_model').default('gpt-4o-mini-tts'),
-  voiceName: text('voice_name').default('alloy'),
+  voiceName: text('voice_name').default('coral'),
   voiceAutoSpeak: boolean('voice_auto_speak').default(true),
   voiceSpeed: text('voice_speed').default('1.0'),
   preferredMic: text('preferred_mic'),

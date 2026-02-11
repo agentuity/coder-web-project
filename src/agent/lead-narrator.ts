@@ -33,7 +33,7 @@ const agent = createAgent('LeadNarrator', {
 	description: 'Voice agent — generates spoken responses from assistant text',
 	schema: {
 		input: z.object({
-			action: z.enum(['transcribe', 'speak', 'condense']),
+			action: z.enum(['transcribe', 'speak', 'condense', 'narrate']),
 			text: z.string().optional(),
 			audio: z.string().optional(),
 			voice: z.string().optional(),
@@ -67,15 +67,15 @@ const agent = createAgent('LeadNarrator', {
 				return { text: transcript.text };
 			}
 
-			case 'speak': {
-				if (!input.text) {
-					return {};
-				}
-				const speech = await generateSpeech({
-					model: openai.speech('gpt-4o-mini-tts'),
-					text: input.text,
-					voice: (input.voice || 'alloy') as never,
-				});
+		case 'speak': {
+			if (!input.text) {
+				return {};
+			}
+			const speech = await generateSpeech({
+				model: openai.speech('gpt-4o-mini-tts'),
+				text: input.text,
+				voice: (input.voice || 'coral') as never,
+			});
 				return {
 					audio: {
 						base64: speech.audio.base64,
@@ -108,6 +108,54 @@ const agent = createAgent('LeadNarrator', {
 				});
 
 				return { text };
+			}
+
+		case 'narrate': {
+				if (!input.text) {
+					return {};
+				}
+
+				let textToSpeak = input.text;
+
+				// If text is long, condense with Haiku first
+				if (input.text.length >= 200) {
+					let conversationContext = '';
+					if (input.conversationHistory && input.conversationHistory.length > 0) {
+						conversationContext = input.conversationHistory
+							.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
+							.join('\n\n');
+					}
+
+					const prompt = conversationContext
+						? `Recent conversation:\n${conversationContext}\n\nThe assistant's latest response (to be delivered as speech):\n${input.text}`
+						: `The assistant's response (to be delivered as speech):\n${input.text}`;
+
+					const { text: condensed } = await generateText({
+						model: FAST_MODEL,
+						system: CONDENSE_SYSTEM,
+						messages: [{ role: 'user', content: prompt }],
+						maxOutputTokens: 800,
+					});
+
+					if (condensed) {
+						textToSpeak = condensed;
+					}
+				}
+
+		// Generate speech
+		const speech = await generateSpeech({
+			model: openai.speech('gpt-4o-mini-tts'),
+			text: textToSpeak,
+			voice: (input.voice || 'coral') as never,
+		});
+
+				return {
+					text: textToSpeak,
+					audio: {
+						base64: speech.audio.base64,
+						mimeType: 'audio/mpeg',
+					},
+				};
 			}
 
 			default:

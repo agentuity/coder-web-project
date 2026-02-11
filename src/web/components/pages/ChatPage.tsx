@@ -11,6 +11,7 @@ import {
 	Loader2,
 	Paperclip,
 	ExternalLink,
+	RotateCcw,
 	Terminal,
 
 	WifiOff,
@@ -65,9 +66,9 @@ import { Loader } from '../ai-elements/loader';
 import { useToast } from '../ui/toast';
 import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
-import { useVoiceInput } from '../../hooks/useVoiceInput';
+import { useNarratorMode } from '../../hooks/useNarratorMode';
 import { useAudioPlayback } from '../../hooks/useAudioPlayback';
-import { MicButton } from '../ui/MicButton';
+import { VoiceControls } from '../ui/VoiceControls';
 import { cn } from '../../lib/utils';
 import { useUrlState } from '../../hooks/useUrlState';
 
@@ -272,6 +273,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		todos,
 		isConnected,
 		error,
+		revertState,
 	} = useSessionEvents(activeSessionId);
 
 	const [isRetrying, setIsRetrying] = useState(false);
@@ -313,19 +315,40 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-	const handleVoiceTranscript = useCallback((text: string) => {
+	const { enqueue: enqueueAudio, clearQueue: clearAudioQueue, isSpeaking } = useAudioPlayback();
+
+	const handleSendRef = useRef<(text: string) => Promise<void>>(undefined);
+
+	const handleNarratorAutoSend = useCallback((text: string) => {
+		void handleSendRef.current?.(text);
+	}, []);
+
+	const handleNarratorCancel = useCallback(() => {
+		toast({ type: 'info', message: 'Cancelled' });
+	}, [toast]);
+
+	const handleDictation = useCallback((text: string) => {
 		setInputText((prev) => (prev ? `${prev} ${text}` : text));
 	}, []);
 
 	const {
+		narratorEnabled,
+		toggleNarrator,
 		isListening,
 		isProcessing,
 		isSupported: voiceSupported,
-		toggleListening,
-		error: voiceError,
-	} = useVoiceInput({
-		onTranscript: handleVoiceTranscript,
-		continuous: true,
+		toggleMic,
+		accumulatedText,
+		interimText,
+		cancelCountdown,
+		isCountingDown,
+		countdownProgress,
+		voiceError,
+	} = useNarratorMode({
+		onAutoSend: handleNarratorAutoSend,
+		onCancel: handleNarratorCancel,
+		onDictation: handleDictation,
+		isSpeaking,
 	});
 
 	useEffect(() => {
@@ -334,32 +357,27 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		}
 	}, [voiceError, toast]);
 
-	const { enqueue: enqueueAudio, clearQueue: clearAudioQueue } = useAudioPlayback();
-
-	// Narrator toggle
-	const [narratorEnabled, setNarratorEnabled] = useState(false);
-
-	const speakTextRef = useRef<(text: string) => Promise<void>>(undefined);
-	speakTextRef.current = async (text: string) => {
-		if (!text.trim()) return;
-		try {
-			const res = await fetch('/api/voice/speech', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ text, voice: 'alloy' }),
-			});
-			if (!res.ok) return;
-			const data = await res.json() as { audio?: { base64: string; mimeType: string } };
-			if (data.audio) enqueueAudio(data.audio);
-		} catch {
-			// Silent fail
-		}
-	};
-
 	// Stop audio playback when user starts speaking (interruption)
 	useEffect(() => {
 		if (isListening) clearAudioQueue();
 	}, [isListening, clearAudioQueue]);
+
+	// Sync narrator accumulated text into the input field
+	useEffect(() => {
+		if (!narratorEnabled) return;
+		const display = interimText
+			? `${accumulatedText} ${interimText}`.trim()
+			: accumulatedText;
+		setInputText(display);
+	}, [narratorEnabled, accumulatedText, interimText]);
+
+	// When user types manually, cancel the silence countdown
+	const handleInputChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+		setInputText(event.target.value);
+		if (narratorEnabled) {
+			cancelCountdown();
+		}
+	}, [narratorEnabled, cancelCountdown]);
 
 	const formatFileSize = useCallback((size: number) => {
 		if (size < 1024) return `${size} B`;
@@ -490,7 +508,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		},
 		[archivedParts, getPartsForMessage, session.status],
 	);
-	const { branch: gitBranch, changedCount: gitChangedCount, refresh: refreshGitStatus } = useGitStatus(activeSessionId, githubAvailable);
+	const { branch: gitBranch, changedCount: gitChangedCount, hasRepo: isGitRepo, refresh: refreshGitStatus } = useGitStatus(activeSessionId, githubAvailable);
 
 	useEffect(() => {
 		if (!isEditingTitle) {
@@ -576,6 +594,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 		await sendMessage(payload);
 	};
+	handleSendRef.current = handleSend;
 
 	useEffect(() => {
 		if (isBusy || isSending || messageQueue.length === 0) return;
@@ -682,6 +701,40 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
     }
   };
 
+	const handleRevert = useCallback(async (messageID: string) => {
+		if (!sessionId) return;
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/revert`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ messageID }),
+			});
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				console.error('Revert failed:', data);
+			}
+			// UI updates come via SSE session.updated event
+		} catch (error) {
+			console.error('Revert failed:', error);
+		}
+	}, [sessionId]);
+
+	const handleUnrevert = useCallback(async () => {
+		if (!sessionId) return;
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/unrevert`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+			});
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				console.error('Unrevert failed:', data);
+			}
+		} catch (error) {
+			console.error('Unrevert failed:', error);
+		}
+	}, [sessionId]);
+
 	const lastAssistantMessage = useMemo(
 		() => [...displayMessages].reverse().find((message) => message.role === 'assistant'),
 		[displayMessages]
@@ -706,7 +759,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			return;
 		}
 
-		// Detect busy → idle transition
 		if (wasBusyRef.current && !isBusy) {
 			const lastAssistant = displayMessages.length > 0
 				? [...displayMessages].reverse().find(m => m.role === 'assistant')
@@ -728,14 +780,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					.replace(/\s{2,}/g, ' ')
 					.trim();
 
-				if (!textContent) {
-					wasBusyRef.current = isBusy;
-					return;
-				}
-
-				if (textContent.length < 200) {
-					void speakTextRef.current?.(textContent);
-				} else {
+				if (textContent) {
 					const recentChat = displayMessages.slice(-6).map(m => {
 						const msgParts = getDisplayParts(m.id);
 						const msgText = msgParts
@@ -748,7 +793,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						return { role: m.role, text: msgText };
 					}).filter(m => m.text.length > 0);
 
-					fetch('/api/voice/condense', {
+					fetch('/api/voice/narrate', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
 						body: JSON.stringify({
@@ -757,18 +802,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						}),
 					})
 						.then(res => res.json())
-						.then((data: { text?: string }) => {
-							if (data.text) void speakTextRef.current?.(data.text);
+						.then((data: { text?: string; audio?: { base64: string; mimeType: string } }) => {
+							if (data.audio) enqueueAudio(data.audio);
 						})
 						.catch(() => {
-							void speakTextRef.current?.(textContent.slice(0, 600));
+							// Silent fail — narrator is best-effort
 						});
 				}
 			}
 		}
 
 		wasBusyRef.current = isBusy;
-	}, [narratorEnabled, isBusy, displayMessages, getDisplayParts]);
+	}, [narratorEnabled, isBusy, displayMessages, getDisplayParts, enqueueAudio]);
 
 	// Clear audio on session change
 	useEffect(() => {
@@ -1131,66 +1176,80 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					)}
 				</ConversationEmptyState>
 			) : (
-				displayMessages.map((message) => {
-					const parts = getDisplayParts(message.id);
-					const agent = 'agent' in message ? message.agent : undefined;
-					const errorInfo = 'error' in message ? message.error : undefined;
+			displayMessages.map((message, msgIndex) => {
+				const parts = getDisplayParts(message.id);
+				const agent = 'agent' in message ? message.agent : undefined;
+				const errorInfo = 'error' in message ? message.error : undefined;
+			const isAfterRevertPoint = isGitRepo && revertState != null && (() => {
+				const revertMsgIndex = displayMessages.findIndex(m => m.id === revertState.messageID);
+				return msgIndex > revertMsgIndex;
+			})();
 
-					return (
-						<Message
-							from={message.role === 'user' ? 'user' : 'assistant'}
-							key={message.id}
-						>
-							<MessageContent>
-								{agent && (
-									<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-										{agent}
-									</div>
-								)}
-							{groupPartsIntoChains(parts).map((part) => {
-								if (part.type === 'chain') {
-									return (
-										<ChainOfThought
-											key={`chain-${part.filePath}-${part.parts[0]?.id ?? 'start'}`}
-											filePath={part.filePath}
-											stepCount={part.parts.length}
-										>
-											{part.parts.map((chainPart) => renderPart(chainPart, message))}
-										</ChainOfThought>
-									);
-								}
-								return renderPart(part, message);
-							})}
-								{errorInfo && (
-									<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-										Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
-									</div>
-								)}
-							</MessageContent>
-							{message.role === 'assistant' && (
-								<MessageToolbar>
-									<ContextIndicator
-										tokens={message.tokens}
-										cost={message.cost}
-										modelID={message.modelID}
-										providerID={message.providerID}
-										label="Message"
-										compact
-									/>
-									<MessageActions>
-										<MessageAction
-											label="Copy"
-											onClick={() => copyMessage(message)}
-											title="Copy"
-										>
-											<Copy className="h-3.5 w-3.5" />
-										</MessageAction>
-									</MessageActions>
-								</MessageToolbar>
+				return (
+					<div key={message.id} className={isAfterRevertPoint ? 'opacity-30 pointer-events-none' : ''}>
+					<Message
+						from={message.role === 'user' ? 'user' : 'assistant'}
+					>
+						<MessageContent>
+							{agent && (
+								<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+									{agent}
+								</div>
 							)}
-						</Message>
-					);
-				})
+						{groupPartsIntoChains(parts).map((part) => {
+							if (part.type === 'chain') {
+								return (
+									<ChainOfThought
+										key={`chain-${part.filePath}-${part.parts[0]?.id ?? 'start'}`}
+										filePath={part.filePath}
+										stepCount={part.parts.length}
+									>
+										{part.parts.map((chainPart) => renderPart(chainPart, message))}
+									</ChainOfThought>
+								);
+							}
+							return renderPart(part, message);
+						})}
+							{errorInfo && (
+								<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+									Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
+								</div>
+							)}
+						</MessageContent>
+						{message.role === 'assistant' && (
+							<MessageToolbar>
+								<ContextIndicator
+									tokens={message.tokens}
+									cost={message.cost}
+									modelID={message.modelID}
+									providerID={message.providerID}
+									label="Message"
+									compact
+								/>
+							<MessageActions>
+								{isGitRepo && (
+									<MessageAction
+										label="Restore"
+										onClick={() => handleRevert(message.id)}
+										title="Restore to this checkpoint"
+									>
+										<RotateCcw className="h-3.5 w-3.5" />
+									</MessageAction>
+								)}
+								<MessageAction
+									label="Copy"
+									onClick={() => copyMessage(message)}
+									title="Copy"
+								>
+									<Copy className="h-3.5 w-3.5" />
+								</MessageAction>
+							</MessageActions>
+							</MessageToolbar>
+						)}
+					</Message>
+					</div>
+				);
+			})
 			)}
 
 				{pendingPermissions.map((perm) => (
@@ -1225,6 +1284,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 	const inputArea = (
 		<div className="relative z-40 shrink-0 border-t border-[var(--border)] bg-[var(--background)] p-4">
+			{revertState && isGitRepo && (
+				<div className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400 mb-2">
+					<span>Session reverted to an earlier checkpoint. New messages will continue from this point.</span>
+					<button
+						type="button"
+						onClick={handleUnrevert}
+						className="shrink-0 rounded px-2 py-0.5 text-xs font-medium text-amber-400 hover:bg-amber-500/20 transition-colors"
+					>
+						Undo Revert
+					</button>
+				</div>
+			)}
 			{messageQueue.length > 0 && (
 				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
 					<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
@@ -1242,7 +1313,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<PromptInput onSubmit={({ text }) => handleSend(text)}>
 					<PromptInputTextarea
 						value={inputText}
-						onChange={(event) => setInputText(event.target.value)}
+						onChange={handleInputChange}
 						placeholder={promptPlaceholder}
 						disabled={session.status !== 'active'}
 					/>
@@ -1259,23 +1330,23 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									<span className="text-[10px] text-[var(--muted-foreground)]">
 										{formatFileSize(attachment.size)}
 									</span>
-									<button
-										type="button"
-										className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-										onClick={() => handleRemoveAttachment(attachment.id)}
-										title="Remove attachment"
-									>
-										<X className="h-3 w-3" />
-									</button>
-								</div>
-							))}
-						</div>
-					)}
-					<PromptInputFooter>
-					<div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
-						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
-						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
-						<span className="hidden md:inline">Enter to send · Shift+Enter for new line</span>
+								<button
+									type="button"
+									className="inline-flex h-5 w-5 sm:h-4 sm:w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+									onClick={() => handleRemoveAttachment(attachment.id)}
+									title="Remove attachment"
+								>
+									<X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
+								</button>
+							</div>
+						))}
+					</div>
+				)}
+				<PromptInputFooter>
+					<div className="flex flex-wrap items-center gap-1 sm:gap-2 text-[10px] text-[var(--muted-foreground)]">
+					<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
+					<ModelSelector value={selectedModel} onChange={setSelectedModel} />
+					<span className="hidden md:inline">Enter to send · Shift+Enter for new line</span>
 							{commentCount > 0 && (
 								<Badge variant="secondary" className="text-[10px]">
 									{commentCount} comment{commentCount > 1 ? 's' : ''}
@@ -1313,29 +1384,15 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 								<Paperclip className="h-4 w-4" />
 							</Button>
 							{session.status === 'active' && (
-								<Button
-									variant="ghost"
-									size="icon"
-									type="button"
-									onClick={() => setNarratorEnabled(prev => !prev)}
-									className={cn("h-9 w-9", narratorEnabled && "text-[var(--primary)]")}
-									aria-label={narratorEnabled ? 'Disable voice narrator' : 'Enable voice narrator'}
-									title={narratorEnabled ? 'Voice narrator on' : 'Voice narrator off'}
-								>
-									<span className={cn(
-										"block h-2.5 w-2.5 rounded-full border-2 transition-colors",
-										narratorEnabled
-											? "border-[var(--primary)] bg-[var(--primary)]"
-											: "border-[var(--muted-foreground)] bg-transparent"
-									)} />
-								</Button>
-							)}
-							{session.status === 'active' && (
-								<MicButton
+								<VoiceControls
+									narratorEnabled={narratorEnabled}
+									onNarratorToggle={toggleNarrator}
 									isListening={isListening}
+									onMicToggle={toggleMic}
 									isProcessing={isProcessing}
 									isSupported={voiceSupported}
-									onClick={toggleListening}
+									isCountingDown={isCountingDown}
+									countdownProgress={countdownProgress}
 								/>
 							)}
 							<PromptInputSubmit
@@ -1451,14 +1508,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						/>
 					)}
 				</div>
-				<div className="hidden md:block">
-					{queuedCount > 0 && (
-						<Badge variant="secondary" className="text-[10px] gap-1">
-							<ListOrdered className="h-2.5 w-2.5" />
-							Queue {queuedCount}
-						</Badge>
-					)}
-				</div>
+	
           {sessionStatus.type === 'retry' && (
             <Badge variant="destructive" className="text-[10px]">
               Retrying ({sessionStatus.attempt})
@@ -1478,7 +1528,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<PopoverContent
 						align="end"
 						side="bottom"
-						className="w-[calc(100vw-2rem)] border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] md:w-80"
+						className="w-[calc(100vw-2rem)] max-w-[90vw] border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] md:w-80"
 					>
 						<div className="space-y-3">
 							<div className="flex items-center gap-2 text-xs">
@@ -1689,36 +1739,36 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 											<span className="text-[10px] text-[var(--muted-foreground)]">
 												{formatFileSize(attachment.size)}
 											</span>
-											<button
-												type="button"
-												className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-												onClick={() => handleRemoveAttachment(attachment.id)}
-												title="Remove attachment"
-											>
-												<X className="h-3 w-3" />
-											</button>
-										</div>
-									))}
-								</div>
-							)}
-							{messageQueue.length > 0 && (
-								<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
-									<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
-										Queued ({messageQueue.length})
-									</span>
-									{messageQueue.map((msg, i) => (
-										<div key={`${msg.text}-${i}`} className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-											<Circle className="h-2 w-2 shrink-0" />
-											<span className="truncate">{msg.text.slice(0, 60)}...</span>
-										</div>
-									))}
-								</div>
-							)}
-							<div className="flex items-center gap-2">
+							<button
+								type="button"
+								className="inline-flex h-5 w-5 sm:h-4 sm:w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+								onClick={() => handleRemoveAttachment(attachment.id)}
+								title="Remove attachment"
+							>
+								<X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
+							</button>
+						</div>
+					))}
+				</div>
+			)}
+			{messageQueue.length > 0 && (
+				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
+					<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
+						Queued ({messageQueue.length})
+					</span>
+					{messageQueue.map((msg, i) => (
+						<div key={`${msg.text}-${i}`} className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+							<Circle className="h-2 w-2 shrink-0" />
+							<span className="truncate">{msg.text.slice(0, 60)}...</span>
+						</div>
+					))}
+				</div>
+			)}
+			<div className="flex items-center gap-1 sm:gap-2">
 								<div className="flex-1 min-w-0">
 									<PromptInputTextarea
 										value={inputText}
-										onChange={(event) => setInputText(event.target.value)}
+										onChange={handleInputChange}
 										placeholder="Message the agent..."
 										disabled={session.status !== 'active'}
 									/>
@@ -1741,29 +1791,15 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									<Paperclip className="h-4 w-4" />
 								</Button>
 								{session.status === 'active' && (
-									<Button
-										variant="ghost"
-										size="icon"
-										type="button"
-										onClick={() => setNarratorEnabled(prev => !prev)}
-										className={cn("h-9 w-9", narratorEnabled && "text-[var(--primary)]")}
-										aria-label={narratorEnabled ? 'Disable voice narrator' : 'Enable voice narrator'}
-										title={narratorEnabled ? 'Voice narrator on' : 'Voice narrator off'}
-									>
-										<span className={cn(
-											"block h-2.5 w-2.5 rounded-full border-2 transition-colors",
-											narratorEnabled
-												? "border-[var(--primary)] bg-[var(--primary)]"
-												: "border-[var(--muted-foreground)] bg-transparent"
-										)} />
-									</Button>
-								)}
-								{session.status === 'active' && (
-									<MicButton
+									<VoiceControls
+										narratorEnabled={narratorEnabled}
+										onNarratorToggle={toggleNarrator}
 										isListening={isListening}
+										onMicToggle={toggleMic}
 										isProcessing={isProcessing}
 										isSupported={voiceSupported}
-										onClick={toggleListening}
+										isCountingDown={isCountingDown}
+										countdownProgress={countdownProgress}
 									/>
 								)}
 								<PromptInputSubmit

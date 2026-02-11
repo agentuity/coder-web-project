@@ -92,7 +92,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 		</button>
 
       {open && (
-			<div className="absolute bottom-full left-0 z-50 mb-2 w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg md:w-64">
+			<div className="absolute bottom-full left-0 z-50 mb-2 w-[calc(100vw-2rem)] max-w-[90vw] rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg md:w-64">
           {MODEL_GROUPS.map((group) => (
             <div key={group.providerID} className="mb-2 last:mb-0">
               <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">

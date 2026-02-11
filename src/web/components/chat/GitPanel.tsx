@@ -1015,6 +1015,7 @@ export function GitPanel({ sessionId, metadata, onOpenDiff, onBranchChange }: Gi
 export function useGitStatus(sessionId: string | undefined, enabled = true) {
 	const [branch, setBranch] = useState<string | null>(null);
 	const [changedCount, setChangedCount] = useState(0);
+	const [hasRepo, setHasRepo] = useState(false);
 
 	const load = useCallback(async () => {
 		if (!sessionId || !enabled) return;
@@ -1024,6 +1025,7 @@ export function useGitStatus(sessionId: string | undefined, enabled = true) {
 			const data: GitStatus = await res.json();
 			setBranch(data.branch);
 			setChangedCount(data.changedFiles.length);
+			setHasRepo(data.hasRepo);
 		} catch {
 			// ignore
 		}
@@ -1040,5 +1042,5 @@ export function useGitStatus(sessionId: string | undefined, enabled = true) {
 		return () => clearInterval(interval);
 	}, [sessionId, enabled, load]);
 
-	return { branch, changedCount, refresh: load };
+	return { branch, changedCount, hasRepo, refresh: load };
 }

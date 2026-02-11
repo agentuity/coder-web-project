@@ -29,6 +29,7 @@ export interface SessionEventState {
 	todos: Todo[];
 	isConnected: boolean;
 	error: string | null;
+	revertState: { messageID: string; partID?: string } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,7 @@ type Action =
 	| { type: 'QUESTION_ASKED'; request: QuestionRequest }
 	| { type: 'QUESTION_REPLIED'; requestID: string }
 	| { type: 'TODO_UPDATED'; todos: Todo[] }
+	| { type: 'SESSION_UPDATED'; payload: { revert?: { messageID: string; partID?: string } } }
 	| { type: 'CONNECTED' }
 	| { type: 'DISCONNECTED'; error?: string }
 	| { type: 'CLEAR' }
@@ -64,6 +66,7 @@ const initialState: SessionEventState = {
 	todos: [],
 	isConnected: false,
 	error: null,
+	revertState: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -133,6 +136,13 @@ function reducer(state: SessionEventState, action: Action): SessionEventState {
 
 		case 'TODO_UPDATED':
 			return { ...state, todos: action.todos };
+
+		case 'SESSION_UPDATED': {
+			return {
+				...state,
+				revertState: action.payload.revert || null,
+			};
+		}
 
 		case 'CONNECTED':
 			return { ...state, isConnected: true, error: null };
@@ -211,6 +221,14 @@ function dispatchChatEvent(dispatch: React.Dispatch<Action>, event: ChatEvent): 
 		case 'session.error':
 			dispatch({ type: 'DISCONNECTED', error: event.properties.error });
 			break;
+		case 'session.updated': {
+			const sessionInfo = (event as any).properties?.info;
+			dispatch({
+				type: 'SESSION_UPDATED',
+				payload: { revert: sessionInfo?.revert || null },
+			});
+			break;
+		}
 	}
 }
 
@@ -356,5 +374,6 @@ export function useSessionEvents(sessionId: string | undefined) {
 		todos: state.todos,
 		isConnected: state.isConnected,
 		error: state.error,
+		revertState: state.revertState,
 	};
 }

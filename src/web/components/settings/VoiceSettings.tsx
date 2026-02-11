@@ -4,7 +4,6 @@ import { Button } from '../ui/button';
 
 interface VoicePreferences {
   voiceEnabled: boolean;
-  voiceModel: string;
   voiceName: string;
   voiceAutoSpeak: boolean;
   voiceSpeed: number;
@@ -12,18 +11,24 @@ interface VoicePreferences {
 
 const VOICE_OPTIONS = [
   { value: 'alloy', label: 'Alloy' },
+  { value: 'ash', label: 'Ash' },
+  { value: 'ballad', label: 'Ballad' },
+  { value: 'coral', label: 'Coral' },
   { value: 'echo', label: 'Echo' },
   { value: 'fable', label: 'Fable' },
-  { value: 'onyx', label: 'Onyx' },
   { value: 'nova', label: 'Nova' },
+  { value: 'onyx', label: 'Onyx' },
+  { value: 'sage', label: 'Sage' },
   { value: 'shimmer', label: 'Shimmer' },
+  { value: 'verse', label: 'Verse' },
+  { value: 'marin', label: 'Marin' },
+  { value: 'cedar', label: 'Cedar' },
 ];
 
 export function VoiceSettings() {
   const [prefs, setPrefs] = useState<VoicePreferences>({
     voiceEnabled: true,
-    voiceModel: 'gpt-4o-mini-tts',
-    voiceName: 'alloy',
+    voiceName: 'coral',
     voiceAutoSpeak: true,
     voiceSpeed: 1.0,
   });

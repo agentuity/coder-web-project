@@ -12,6 +12,16 @@ import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
 
+/** Map slash-command slugs to the OpenCode agent display names used by promptAsync. */
+const COMMAND_TO_AGENT: Record<string, string> = {
+	'agentuity-coder': 'Agentuity Coder Lead',
+	'agentuity-cadence': 'Agentuity Coder Lead',
+	'agentuity-memory-save': 'Agentuity Coder Memory',
+	'agentuity-memory-share': 'Agentuity Coder Lead',
+	'agentuity-cloud': 'Agentuity Coder Lead',
+	'agentuity-sandbox': 'Agentuity Coder Lead',
+};
+
 const SANDBOX_HOME = '/home/agentuity';
 const UPLOADS_DIR = `${SANDBOX_HOME}/uploads`;
 const MAX_ATTACHMENTS = 5;
@@ -174,47 +184,32 @@ api.post('/:id/messages', async (c) => {
 
 	try {
 		// Determine the agent name from the command (e.g., "/agentuity-coder" → "agentuity-coder")
-		const agentName = body.command ? body.command.replace(/^\//, '') : null;
+		const commandSlug = body.command ? body.command.replace(/^\//, '') : null;
 
-		// Check if this session already has an active agent (stored in DB)
-		const sessionAgent = session.agent;
+		// Resolve to OpenCode agent display name.
+		// If it's in our mapping, use that. Otherwise pass the slug directly
+		// (for built-in OpenCode commands like "review" that OpenCode resolves itself).
+		const agentName = commandSlug
+			? (COMMAND_TO_AGENT[commandSlug] || commandSlug)
+			: session.agent ? (COMMAND_TO_AGENT[session.agent] || session.agent) : undefined;
 
-		if (agentName && agentName !== sessionAgent) {
-			// First time using this agent in this session → use command endpoint to initialize
-			await client.session.command({
-				path: { id: session.opencodeSessionId },
-				body: {
-					command: agentName,
-					arguments: body.text,
-				},
-			});
+		const [providerID, modelID] = body.model ? body.model.split('/') : [];
 
-			// Store the agent on the session so subsequent messages use promptAsync
+		await client.session.promptAsync({
+			path: { id: session.opencodeSessionId },
+			body: {
+				parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
+				...(agentName ? { agent: agentName } : {}),
+				...(providerID && modelID ? { model: { providerID, modelID } } : {}),
+			},
+		});
+
+		// Store the command slug on the session for reference
+		if (commandSlug && commandSlug !== session.agent) {
 			await db
 				.update(chatSessions)
-				.set({ agent: agentName, updatedAt: new Date() })
+				.set({ agent: commandSlug, updatedAt: new Date() })
 				.where(eq(chatSessions.id, session.id));
-		} else if (sessionAgent && (agentName === sessionAgent || agentName)) {
-			// Agent already initialized → use promptAsync with agent field (no preamble repeat)
-			const [providerID, modelID] = body.model ? body.model.split('/') : [];
-			await client.session.promptAsync({
-				path: { id: session.opencodeSessionId },
-				body: {
-					parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
-					...(providerID && modelID ? { model: { providerID, modelID } } : {}),
-					agent: sessionAgent,
-				},
-			});
-		} else {
-			// No command, no session agent → regular chat via promptAsync
-			const [providerID, modelID] = body.model ? body.model.split('/') : [];
-			await client.session.promptAsync({
-				path: { id: session.opencodeSessionId },
-				body: {
-					parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
-					...(providerID && modelID ? { model: { providerID, modelID } } : {}),
-				},
-			});
 		}
 
 		// Auto-title from first message if untitled
@@ -439,6 +434,66 @@ api.post('/:id/questions/:reqId', async (c) => {
 		return c.json({ success: true });
 	} catch (error) {
 		return c.json({ error: 'Failed to reply to question', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/sessions/:id/revert — revert session to a specific message
+// ---------------------------------------------------------------------------
+api.post('/:id/revert', async (c) => {
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')!));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
+		return c.json({ error: 'Session sandbox not ready' }, 503);
+	}
+
+	const body = (await c.req.json().catch(() => ({}))) as {
+		messageID?: string;
+		partID?: string;
+	};
+	if (!body.messageID) {
+		return c.json({ error: 'messageID is required' }, 400);
+	}
+
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	try {
+		const result = await client.session.revert({
+			path: { id: session.opencodeSessionId },
+			body: {
+				messageID: body.messageID,
+				...(body.partID ? { partID: body.partID } : {}),
+			},
+		});
+		return c.json({ success: true, session: result.data });
+	} catch (error) {
+		return c.json({ error: 'Failed to revert', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/sessions/:id/unrevert — undo a revert
+// ---------------------------------------------------------------------------
+api.post('/:id/unrevert', async (c) => {
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, c.req.param('id')!));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
+		return c.json({ error: 'Session sandbox not ready' }, 503);
+	}
+
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	try {
+		const result = await client.session.unrevert({
+			path: { id: session.opencodeSessionId },
+		});
+		return c.json({ success: true, session: result.data });
+	} catch (error) {
+		return c.json({ error: 'Failed to unrevert', details: String(error) }, 500);
 	}
 });
 

@@ -8,7 +8,7 @@ const router = createRouter();
 const DEFAULT_VOICE_SETTINGS = {
 	voiceEnabled: false,
 	voiceModel: 'gpt-4o-mini-tts',
-	voiceName: 'alloy',
+	voiceName: 'coral',
 	voiceAutoSpeak: true,
 	voiceSpeed: '1.0',
 	preferredMic: null as string | null,
