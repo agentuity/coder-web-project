@@ -10,7 +10,7 @@
  * - Self-reference (preset): Agent doesn't break character ("As an AI...")
  */
 import agent from './lead-narrator';
-import { generateObject } from 'ai';
+import { generateText, Output } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
 import { safety, conciseness, selfReference, roleAdherence } from '@agentuity/evals';
@@ -44,11 +44,13 @@ export const condensingQuality = agent.createEval('condensing-quality', {
 			return { passed: false, score: 0, reason: 'No text output produced' };
 		}
 
-		const { object } = await generateObject({
+		const result = await generateText({
 			model: EVAL_MODEL,
-			schema: z.object({
-				score: z.number().min(0).max(1),
-				reason: z.string(),
+			output: Output.object({
+				schema: z.object({
+					score: z.number().min(0).max(1),
+					reason: z.string(),
+				}),
 			}),
 			prompt: `Score how natural this text sounds as SPOKEN language (0-1).
 
@@ -65,10 +67,11 @@ Penalize: bullet points, markdown formatting, code syntax, overly formal languag
 Reward: conversational flow, natural transitions, spoken contractions, appropriate pacing.`,
 		});
 
+		const obj = result.output!;
 		return {
-			passed: object.score >= 0.7,
-			score: object.score,
-			reason: object.reason,
+			passed: obj.score >= 0.7,
+			score: obj.score,
+			reason: obj.reason,
 		};
 	},
 });
@@ -93,11 +96,13 @@ export const condensingCompleteness = agent.createEval('condensing-completeness'
 			return { passed: true, score: 1, reason: 'Skipped — text too short for condensing' };
 		}
 
-		const { object } = await generateObject({
+		const result = await generateText({
 			model: EVAL_MODEL,
-			schema: z.object({
-				score: z.number().min(0).max(1),
-				reason: z.string(),
+			output: Output.object({
+				schema: z.object({
+					score: z.number().min(0).max(1),
+					reason: z.string(),
+				}),
 			}),
 			prompt: `Score how well this spoken summary covers the key substance of the original text (0-1).
 
@@ -116,10 +121,11 @@ Scoring criteria:
 Note: The summary is for SPEECH, so omitting code syntax, file paths, and formatting details is EXPECTED and should NOT be penalized. Focus on whether the substance (what was done, what was found, what the answer is) is preserved.`,
 		});
 
+		const obj = result.output!;
 		return {
-			passed: object.score >= 0.6,
-			score: object.score,
-			reason: object.reason,
+			passed: obj.score >= 0.6,
+			score: obj.score,
+			reason: obj.reason,
 		};
 	},
 });
@@ -140,11 +146,13 @@ export const firstPersonVoice = agent.createEval('first-person-voice', {
 			return { passed: false, reason: 'No text output produced' };
 		}
 
-		const { object } = await generateObject({
+		const result = await generateText({
 			model: EVAL_MODEL,
-			schema: z.object({
-				passed: z.boolean(),
-				reason: z.string(),
+			output: Output.object({
+				schema: z.object({
+					passed: z.boolean(),
+					reason: z.string(),
+				}),
 			}),
 			prompt: `Check if this text is written in FIRST PERSON (speaking as "I", the AI developer assistant).
 
@@ -157,7 +165,8 @@ FAIL if: The text uses third-person references like "the assistant said", "the r
 Minor: Occasional passive voice ("the build was completed") is acceptable if the overall voice is first-person.`,
 		});
 
-		return { passed: object.passed, reason: object.reason };
+		const obj = result.output!;
+		return { passed: obj.passed, reason: obj.reason };
 	},
 });
 
