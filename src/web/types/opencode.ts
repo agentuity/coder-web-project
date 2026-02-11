@@ -200,6 +200,23 @@ export interface PatchPart {
 	files: string[];
 }
 
+export interface UISpecPart {
+	id: string;
+	sessionID: string;
+	messageID: string;
+	type: 'ui_spec';
+	spec: Record<string, unknown>;
+}
+
+export interface WebPreviewPart {
+	id: string;
+	sessionID: string;
+	messageID: string;
+	type: 'web_preview';
+	url: string;
+	title?: string;
+}
+
 export type Part =
 	| TextPart
 	| ReasoningPart
@@ -212,7 +229,9 @@ export type Part =
 	| RetryPart
 	| CompactionPart
 	| SnapshotPart
-	| PatchPart;
+	| PatchPart
+	| UISpecPart
+	| WebPreviewPart;
 
 // ============================================
 // Session Status

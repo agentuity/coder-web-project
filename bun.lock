@@ -16,6 +16,9 @@
         "@ai-sdk/anthropic": "^3.0.41",
         "@ai-sdk/openai": "^3.0.26",
         "@daveyplate/better-auth-ui": "^3.3.15",
+        "@json-render/codegen": "^0.5.2",
+        "@json-render/core": "^0.5.2",
+        "@json-render/react": "^0.5.2",
         "@opencode-ai/sdk": "^1.1.53",
         "@pierre/diffs": "^1.0.10",
         "@radix-ui/react-dialog": "^1.1.15",
@@ -275,6 +278,12 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@js-sdsl/ordered-map": ["@js-sdsl/ordered-map@4.4.2", "", {}, "sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw=="],
+
+    "@json-render/codegen": ["@json-render/codegen@0.5.2", "", { "dependencies": { "@json-render/core": "0.5.2" } }, "sha512-U+Ekx94eU6c3gI6pinwagA+4muZ2BtNzytaMRnOQFJqCe+4iDj5JT/WSXsLSksVm1CY0rqgIU04+f9PlXHCOZQ=="],
+
+    "@json-render/core": ["@json-render/core@0.5.2", "", { "dependencies": { "zod": "^4.0.0" } }, "sha512-Ti4RXoY3rZbkWiB5sLha0ldKkl0k6s1kXwbdrnB/+W3EWqi9w1bwhboYwUo5MZGQ1n9N44TvMviesXpLISxaEQ=="],
+
+    "@json-render/react": ["@json-render/react@0.5.2", "", { "dependencies": { "@json-render/core": "0.5.2" }, "peerDependencies": { "react": "^19.2.3" } }, "sha512-VO6OujdzaXYfVF5jtpW1BQY9p6xVcL1Fbl3LrfU4LjbdEpHCVJqFoRRiJLg10PU8teSs/ndBy0VS3WznCZoZuw=="],
 
     "@keyv/serialize": ["@keyv/serialize@1.1.1", "", {}, "sha512-dXn3FZhPv0US+7dtJsIi2R+c7qWYiReoEh5zUntWCf4oSpMNib8FDhSoed6m3QyZdx5hK7iLFkYk3rNxwt8vTA=="],
 

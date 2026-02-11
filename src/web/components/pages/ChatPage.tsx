@@ -24,11 +24,20 @@ import { Badge } from '../ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
 import { FileExplorer } from '../chat/FileExplorer';
+import { UIPartView } from '../chat/UIPartView';
+import { WebPreview } from '../chat/WebPreview';
 
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
 import { GitPanel, useGitStatus } from '../chat/GitPanel';
-import type { Message as ChatMessage, Part, ReasoningPart, ToolPart } from '../../types/opencode';
+import type {
+	Message as ChatMessage,
+	Part,
+	ReasoningPart,
+	ToolPart,
+	UISpecPart,
+	WebPreviewPart,
+} from '../../types/opencode';
 import { TextPartView } from '../chat/TextPartView';
 import { ToolCallCard } from '../chat/ToolCallCard';
 import { FilePartView } from '../chat/FilePartView';
@@ -1116,18 +1125,35 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						{'📸'} Context snapshot saved
 					</div>
 				);
-			case 'compaction':
-				return (
-					<div key={part.id} className="text-[10px] italic text-[var(--muted-foreground)]">
-						{'🗜️'} Context compacted{part.auto ? ' (auto)' : ''}
-					</div>
-				);
-			case 'retry':
-				return (
-					<div key={part.id} className="flex items-center gap-2 text-xs text-yellow-500">
-						<span>Retry attempt {part.attempt}: {part.error.message || part.error.type}</span>
-					</div>
-				);
+		case 'compaction':
+			return (
+				<div key={part.id} className="text-[10px] italic text-[var(--muted-foreground)]">
+					{'🗜️'} Context compacted{part.auto ? ' (auto)' : ''}
+				</div>
+			);
+		case 'ui_spec':
+			return (
+				<MessageResponse key={part.id}>
+					<UIPartView
+						spec={(part as UISpecPart).spec}
+						loading={isStreaming && message.id === lastAssistantMessage?.id}
+					/>
+				</MessageResponse>
+			);
+		case 'web_preview':
+			return (
+				<WebPreview
+					key={part.id}
+					url={(part as WebPreviewPart).url}
+					title={(part as WebPreviewPart).title}
+				/>
+			);
+		case 'retry':
+			return (
+				<div key={part.id} className="flex items-center gap-2 text-xs text-yellow-500">
+					<span>Retry attempt {part.attempt}: {part.error.message || part.error.type}</span>
+				</div>
+			);
 			case 'step-start':
 				return null;
 			default:
