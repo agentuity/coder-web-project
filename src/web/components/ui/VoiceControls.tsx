@@ -38,7 +38,7 @@ export function VoiceControls({
 		<fieldset
 			aria-label="Voice controls"
 			className={cn(
-				'relative inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--muted)] m-0 p-0',
+				'relative inline-flex items-center rounded-md border border-[var(--border)] bg-[var(--muted)] m-0 p-0 h-9',
 				className,
 			)}
 		>
@@ -49,7 +49,7 @@ export function VoiceControls({
 				disabled={disabled || isProcessing}
 				aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
 				className={cn(
-					'relative flex items-center justify-center min-h-[44px] min-w-[44px] px-2.5 py-1.5 transition-colors',
+					'relative flex items-center justify-center h-full w-9 transition-colors',
 					isProcessing && 'cursor-not-allowed opacity-50',
 					micActive && 'bg-red-500/20 text-red-500',
 					bothActive && 'bg-[var(--primary)]/15 text-[var(--primary)]',
@@ -67,7 +67,7 @@ export function VoiceControls({
 			</button>
 
 			{/* Divider */}
-			<div className="h-5 w-px bg-[var(--border)]" />
+			<div className="h-4 w-px bg-[var(--border)]" />
 
 			{/* Narrator half */}
 			<div className="relative">
@@ -78,12 +78,12 @@ export function VoiceControls({
 					onMouseLeave={() => setShowHint(false)}
 					disabled={disabled}
 					aria-label={narratorEnabled ? 'Disable narrator mode' : 'Enable narrator mode'}
-					className={cn(
-						'relative flex items-center justify-center min-h-[44px] min-w-[44px] px-2.5 py-1.5 transition-colors',
-						narratorEnabled && 'bg-[var(--primary)]/15 text-[var(--primary)]',
-						narratorEnabled && isCountingDown && 'animate-pulse',
-						!narratorEnabled && 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
-					)}
+				className={cn(
+					'relative flex items-center justify-center h-full w-9 transition-colors',
+					narratorEnabled && 'bg-[var(--primary)]/15 text-[var(--primary)]',
+					narratorEnabled && isCountingDown && 'animate-pulse',
+					!narratorEnabled && 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
+				)}
 				>
 					{narratorEnabled ? (
 						<Circle className="h-3.5 w-3.5 fill-current" />

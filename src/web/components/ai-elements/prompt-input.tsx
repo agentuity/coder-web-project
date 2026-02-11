@@ -50,7 +50,7 @@ export const PromptInput = ({
 			onSubmit={handleSubmit}
 			{...props}
 		>
-		<div className="border border-[var(--border)] bg-[var(--background)] shadow-sm">
+		<div className="border border-[var(--border)] bg-[var(--background)]">
 			{children}
 		</div>
 		</form>
