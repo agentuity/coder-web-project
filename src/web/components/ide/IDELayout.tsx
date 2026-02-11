@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { FolderOpen } from 'lucide-react';
+import { Code2, FolderOpen, MessageSquare } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 interface IDELayoutProps {
@@ -76,8 +76,9 @@ export function IDELayout({ sidebar, codePanel, chatPanel }: IDELayoutProps) {
 								'px-2 py-1 text-xs rounded',
 								mobilePanel === 'code' && 'bg-[var(--background)] shadow-sm',
 							)}
+							title="Code"
 						>
-							Code
+							<Code2 className="h-3.5 w-3.5" />
 						</button>
 						<button
 							type="button"
@@ -86,8 +87,9 @@ export function IDELayout({ sidebar, codePanel, chatPanel }: IDELayoutProps) {
 								'px-2 py-1 text-xs rounded',
 								mobilePanel === 'chat' && 'bg-[var(--background)] shadow-sm',
 							)}
+							title="Chat"
 						>
-							Chat
+							<MessageSquare className="h-3.5 w-3.5" />
 						</button>
 					</div>
 				)}

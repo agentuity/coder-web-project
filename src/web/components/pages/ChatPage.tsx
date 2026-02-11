@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEventHandler } from 'react';
 import {
 	Check,
+	Code2,
 	Copy,
 	GitBranch,
 	GitFork,
@@ -9,6 +10,7 @@ import {
 	ListOrdered,
 	ListTodo,
 	Loader2,
+	MessageSquare,
 	Paperclip,
 	ExternalLink,
 	RotateCcw,
@@ -1621,16 +1623,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						size="sm"
 						onClick={() => setUrlState({ v: 'chat' })}
 						className={`h-7 px-2 text-xs ${viewMode === 'chat' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+						title="Chat"
 					>
-						Chat
+						<MessageSquare className="h-3.5 w-3.5" />
 					</Button>
 					<Button
 						variant="ghost"
 						size="sm"
 						onClick={() => setUrlState({ v: 'ide' })}
 						className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+						title="Code"
 					>
-						<span className="font-mono font-extrabold">{'</>'}</span>
+						<Code2 className="h-3.5 w-3.5" />
 					</Button>
 				</div>
 				<div
