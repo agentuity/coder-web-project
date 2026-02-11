@@ -15,6 +15,13 @@
       "when": 1770738411447,
       "tag": "0001_married_nico_minoru",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770774188215,
+      "tag": "0002_nervous_wither",
+      "breakpoints": true
     }
   ]
 }

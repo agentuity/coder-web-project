@@ -67,6 +67,12 @@ export const userSettings = pgTable('user_settings', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: text('user_id').notNull().unique(),
   githubPat: text('github_pat'),
+  voiceEnabled: boolean('voice_enabled').default(false),
+  voiceModel: text('voice_model').default('gpt-4o-mini-tts'),
+  voiceName: text('voice_name').default('alloy'),
+  voiceAutoSpeak: boolean('voice_auto_speak').default(true),
+  voiceSpeed: text('voice_speed').default('1.0'),
+  preferredMic: text('preferred_mic'),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
