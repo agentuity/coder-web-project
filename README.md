@@ -23,6 +23,9 @@ Copy and paste these instructions into your coding agent to automate the full se
 ```
 Set up this Agentuity Coder project from scratch. Follow these steps in order, stopping if any step fails:
 
+First you must have the Agentuity CLI installed and be logged in: https://agentuity.dev/Get-Started/installation.md - Once installed
+run agentuity login to ensure the user is logged in to Agentuity.
+
 1. Install dependencies:
    Run: bun install
 
