@@ -34,6 +34,7 @@ export const chatSessions = pgTable('chat_sessions', {
   opencodeSessionId: text('opencode_session_id'),
 	agent: text('agent'),
 	model: text('model'),
+  forkedFromSessionId: uuid('forked_from_session_id'),
   flagged: boolean('flagged').default(false),
   metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),

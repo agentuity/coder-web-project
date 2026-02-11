@@ -8,6 +8,7 @@ import { eq } from '@agentuity/drizzle';
 import { randomUUID } from 'node:crypto';
 import {
 	createSandbox,
+	forkSandbox,
 	generateOpenCodeConfig,
 	serializeOpenCodeConfig,
 	getOpencodeClient,
@@ -127,7 +128,7 @@ api.post('/:id/retry', async (c) => {
 	return c.json(updated);
 });
 
-// POST /api/sessions/:id/fork — create a new session from existing session
+// POST /api/sessions/:id/fork — snapshot-based fork with full state preservation
 api.post('/:id/fork', async (c) => {
 	const user = c.get('user')!;
 	const [sourceSession] = await db
@@ -136,29 +137,13 @@ api.post('/:id/fork', async (c) => {
 		.where(eq(chatSessions.id, c.req.param('id')));
 	if (!sourceSession) return c.json({ error: 'Session not found' }, 404);
 
-	const workspaceId = sourceSession.workspaceId;
-	const [workspaceSkills, workspaceSources] = await Promise.all([
-		db.select().from(skills).where(eq(skills.workspaceId, workspaceId)),
-		db.select().from(sources).where(eq(sources.workspaceId, workspaceId)),
-	]);
-
-	const opencodeConfig = generateOpenCodeConfig(
-		{ model: sourceSession.model },
-		workspaceSources.map((s) => ({
-			name: s.name,
-			type: s.type,
-			config: (s.config || {}) as Record<string, unknown>,
-			enabled: s.enabled ?? true,
-		})),
-	);
-
-	const enabledSkills = workspaceSkills.filter((s) => s.enabled ?? true);
-	const customSkills = enabledSkills
-		.filter((s) => s.type !== 'registry')
-		.map((s) => ({ name: s.name, content: s.content }));
-	const registrySkills = enabledSkills
-		.filter((s) => s.type === 'registry' && s.repo)
-		.map((s) => ({ repo: s.repo as string, skillName: s.name }));
+	// Validate source session has an active sandbox we can snapshot
+	if (!sourceSession.sandboxId || !sourceSession.sandboxUrl) {
+		return c.json({ error: 'Source session has no sandbox to fork from' }, 400);
+	}
+	if (!sourceSession.opencodeSessionId) {
+		return c.json({ error: 'Source session has no OpenCode session to fork' }, 400);
+	}
 
 	const metadata = parseMetadata(sourceSession);
 	const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
@@ -166,18 +151,23 @@ api.post('/:id/fork', async (c) => {
 	const baseTitle = sourceSession.title || 'Untitled Session';
 	const title = `Fork of ${baseTitle}`;
 
+	// Derive workDir from repoUrl (same logic as createSandbox)
+	const repoName = repoUrl ? repoUrl.split('/').pop()?.replace('.git', '') || 'project' : 'project';
+	const workDir = `/home/agentuity/${repoName}`;
+
 	// Client-side UUID for idempotent INSERT (see sessions.ts for explanation)
 	const forkSessionId = randomUUID();
 	const forkInsertedRows = await db
 		.insert(chatSessions)
 		.values({
 			id: forkSessionId,
-			workspaceId,
+			workspaceId: sourceSession.workspaceId,
 			createdBy: sourceSession.createdBy || user.id,
 			status: 'creating',
 			title,
 			agent: sourceSession.agent ?? null,
 			model: sourceSession.model ?? null,
+			forkedFromSessionId: sourceSession.id,
 			metadata: { ...metadata, repoUrl, branch },
 		})
 		.onConflictDoNothing()
@@ -203,9 +193,14 @@ api.post('/:id/fork', async (c) => {
 		await thread.state.set('forkedToSessionId', session!.id);
 	}
 
+	// Async: snapshot → new sandbox → OpenCode fork → update DB
+	const sourceOpencodeSessionId = sourceSession.opencodeSessionId;
 	(async () => {
+		let snapshotId: string | undefined;
 		try {
 			const sandboxCtx: SandboxContext = { sandbox, logger };
+
+			// 1. Get GitHub token for the new sandbox
 			let githubToken: string | undefined;
 			try {
 				const [settings] = await db
@@ -216,28 +211,32 @@ api.post('/:id/fork', async (c) => {
 					githubToken = decrypt(settings.githubPat);
 				}
 			} catch {
-				logger.warn('Failed to load GitHub token for sandbox', { userId: user.id });
+				logger.warn('Failed to load GitHub token for fork sandbox', { userId: user.id });
 			}
-			const { sandboxId, sandboxUrl } = await createSandbox(sandboxCtx, {
-				repoUrl,
-				branch,
-				opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
-				customSkills,
-				registrySkills,
+
+			// 2. Snapshot source sandbox → create new sandbox from snapshot
+			const forkResult = await forkSandbox(sandboxCtx, {
+				sourceSandboxId: sourceSession.sandboxId!,
+				workDir,
 				githubToken,
 			});
+			snapshotId = forkResult.snapshotId;
 
-			const client = getOpencodeClient(sandboxId, sandboxUrl);
+			// 3. Use OpenCode's fork API to create a new session with full message history
+			const client = getOpencodeClient(forkResult.sandboxId, forkResult.sandboxUrl);
 			let opencodeSessionId: string | null = null;
 			for (let attempt = 1; attempt <= 5; attempt++) {
 				try {
-					const opencodeSession = await client.session.create({ body: {} });
+					const forkedSession = await client.session.fork({
+						path: { id: sourceOpencodeSessionId },
+						body: {},
+					});
 					opencodeSessionId =
-						(opencodeSession as any)?.data?.id || (opencodeSession as any)?.id || null;
+						(forkedSession as any)?.data?.id || (forkedSession as any)?.id || null;
 					if (opencodeSessionId) break;
-					logger.warn(`fork session.create attempt ${attempt}: no session ID returned`);
+					logger.warn(`fork session.fork attempt ${attempt}: no session ID returned`);
 				} catch (err) {
-					logger.warn(`fork session.create attempt ${attempt} failed`, { error: err });
+					logger.warn(`fork session.fork attempt ${attempt} failed`, { error: err });
 				}
 				if (attempt < 5) await new Promise((r) => setTimeout(r, 2000));
 			}
@@ -247,14 +246,23 @@ api.post('/:id/fork', async (c) => {
 			await db
 				.update(chatSessions)
 				.set({
-					sandboxId,
-					sandboxUrl,
+					sandboxId: forkResult.sandboxId,
+					sandboxUrl: forkResult.sandboxUrl,
 					opencodeSessionId,
 					status: newStatus,
 					updatedAt: new Date(),
 				})
 				.where(eq(chatSessions.id, session!.id));
+
+			// 4. Clean up snapshot (it was only needed for creating the new sandbox)
+			try {
+				await sandbox.snapshot.delete(snapshotId);
+				logger.info(`Cleaned up fork snapshot: ${snapshotId}`);
+			} catch {
+				logger.warn(`Failed to clean up fork snapshot: ${snapshotId}`);
+			}
 		} catch (error) {
+			logger.error('Fork failed', { error });
 			await db
 				.update(chatSessions)
 				.set({
@@ -263,6 +271,14 @@ api.post('/:id/fork', async (c) => {
 					updatedAt: new Date(),
 				})
 				.where(eq(chatSessions.id, session!.id));
+			// Try to clean up snapshot on failure too
+			if (snapshotId) {
+				try {
+					await sandbox.snapshot.delete(snapshotId);
+				} catch {
+					// Ignore
+				}
+			}
 		}
 	})();
 

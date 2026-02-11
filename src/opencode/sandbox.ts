@@ -21,6 +21,10 @@ export interface SandboxContext {
     create: (opts: any) => Promise<any>;
     get: (id: string) => Promise<any>;
     destroy: (id: string) => Promise<void>;
+    snapshot: {
+      create: (sandboxId: string, opts?: { name?: string; description?: string; tag?: string }) => Promise<{ snapshotId: string }>;
+      delete: (snapshotId: string) => Promise<void>;
+    };
   };
   logger: {
     info: (...args: any[]) => void;
@@ -173,6 +177,109 @@ export async function createSandbox(
       await ctx.sandbox.destroy(sandboxId);
     } catch {
       // Ignore destroy errors
+    }
+    throw error;
+  }
+}
+
+export interface ForkSandboxConfig {
+  /** Sandbox ID of the source session to snapshot */
+  sourceSandboxId: string;
+  /** Environment variables (API keys, GitHub token, etc.) */
+  env?: Record<string, string>;
+  /** GitHub token for git operations */
+  githubToken?: string;
+  /** Working directory inside the sandbox (e.g. /home/agentuity/myrepo) */
+  workDir: string;
+}
+
+/**
+ * Fork a sandbox by snapshotting and creating a new one from that snapshot.
+ * The new sandbox inherits the full filesystem state (code, git, OpenCode data, deps).
+ * After boot, the caller should use the OpenCode fork API to create a new session.
+ */
+export async function forkSandbox(
+  ctx: SandboxContext,
+  config: ForkSandboxConfig,
+): Promise<{ sandboxId: string; sandboxUrl: string; snapshotId: string }> {
+  ctx.logger.info(`Forking sandbox ${config.sourceSandboxId}...`);
+
+  // 1. Snapshot the source sandbox
+  ctx.logger.info('Creating snapshot of source sandbox...');
+  const snapshot = await ctx.sandbox.snapshot.create(config.sourceSandboxId, {
+    name: `fork-${Date.now()}`,
+    description: `Fork snapshot from sandbox ${config.sourceSandboxId}`,
+  });
+  const snapshotId = snapshot.snapshotId;
+  ctx.logger.info(`Snapshot created: ${snapshotId}`);
+
+  // 2. Create new sandbox from the snapshot
+  ctx.logger.info('Creating new sandbox from snapshot...');
+  const sandbox = await ctx.sandbox.create({
+    snapshot: snapshotId,
+    network: { enabled: true, port: OPENCODE_PORT },
+    resources: { memory: '2Gi', cpu: '2000m' },
+    timeout: { idle: '2h' },
+    env: {
+      ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
+      OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      ...(config.githubToken
+        ? { GH_TOKEN: config.githubToken, GITHUB_TOKEN: config.githubToken }
+        : {}),
+      ...(config.env || {}),
+    },
+  });
+
+  const sandboxId = sandbox.id as string;
+  ctx.logger.info(`Fork sandbox created: ${sandboxId}`);
+
+  try {
+    // 3. Setup GitHub auth if token available
+    if (config.githubToken) {
+      try {
+        await sandbox.execute({
+          command: ['bash', '-c', 'gh auth setup-git'],
+        });
+      } catch (error) {
+        ctx.logger.warn('gh auth setup-git failed in fork sandbox', { error });
+      }
+    }
+
+    // 4. Start OpenCode server (filesystem already has everything from snapshot)
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
+      ],
+    });
+
+    // 5. Wait for health check
+    ctx.logger.info('Waiting for OpenCode server to be ready in fork sandbox...');
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        `for i in $(seq 1 30); do curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1 && exit 0; sleep 1; done; exit 1`,
+      ],
+    });
+
+    // 6. Get sandbox info for URL
+    const sandboxInfo = await ctx.sandbox.get(sandboxId);
+    const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+
+    ctx.logger.info(`Fork sandbox ready at ${sandboxUrl}`);
+    return { sandboxId, sandboxUrl, snapshotId };
+  } catch (error) {
+    ctx.logger.error('Failed to setup fork sandbox, destroying...', { error });
+    try {
+      await ctx.sandbox.destroy(sandboxId);
+    } catch {
+      // Ignore destroy errors
+    }
+    // Also clean up the snapshot on failure
+    try {
+      await ctx.sandbox.snapshot.delete(snapshotId);
+    } catch {
+      // Ignore snapshot cleanup errors
     }
     throw error;
   }
