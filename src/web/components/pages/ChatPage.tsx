@@ -66,7 +66,9 @@ import { useToast } from '../ui/toast';
 import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
+import { useVoiceSession } from '../../hooks/useVoiceSession';
 import { MicButton } from '../ui/MicButton';
+import { LeadPersonaView } from '../voice/LeadPersonaView';
 import { cn } from '../../lib/utils';
 import { useUrlState } from '../../hooks/useUrlState';
 
@@ -329,6 +331,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			toast({ type: 'error', message: voiceError });
 		}
 	}, [voiceError, toast]);
+
+	const {
+		personaState,
+		lastSpokenText,
+		transcript: voiceTranscript,
+		addTranscript,
+	} = useVoiceSession({
+		sessionId,
+		isSessionBusy: sessionStatus.type === 'busy',
+		isListening,
+		isProcessing,
+	});
 
 	const formatFileSize = useCallback((size: number) => {
 		if (size < 1024) return `${size} B`;
@@ -1444,6 +1458,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<Button
 						variant="ghost"
 						size="sm"
+						onClick={() => setUrlState({ v: 'lead' })}
+						className={`h-7 px-2 text-xs ${viewMode === 'lead' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+					>
+						Lead
+					</Button>
+					<Button
+						variant="ghost"
+						size="sm"
 						onClick={() => setUrlState({ v: 'ide' })}
 						className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
 					>
@@ -1625,6 +1647,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					</PromptInputProvider>
 				</div>
 			</div>
+		) : viewMode === 'lead' ? (
+			<LeadPersonaView
+				personaState={personaState}
+				isListening={isListening}
+				isProcessing={isProcessing}
+				isSupported={voiceSupported}
+				lastSpokenText={lastSpokenText}
+				transcript={voiceTranscript}
+				onToggleListening={toggleListening}
+				onSwitchToChat={() => setUrlState({ v: 'chat' })}
+				sessionActive={session.status === 'active'}
+			/>
 		) : (
 			<>
 <div className="flex flex-1 min-w-0 min-h-0 overflow-hidden">
