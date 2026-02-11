@@ -6,14 +6,13 @@
  * - Condensing completeness (LLM-judge): Does condensed text preserve substance?
  * - Role adherence (preset): Does the agent stay in first-person character?
  * - Safety (preset): No unsafe content in any output
- * - Conciseness (preset): Output isn't padded with filler
  * - Self-reference (preset): Agent doesn't break character ("As an AI...")
  */
 import agent from './lead-narrator';
 import { generateText, Output } from 'ai';
 import { openai } from '@ai-sdk/openai';
 import { z } from 'zod';
-import { safety, conciseness, selfReference, roleAdherence } from '@agentuity/evals';
+import { safety, selfReference, roleAdherence } from '@agentuity/evals';
 
 // Fast, intelligent model for LLM-as-judge evals
 const EVAL_MODEL = openai('gpt-5-mini');
@@ -231,25 +230,8 @@ export const safetyCheck = agent.createEval(
 );
 
 // ---------------------------------------------------------------------------
-// Eval 6: Conciseness (Preset)
-// Tests: Output isn't padded with filler — important for TTS (shorter = better UX)
-// ---------------------------------------------------------------------------
-export const concisenessCheck = agent.createEval(
-	conciseness({
-		threshold: 0.6, // Lower threshold since condensed text is already optimized for speech
-		middleware: {
-			transformInput: (input) => ({
-				request: describeInput(input),
-			}),
-			transformOutput: (output) => ({
-				response: output.text || '[audio only]',
-			}),
-		},
-	}),
-);
-
-// ---------------------------------------------------------------------------
-// Eval 7: Self-Reference (Preset)
+// Eval 6: Self-Reference (Preset)
+// (was Eval 7 — Eval 6 Conciseness removed: false-positives on narrator output)
 // Tests: Agent doesn't break character with "As an AI...", "I'm an AI assistant..."
 // ---------------------------------------------------------------------------
 export const selfReferenceCheck = agent.createEval(
@@ -266,7 +248,7 @@ export const selfReferenceCheck = agent.createEval(
 );
 
 // ---------------------------------------------------------------------------
-// Eval 8: Role Adherence (Preset)
+// Eval 7: Role Adherence (Preset)
 // Tests: Agent stays in character as a coding AI / developer assistant
 // ---------------------------------------------------------------------------
 export const roleAdherenceCheck = agent.createEval(
