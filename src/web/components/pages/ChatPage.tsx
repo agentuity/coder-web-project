@@ -318,9 +318,24 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+	// Refs to bridge ordering: handleVoiceTranscript is created before sendMessage,
+	// so we use refs to let the callback reach sendMessage/addTranscript later.
+	const viewModeRef = useRef(viewMode);
+	useEffect(() => { viewModeRef.current = viewMode; }, [viewMode]);
+
+	const leadSendRef = useRef<((text: string) => void) | null>(null);
+
 	const handleVoiceTranscript = useCallback((text: string) => {
-		setInputText((prev) => (prev ? `${prev} ${text}` : text));
+		if (viewModeRef.current === 'lead' && leadSendRef.current) {
+			// Lead mode: show in transcript + auto-send as a message
+			leadSendRef.current(text);
+		} else {
+			// Chat/IDE mode: append to text input (dictation)
+			setInputText((prev) => (prev ? `${prev} ${text}` : text));
+		}
 	}, []);
+
+	const isLeadModeForVoice = viewMode === 'lead';
 
 	const {
 		isListening,
@@ -328,7 +343,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		isSupported: voiceSupported,
 		toggleListening,
 		error: voiceError,
-	} = useVoiceInput({ onTranscript: handleVoiceTranscript });
+	} = useVoiceInput({
+		onTranscript: handleVoiceTranscript,
+		continuous: !isLeadModeForVoice,
+	});
 
 	useEffect(() => {
 		if (voiceError) {
@@ -585,6 +603,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		setMessageQueue(rest);
 		void sendMessage(next);
 	}, [isBusy, isSending, messageQueue, sendMessage]);
+
+	// Wire up Lead mode voice → auto-send. This runs after sendMessage and
+	// addTranscript are defined, updating the ref that handleVoiceTranscript reads.
+	useEffect(() => {
+		leadSendRef.current = (text: string) => {
+			addTranscript('user', text);
+			void sendMessage({
+				text,
+				model: selectedModel,
+			});
+		};
+	}, [addTranscript, sendMessage, selectedModel]);
 
   const handleFork = async () => {
     if (isForking) return;

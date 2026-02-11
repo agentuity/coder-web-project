@@ -3,6 +3,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 interface UseVoiceInputOptions {
 	onTranscript: (text: string) => void;
 	onInterimTranscript?: (text: string) => void;
+	/** When false, recognition stops after one utterance (ideal for Lead/voice mode). Default true. */
+	continuous?: boolean;
 }
 
 interface UseVoiceInputReturn {
@@ -38,11 +40,15 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputRetur
 	const mediaStreamRef = useRef<MediaStream | null>(null);
 	const chunksRef = useRef<Blob[]>([]);
 	const isListeningRef = useRef(false);
+	const continuousRef = useRef(options.continuous ?? true);
 
-	// Keep the ref in sync so event handlers see the latest value
+	// Keep refs in sync so event handlers / toggle see the latest values
 	useEffect(() => {
 		isListeningRef.current = isListening;
 	}, [isListening]);
+	useEffect(() => {
+		continuousRef.current = options.continuous ?? true;
+	}, [options.continuous]);
 
 	const SpeechRecognitionCtor = getSpeechRecognitionConstructor();
 	const mediaRecorderMime = getMediaRecorderMimeType();
@@ -67,7 +73,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputRetur
 		if (!SpeechRecognitionCtor) return;
 
 		const recognition = new SpeechRecognitionCtor();
-		recognition.continuous = true;
+		recognition.continuous = continuousRef.current;
 		recognition.interimResults = true;
 		recognition.lang = 'en-US';
 
@@ -114,7 +120,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputRetur
 	}, [SpeechRecognitionCtor]);
 
 	const stopSpeechRecognition = useCallback(() => {
-		recognitionRef.current?.stop();
+		recognitionRef.current?.abort();
 		recognitionRef.current = null;
 		setIsListening(false);
 	}, []);
@@ -210,7 +216,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputRetur
 	// Toggle
 	// -----------------------------------------------------------------------
 	const toggleListening = useCallback(() => {
-		if (isListening) {
+		if (isListeningRef.current) {
 			if (hasSpeechApi) {
 				stopSpeechRecognition();
 			} else {
@@ -223,7 +229,7 @@ export function useVoiceInput(options: UseVoiceInputOptions): UseVoiceInputRetur
 				void startMediaRecorder();
 			}
 		}
-	}, [isListening, hasSpeechApi, startSpeechRecognition, stopSpeechRecognition, startMediaRecorder, stopMediaRecorder]);
+	}, [hasSpeechApi, startSpeechRecognition, stopSpeechRecognition, startMediaRecorder, stopMediaRecorder]);
 
 	// -----------------------------------------------------------------------
 	// Cleanup on unmount
