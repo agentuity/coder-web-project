@@ -728,8 +728,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	// Narrator pipeline: events -> narrate -> TTS (Lead mode only)
 	const isLeadMode = viewMode === 'lead';
 
-	const switchToChat = useCallback(() => setUrlState({ v: 'chat' }), [setUrlState]);
-
 	const handleNarration = useCallback((text: string) => {
 		void speakText(text);
 	}, [speakText]);
@@ -1771,10 +1769,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				isListening={isListening}
 				isProcessing={isProcessing}
 				isSupported={voiceSupported}
-				lastSpokenText={lastSpokenText}
-				transcript={voiceTranscript}
 				onToggleListening={toggleListening}
-				onSwitchToChat={switchToChat}
 				sessionActive={session.status === 'active'}
 			/>
 		) : (

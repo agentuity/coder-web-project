@@ -1,8 +1,7 @@
 import { lazy, memo, Suspense } from 'react';
-import { Mic, MicOff, Loader2, MessageSquare } from 'lucide-react';
+import { Mic, MicOff, Loader2 } from 'lucide-react';
 import type { PersonaState } from '../ai-elements/persona';
 import { Button } from '../ui/button';
-import { cn } from '../../lib/utils';
 
 const Persona = lazy(() =>
   import('../ai-elements/persona').then((m) => ({ default: m.Persona }))
@@ -13,10 +12,7 @@ interface LeadPersonaViewProps {
   isListening: boolean;
   isProcessing: boolean;
   isSupported: boolean;
-  lastSpokenText: string | null;
-  transcript: string[];
   onToggleListening: () => void;
-  onSwitchToChat: () => void;
   sessionActive: boolean;
 }
 
@@ -25,70 +21,22 @@ export const LeadPersonaView = memo(function LeadPersonaView({
   isListening,
   isProcessing,
   isSupported,
-  lastSpokenText,
-  transcript,
   onToggleListening,
-  onSwitchToChat,
   sessionActive,
 }: LeadPersonaViewProps) {
-  const stateLabel = (() => {
-    switch (personaState) {
-      case 'listening': return 'Listening...';
-      case 'thinking': return 'Thinking...';
-      case 'speaking': return 'Speaking...';
-      case 'asleep': return 'Asleep';
-      default: return 'Ready';
-    }
-  })();
-
   return (
-    <div className="flex flex-1 flex-col items-center min-h-0 overflow-hidden bg-[var(--background)]">
-      {/* Persona area -- centered, takes most space */}
-      <section className="flex flex-1 flex-col items-center justify-center gap-4 p-6 min-h-0" aria-label="Lead AI persona">
-        <Suspense fallback={<div className="size-40 md:size-52" />}>
+    <div className="flex flex-1 flex-col items-center justify-center min-h-0 overflow-hidden bg-[var(--background)]">
+      {/* Persona -- centered, fills the space */}
+      <section className="flex flex-col items-center justify-center gap-6" aria-label="Lead AI persona">
+        <Suspense fallback={<div className="size-48 md:size-64" />}>
           <Persona
             state={personaState}
             variant="command"
-            className="size-40 md:size-52"
+            className="size-48 md:size-64"
           />
         </Suspense>
-        <output 
-          className="text-xs text-[var(--muted-foreground)] tracking-wide uppercase"
-          aria-live="polite"
-        >
-          {stateLabel}
-        </output>
-        {lastSpokenText && (
-          <p className="max-w-sm text-center text-sm text-[var(--foreground)] leading-relaxed">
-            "{lastSpokenText}"
-          </p>
-        )}
-      </section>
 
-      {/* Transcript -- scrollable, compact */}
-      {transcript.length > 0 && (
-        <div className="w-full max-w-md px-4 pb-2 max-h-32 overflow-y-auto" role="log" aria-label="Voice conversation transcript">
-          <div className="space-y-1">
-            {transcript.map((line, i) => (
-              <p
-                key={`${line.slice(0, 20)}-${i}`}
-                className={cn(
-                  'text-xs leading-relaxed',
-                  line.startsWith('You:')
-                    ? 'text-[var(--muted-foreground)]'
-                    : 'text-[var(--foreground)]'
-                )}
-              >
-                {line}
-              </p>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Bottom controls */}
-      <div className="shrink-0 flex flex-col items-center gap-3 pb-6 pt-4 border-t border-[var(--border)] w-full">
-        {/* Large mic button */}
+        {/* Mic button -- directly below persona */}
         {isSupported && sessionActive && (
           <div className="relative">
             {isListening && (
@@ -97,32 +45,22 @@ export const LeadPersonaView = memo(function LeadPersonaView({
             <Button
               variant={isListening ? 'destructive' : 'default'}
               size="icon"
-              className="h-16 w-16 rounded-full"
+              className="h-14 w-14 rounded-full"
               onClick={onToggleListening}
               disabled={isProcessing}
               aria-label={isListening ? 'Stop listening' : 'Start listening'}
             >
               {isProcessing ? (
-                <Loader2 className="h-6 w-6 animate-spin" />
+                <Loader2 className="h-5 w-5 animate-spin" />
               ) : isListening ? (
-                <MicOff className="h-6 w-6" />
+                <MicOff className="h-5 w-5" />
               ) : (
-                <Mic className="h-6 w-6" />
+                <Mic className="h-5 w-5" />
               )}
             </Button>
           </div>
         )}
-
-        {/* Back to chat link */}
-        <button
-          type="button"
-          className="flex items-center gap-1.5 text-xs text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
-          onClick={onSwitchToChat}
-        >
-          <MessageSquare className="h-3 w-3" />
-          Back to Chat
-        </button>
-      </div>
+      </section>
     </div>
   );
 });
