@@ -66,6 +66,7 @@ import { useToast } from '../ui/toast';
 import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
+import { useAudioPlayback } from '../../hooks/useAudioPlayback';
 import { useVoiceSession } from '../../hooks/useVoiceSession';
 import { MicButton } from '../ui/MicButton';
 import { LeadPersonaView } from '../voice/LeadPersonaView';
@@ -332,17 +333,31 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		}
 	}, [voiceError, toast]);
 
+	const { isSpeaking, enqueue: enqueueAudio, clearQueue: clearAudioQueue } = useAudioPlayback();
+
 	const {
 		personaState,
 		lastSpokenText,
 		transcript: voiceTranscript,
 		addTranscript,
-	} = useVoiceSession({
-		sessionId,
-		isSessionBusy: sessionStatus.type === 'busy',
-		isListening,
-		isProcessing,
-	});
+		speakText,
+	} = useVoiceSession(
+		{
+			sessionId,
+			isSessionBusy: sessionStatus.type === 'busy',
+			isListening,
+			isProcessing,
+			isSpeaking,
+		},
+		{ enqueue: enqueueAudio }
+	);
+
+	// Stop audio playback when user starts speaking (interruption)
+	useEffect(() => {
+		if (isListening) {
+			clearAudioQueue();
+		}
+	}, [isListening, clearAudioQueue]);
 
 	const formatFileSize = useCallback((size: number) => {
 		if (size < 1024) return `${size} B`;
@@ -676,6 +691,32 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		session.status !== 'active'
 		|| isSending
 		|| (!inputText.trim() && attachments.length === 0);
+
+	// Auto-speak new assistant messages in Lead mode
+	const lastSpokenMessageRef = useRef<string | null>(null);
+
+	useEffect(() => {
+		if (viewMode !== 'lead') return;
+		if (!lastAssistantMessage) return;
+		if (lastAssistantMessage.id === lastSpokenMessageRef.current) return;
+		if (isBusy) return; // Wait for message to complete
+
+		// Get the text content of the last assistant message
+		const parts = getDisplayParts(lastAssistantMessage.id);
+		const textContent = parts
+			.filter((p) => p.type === 'text')
+			.map((p) => (p as { text: string }).text)
+			.join(' ')
+			.trim();
+
+		if (!textContent) return;
+
+		lastSpokenMessageRef.current = lastAssistantMessage.id;
+
+		// Truncate for TTS (keep it conversational, not reading entire responses)
+		const toSpeak = textContent.length > 500 ? textContent.slice(0, 497) + '...' : textContent;
+		void speakText(toSpeak);
+	}, [viewMode, lastAssistantMessage, isBusy, getDisplayParts, speakText]);
 
 	const copyMessage = useCallback(
 		(message: ChatMessage) => {
