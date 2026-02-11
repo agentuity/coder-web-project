@@ -52,9 +52,10 @@ export function VoiceControls({
 					'relative flex items-center justify-center h-full w-9 transition-colors',
 					isProcessing && 'cursor-not-allowed opacity-50',
 					micActive && 'bg-red-500/20 text-red-500',
-					bothActive && 'bg-[var(--primary)]/15 text-[var(--primary)]',
+					bothActive && 'text-[var(--primary)]',
 					!isListening && !narratorEnabled && 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
 				)}
+				style={bothActive ? { backgroundColor: 'color-mix(in srgb, var(--primary) 20%, transparent)' } : undefined}
 			>
 				{isListening && !narratorEnabled && (
 					<div className="absolute inset-0 animate-ping rounded-none bg-red-500/10 pointer-events-none" />
@@ -80,10 +81,11 @@ export function VoiceControls({
 					aria-label={narratorEnabled ? 'Disable narrator mode' : 'Enable narrator mode'}
 				className={cn(
 					'relative flex items-center justify-center h-full w-9 transition-colors',
-					narratorEnabled && 'bg-[var(--primary)]/15 text-[var(--primary)]',
+					narratorEnabled && 'text-[var(--primary)]',
 					narratorEnabled && isCountingDown && 'animate-pulse',
 					!narratorEnabled && 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
 				)}
+				style={narratorEnabled ? { backgroundColor: 'color-mix(in srgb, var(--primary) 20%, transparent)' } : undefined}
 				>
 					{narratorEnabled ? (
 						<Circle className="h-3.5 w-3.5 fill-current" />

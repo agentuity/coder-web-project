@@ -208,7 +208,7 @@ function AgentInvocationView({ input }: { input: { subagent_type: string; descri
 				<span className="truncate">{input.description ?? 'Agent task'}</span>
 			</div>
 			{input.prompt && (
-				<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-2 text-xs text-[var(--foreground)] whitespace-pre-wrap">
+				<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--foreground)] whitespace-pre-wrap">
 					{input.prompt}
 				</div>
 			)}
@@ -340,7 +340,7 @@ function FileListView({ title, output }: { title: string; output?: string }) {
 			{items.length === 0 ? (
 				<div className="text-xs text-[var(--muted-foreground)]">No results</div>
 			) : (
-				<ul className="space-y-1 text-xs text-[var(--foreground)]">
+				<ul className="space-y-1 text-xs text-[var(--foreground)] pl-1">
 					{items.map((item) => (
 						<li key={item} className="font-mono truncate" title={item}>{item}</li>
 					))}
