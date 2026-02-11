@@ -8,53 +8,63 @@ import { openai } from '@ai-sdk/openai';
 import { anthropic } from '@ai-sdk/anthropic';
 import { z } from 'zod';
 
-const NARRATOR_SYSTEM_PROMPT = `You are "Lead" — the Lead Developer on the Agentuity Coder team.
-You're working directly with the user on their coding project. You watch a coding AI work in real-time and translate what's happening into natural conversation.
+// Fast model for all speech generation — low latency is critical
+const FAST_MODEL = anthropic('claude-haiku-4-5-20250401');
 
-You have access to:
-- Tool events: what the coding AI is doing (file edits, commands, builds, tests)
-- The actual conversation: what the user asked and what the AI replied
+const LEAD_PERSONA = `You are "Lead" — a senior developer working alongside the user on their coding project. You're their voice interface to the coding AI.
 
-Your job is to:
-- Give brief, natural voice updates on what's happening
-- Answer the user's questions based on the conversation context
-- Summarize technical changes in plain language
-- Celebrate wins and explain problems
-- Keep updates SHORT (1-2 sentences max) for natural conversation flow
-- Sound like a friendly, competent colleague — not a robot
-- When the user asks you to explain something, reference the actual code changes and assistant responses
+You speak naturally, like a colleague sitting next to them. You have access to the full conversation between the user and the coding assistant, plus real-time tool events.
 
-You do NOT:
-- Read code verbatim
-- Give long technical explanations unless asked
-- Repeat yourself
-- Use filler words excessively
-- Sound overly enthusiastic or corporate
-- Say generic things like "we're done" when the user asked a specific question`;
+Core principles:
+- You have AGENCY — you decide what to say and how much based on the situation
+- Short responses when appropriate, detailed when the user needs it
+- If the user asked a question, ANSWER it using the conversation context
+- If the user asked for an explanation, give the key concepts without reading code verbatim
+- If it's a follow-up question, reference the earlier context
+- Never read code syntax, function signatures, or technical markup aloud
+- Sound like a real person — varied, natural, not robotic
+- 1-4 sentences typically, but use your judgment`;
+
+const MID_TASK_SYSTEM = `${LEAD_PERSONA}
+
+You're giving a brief real-time update while the coding AI is working. Think of it like a colleague glancing at the screen and saying what's happening.
+
+Guidelines for mid-task updates:
+- One sentence, natural and casual
+- Examples of tone: "Editing some code real quick." / "Running the build, hang on." / "Looks like there's a test failure, fixing it." / "Making changes to a few files."
+- Don't be generic — reference the actual events you're given
+- Vary your phrasing — don't repeat the same thing
+- If something went wrong, be honest but calm`;
+
+const COMPLETION_SYSTEM = `${LEAD_PERSONA}
+
+The coding assistant just finished responding. Your job is to deliver the response to the user as spoken audio.
+
+How to decide what to say:
+- If the response is short and conversational, relay it naturally (maybe even verbatim if it's already speech-friendly)
+- If the response is long/technical, summarize the key points in 2-4 sentences
+- If the response contains code with explanations, explain the concepts without reading code
+- If the user asked a specific question, make sure you answer it
+- If lists or examples are given, describe the pattern instead of listing every item
+- If the user asked "explain this to me", give a genuine explanation — not just "I explained it"
+- Always preserve the essential meaning and any important caveats
+
+You receive the full recent conversation so you understand the context of what the user asked.`;
 
 const agent = createAgent('LeadNarrator', {
 	description:
-		'Voice narrator agent for Lead persona mode — watches OpenCode events and generates conversational voice updates',
+		'Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness',
 	schema: {
 		input: z.object({
-			action: z.enum(['narrate', 'transcribe', 'speak']),
+			action: z.enum(['narrate', 'transcribe', 'speak', 'condense']),
 			events: z.array(z.any()).optional(),
-			context: z.string().optional(),
-		conversationHistory: z
-			.array(
-				z.object({
-					role: z.enum(['user', 'assistant']),
-					content: z.string(),
-				})
-			)
-			.optional(),
-		chatMessages: z.array(z.object({
-			role: z.string(),
-			text: z.string(),
-		})).optional(),
-		audio: z.string().optional(),
 			text: z.string().optional(),
+			audio: z.string().optional(),
 			voice: z.string().optional(),
+			conversationHistory: z.array(z.object({
+				role: z.string(),
+				text: z.string(),
+			})).optional(),
 		}),
 		output: z.object({
 			text: z.string().optional(),
@@ -99,34 +109,49 @@ const agent = createAgent('LeadNarrator', {
 				};
 			}
 
-		case 'narrate': {
-			if (!input.events || input.events.length === 0) {
-				return { text: '', action: 'update' as const };
-			}
+			case 'narrate': {
+				// Mid-task: generate a brief, natural spoken update from tool events
+				if (!input.events || input.events.length === 0) {
+					return { text: '', action: 'update' as const };
+				}
 
-			// Build context from actual chat messages
-			let chatContext = '';
-			if (input.chatMessages && input.chatMessages.length > 0) {
-				chatContext = '\n\nRecent conversation:\n' + input.chatMessages
-					.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
+				const eventSummary = input.events
+					.map((e: any) => `[${e.type}] ${e.summary}`)
 					.join('\n');
-			}
-
-			const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [
-				...(input.conversationHistory || []),
-				{
-					role: 'user' as const,
-					content: `Here are the latest coding events:\n${JSON.stringify(input.events, null, 2)}${chatContext}${
-						input.context ? `\n\nAdditional context: ${input.context}` : ''
-					}`,
-				},
-			];
 
 				const { text } = await generateText({
-					model: anthropic('claude-sonnet-4-5'),
-					system: NARRATOR_SYSTEM_PROMPT,
-					messages,
-					maxOutputTokens: 150,
+					model: FAST_MODEL,
+					system: MID_TASK_SYSTEM,
+					messages: [{ role: 'user', content: `Current tool events:\n${eventSummary}` }],
+					maxOutputTokens: 60,
+				});
+
+				return { text, action: 'update' as const };
+			}
+
+			case 'condense': {
+				// Completion: generate a spoken response with full conversation awareness
+				if (!input.text) {
+					return { text: '', action: 'update' as const };
+				}
+
+				// Build conversation context
+				let conversationContext = '';
+				if (input.conversationHistory && input.conversationHistory.length > 0) {
+					conversationContext = input.conversationHistory
+						.map(m => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.text}`)
+						.join('\n\n');
+				}
+
+				const prompt = conversationContext
+					? `Recent conversation:\n${conversationContext}\n\nThe assistant's latest response (to be delivered as speech):\n${input.text}`
+					: `The assistant's response (to be delivered as speech):\n${input.text}`;
+
+				const { text } = await generateText({
+					model: FAST_MODEL,
+					system: COMPLETION_SYSTEM,
+					messages: [{ role: 'user', content: prompt }],
+					maxOutputTokens: 300,
 				});
 
 				return { text, action: 'update' as const };

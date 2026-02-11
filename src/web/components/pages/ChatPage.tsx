@@ -740,25 +740,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	});
 
 	const handleEventBatch = useCallback((events: AccumulatedEvent[]) => {
-		// Skip completion events -- handled by the speak-on-complete effect below
 		const midTaskEvents = events.filter(e => e.type !== 'complete');
 		if (midTaskEvents.length === 0) return;
 
-		// Mid-task narration: use narrator for real-time updates
-		const recentMessages = displayMessages.slice(-4).map(m => {
-			const parts = getDisplayParts(m.id);
-			const textContent = parts
-				.filter(p => p.type === 'text')
-				.map(p => (p as { text: string }).text)
-				.join('');
-			return {
-				role: m.role,
-				text: textContent.slice(0, 300),
-			};
-		}).filter(m => m.text.length > 0);
-
-		void narrate(midTaskEvents, recentMessages);
-	}, [narrate, displayMessages, getDisplayParts]);
+		// Send to narrator agent (Haiku) for a natural mid-task phrase
+		void narrate(midTaskEvents);
+	}, [narrate]);
 
 	// Get parts of the current streaming assistant message for accumulation
 	// Memoize to prevent useEventAccumulator from re-running on every render
@@ -804,13 +791,43 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				.trim();
 
 			if (textContent) {
-				// Take a reasonable amount for TTS (first ~800 chars, break at sentence)
-				let speechText = textContent;
-				if (speechText.length > 800) {
-					const cutoff = speechText.lastIndexOf('.', 800);
-					speechText = cutoff > 200 ? speechText.slice(0, cutoff + 1) : speechText.slice(0, 800);
+				// Build conversation context for the agent
+				const recentChat = displayMessages.slice(-6).map(m => {
+					const msgParts = getDisplayParts(m.id);
+					const msgText = msgParts
+						.filter(p => p.type === 'text')
+						.map(p => (p as { text: string }).text || '')
+						.join('\n')
+						.replace(/```[\s\S]*?```/g, '')
+						.trim()
+						.slice(0, 500);
+					return { role: m.role, text: msgText };
+				}).filter(m => m.text.length > 0);
+
+				// Short responses: speak directly. Long responses: condense via LLM first.
+				if (textContent.length < 200) {
+					void speakText(textContent);
+				} else {
+					// Condense for speech with conversation awareness
+					fetch('/api/voice/condense', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							text: textContent.slice(0, 3000),
+							conversationHistory: recentChat,
+						}),
+					})
+						.then(res => res.json())
+						.then((data: { text?: string }) => {
+							if (data.text) {
+								void speakText(data.text);
+							}
+						})
+						.catch(() => {
+							// Fallback: speak truncated original
+							void speakText(textContent.slice(0, 400));
+						});
 				}
-				void speakText(speechText);
 			}
 		}, 500);
 

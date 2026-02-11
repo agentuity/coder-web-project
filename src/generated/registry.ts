@@ -10,31 +10,31 @@ import type { InferInput, InferOutput } from '@agentuity/core';
 
 /**
  * Input type for LeadNarrator agent
- * Voice narrator agent for Lead persona mode — watches OpenCode events and generates conversational voice updates
+ * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
  */
 export type LeadNarratorInput = InferInput<typeof leadNarrator['inputSchema']>;
 
 /**
  * Output type for LeadNarrator agent
- * Voice narrator agent for Lead persona mode — watches OpenCode events and generates conversational voice updates
+ * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
  */
 export type LeadNarratorOutput = InferOutput<typeof leadNarrator['outputSchema']>;
 
 /**
  * Input schema type for LeadNarrator agent
- * Voice narrator agent for Lead persona mode — watches OpenCode events and generates conversational voice updates
+ * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
  */
 export type LeadNarratorInputSchema = typeof leadNarrator['inputSchema'];
 
 /**
  * Output schema type for LeadNarrator agent
- * Voice narrator agent for Lead persona mode — watches OpenCode events and generates conversational voice updates
+ * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
  */
 export type LeadNarratorOutputSchema = typeof leadNarrator['outputSchema'];
 
 /**
  * Agent type for LeadNarrator
- * Voice narrator agent for Lead persona mode — watches OpenCode events and generates conversational voice updates
+ * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
  */
 export type LeadNarratorAgent = AgentRunner<
 	LeadNarratorInputSchema,
@@ -71,7 +71,7 @@ export type LeadNarratorAgent = AgentRunner<
 export const AgentDefinitions = {
 	/**
 	 * LeadNarrator
-	 * Voice narrator agent for Lead persona mode — watches OpenCode events and generates conversational voice updates
+	 * Voice persona agent for Lead mode — generates natural spoken responses with full conversation awareness
 	 * @type {LeadNarratorAgent}
 	 */
 	leadNarrator,

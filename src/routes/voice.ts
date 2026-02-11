@@ -37,21 +37,37 @@ router.post('/speech', async (c) => {
 	}
 });
 
+// POST /api/voice/condense - Generate spoken response with conversation awareness
+router.post('/condense', async (c) => {
+	try {
+		const body = (await c.req.json().catch(() => ({}))) as {
+			text?: string;
+			conversationHistory?: Array<{ role: string; text: string }>;
+		};
+		if (!body.text) {
+			return c.json({ error: 'Text is required' }, 400);
+		}
+		const result = await leadNarrator.run({
+			action: 'condense',
+			text: body.text,
+			conversationHistory: body.conversationHistory,
+		});
+		return c.json(result);
+	} catch (error) {
+		c.var.logger.error('Voice condense failed', { error });
+		return c.json({ error: error instanceof Error ? error.message : String(error) }, 500);
+	}
+});
+
 // POST /api/voice/narrate - Accept events, return conversational text
 router.post('/narrate', async (c) => {
 	try {
 		const body = (await c.req.json().catch(() => ({}))) as {
 			events?: unknown[];
-			context?: string;
-			conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
-			chatMessages?: Array<{ role: string; text: string }>;
 		};
 		const result = await leadNarrator.run({
 			action: 'narrate',
 			events: body.events,
-			context: body.context,
-			conversationHistory: body.conversationHistory,
-			chatMessages: body.chatMessages,
 		});
 		return c.json(result);
 	} catch (error) {
