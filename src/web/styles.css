@@ -121,8 +121,8 @@ h1, h2, #logo {
   color-scheme: dark;
 }
 
-/* Solid background for dialog content in dark mode */
-.dark [role="dialog"] {
+/* Solid background for dialog content */
+[role="dialog"] {
   background-color: var(--card);
   color: var(--card-foreground);
 }
