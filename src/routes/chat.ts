@@ -11,6 +11,9 @@ import { eq } from 'drizzle-orm';
 import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
+import { parseMetadata } from '../lib/parse-metadata';
+import { deliverWebhook } from '../lib/webhook';
+import type { WebhookPayload } from '../lib/webhook';
 
 const SANDBOX_HOME = '/home/agentuity';
 const UPLOADS_DIR = `${SANDBOX_HOME}/uploads`;
@@ -71,6 +74,69 @@ function isAllowedFilename(filename: string) {
 }
 
 const api = createRouter();
+
+// ---------------------------------------------------------------------------
+// Session completion detection & webhook delivery
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect whether an SSE event signals session completion (session.idle).
+ * When detected, update DB status to 'completed' and fire webhook if configured.
+ */
+async function handleSessionCompletionEvent(
+	event: any,
+	sessionId: string,
+	opencodeSessionId: string,
+): Promise<void> {
+	// OpenCode emits "session.idle" when the AI finishes its work
+	const eventType = event?.type;
+	if (eventType !== 'session.idle') return;
+
+	// Check if this event is for our session
+	const props = event?.properties;
+	const eventSessionId =
+		props?.sessionID || props?.info?.sessionID || props?.info?.id || props?.part?.sessionID;
+	if (eventSessionId && eventSessionId !== opencodeSessionId) return;
+
+	// Only handle completion for API-created tasks — leave web UI sessions untouched
+	const [current] = await db
+		.select()
+		.from(chatSessions)
+		.where(eq(chatSessions.id, sessionId))
+		.limit(1);
+	if (!current) return;
+
+	const metadata = parseMetadata(current);
+	if (metadata.source !== 'api') return;
+
+	// Update session status to 'completed'
+	const [updated] = await db
+		.update(chatSessions)
+		.set({ status: 'completed', updatedAt: new Date() })
+		.where(eq(chatSessions.id, sessionId))
+		.returning();
+
+	if (!updated) return;
+
+	// Check for webhook URL in metadata
+	const webhookUrl = typeof metadata.webhookUrl === 'string' ? metadata.webhookUrl : null;
+	if (!webhookUrl) return;
+
+	// Build webhook payload
+	const payload: WebhookPayload = {
+		taskId: sessionId,
+		status: 'completed',
+		repoUrl: typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined,
+		branch: typeof metadata.branch === 'string' ? metadata.branch : undefined,
+		prUrl: (metadata.pullRequest as any)?.url ?? undefined,
+		completedAt: new Date().toISOString(),
+	};
+
+	// Fire-and-forget webhook delivery (don't block SSE)
+	deliverWebhook(webhookUrl, payload).catch((err) => {
+		console.error(`[webhook] Failed to deliver for session ${sessionId}:`, err);
+	});
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/sessions/:id/messages — fetch existing messages for page load
@@ -265,24 +331,29 @@ api.get(
 						const jsonStr = line.slice(6).trim();
 						if (!jsonStr) continue;
 
-						try {
-							const event = JSON.parse(jsonStr);
-							// Filter by session
-							const props = (event as any)?.properties;
-							const eventSessionId =
-								props?.sessionID ||
-								props?.info?.sessionID ||
-								props?.info?.id ||
-								props?.part?.sessionID;
+					try {
+						const event = JSON.parse(jsonStr);
+						// Filter by session
+						const props = (event as any)?.properties;
+						const eventSessionId =
+							props?.sessionID ||
+							props?.info?.sessionID ||
+							props?.info?.id ||
+							props?.part?.sessionID;
 
-							if (eventSessionId && eventSessionId !== session.opencodeSessionId) {
-								continue;
-							}
-
-							await stream.writeSSE({ data: JSON.stringify(event) });
-						} catch {
-							// Skip malformed events
+						if (eventSessionId && eventSessionId !== session.opencodeSessionId) {
+							continue;
 						}
+
+						// Detect session completion and trigger webhook (fire-and-forget)
+						handleSessionCompletionEvent(event, session.id, session.opencodeSessionId!).catch(
+							() => {},
+						);
+
+						await stream.writeSSE({ data: JSON.stringify(event) });
+					} catch {
+						// Skip malformed events
+					}
 					}
 				}
 			} catch {
