@@ -105,7 +105,6 @@ These secrets are used by AI sandboxes (not by the app itself). Set them in your
 ```bash
 agentuity cloud env set ANTHROPIC_API_KEY <your-key> --secret --org
 agentuity cloud env set OPENAI_API_KEY <your-key> --secret --org
-agentuity cloud env set GH_TOKEN <your-token> --secret --org
 ```
 
 At minimum you need `ANTHROPIC_API_KEY` for Claude-based coding.
