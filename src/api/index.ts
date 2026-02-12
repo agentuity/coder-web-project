@@ -17,7 +17,6 @@ import githubGlobalRoutes from '../routes/github-global';
 import userSettingsRoutes from '../routes/user-settings';
 import voiceRoutes from '../routes/voice';
 import voiceSettingsRoutes from '../routes/voice-settings';
-import webSandboxRoutes from '../routes/web-sandbox';
 
 const api = createRouter();
 
@@ -81,8 +80,5 @@ api.route('/sessions', sessionMcpRoutes);
 // Sources routes (nested under workspaces + standalone)
 api.route('/workspaces/:wid/sources', sourceRoutes);
 api.route('/sources', sourceRoutes);
-
-// Web sandbox routes
-api.route('/web-sandbox', webSandboxRoutes);
 
 export default api;

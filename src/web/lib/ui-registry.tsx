@@ -3,6 +3,20 @@ import { defineRegistry, useStateStore } from '@json-render/react';
 import { catalog } from './ui-catalog';
 import { cn } from './utils';
 
+/* ── shadcn component imports ─────────────────────────────────── */
+import { Card as ShadcnCard, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
+import { Button as ShadcnButton } from '../components/ui/button';
+import { Input as ShadcnInput } from '../components/ui/input';
+import { Badge as ShadcnBadge } from '../components/ui/badge';
+import { Separator } from '../components/ui/separator';
+import { Table as ShadcnTable, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table';
+import { Alert as ShadcnAlert, AlertTitle, AlertDescription } from '../components/ui/alert';
+import { Select as ShadcnSelect, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
+import { Avatar as ShadcnAvatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../components/ui/collapsible';
+
+/* ── helpers ──────────────────────────────────────────────────── */
+
 type ChartDatum = number | Record<string, unknown>;
 
 const spacingMap: Record<'sm' | 'md' | 'lg', string> = {
@@ -24,33 +38,36 @@ const alignMap: Record<'start' | 'center' | 'end' | 'stretch', string> = {
   stretch: 'items-stretch',
 };
 
-const badgeVariants: Record<'default' | 'success' | 'warning' | 'error' | 'info', string> = {
-  default: 'bg-[var(--muted)] text-[var(--foreground)] border-[var(--border)]',
-  success: 'bg-emerald-500/10 text-emerald-600 border-emerald-500/30',
-  warning: 'bg-amber-500/10 text-amber-600 border-amber-500/30',
-  error: 'bg-red-500/10 text-red-600 border-red-500/30',
-  info: 'bg-blue-500/10 text-blue-600 border-blue-500/30',
-};
-
-const alertVariants: Record<'info' | 'success' | 'warning' | 'error', string> = {
-  info: 'border-blue-500/40 bg-blue-500/5 text-blue-700',
-  success: 'border-emerald-500/40 bg-emerald-500/5 text-emerald-700',
-  warning: 'border-amber-500/40 bg-amber-500/5 text-amber-700',
-  error: 'border-red-500/40 bg-red-500/5 text-red-700',
-};
-
-const buttonVariants: Record<'primary' | 'secondary' | 'outline' | 'ghost', string> = {
-  primary: 'bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90',
-  secondary: 'bg-[var(--secondary)] text-[var(--secondary-foreground)] hover:opacity-80',
-  outline: 'border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]',
-  ghost: 'hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]',
-};
-
 const textVariants: Record<'heading' | 'subheading' | 'body' | 'caption', string> = {
   heading: 'text-lg font-semibold text-[var(--foreground)]',
   subheading: 'text-base font-medium text-[var(--foreground)]',
   body: 'text-sm text-[var(--foreground)]',
   caption: 'text-xs text-[var(--muted-foreground)]',
+};
+
+/** Map catalog badge variants → shadcn badge variants + custom classes */
+const badgeVariantMap: Record<'default' | 'success' | 'warning' | 'error' | 'info', { variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
+  default: { variant: 'secondary' },
+  success: { variant: 'outline', className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' },
+  warning: { variant: 'outline', className: 'border-amber-500/30 bg-amber-500/10 text-amber-600' },
+  error: { variant: 'destructive' },
+  info: { variant: 'outline', className: 'border-blue-500/30 bg-blue-500/10 text-blue-600' },
+};
+
+/** Map catalog button variants → shadcn button variants */
+const buttonVariantMap: Record<'primary' | 'secondary' | 'outline' | 'ghost', 'default' | 'secondary' | 'outline' | 'ghost'> = {
+  primary: 'default',
+  secondary: 'secondary',
+  outline: 'outline',
+  ghost: 'ghost',
+};
+
+/** Map catalog alert variants to classes (shadcn Alert only has default/destructive, so we add semantic colors) */
+const alertColorMap: Record<'info' | 'success' | 'warning' | 'error', string> = {
+  info: 'border-blue-500/40 bg-blue-500/5 text-blue-700 [&>h5]:text-blue-700',
+  success: 'border-emerald-500/40 bg-emerald-500/5 text-emerald-700 [&>h5]:text-emerald-700',
+  warning: 'border-amber-500/40 bg-amber-500/5 text-amber-700 [&>h5]:text-amber-700',
+  error: 'border-red-500/40 bg-red-500/5 text-red-700 [&>h5]:text-red-700',
 };
 
 const chartPalette = ['#3b82f6', '#22c55e', '#f97316', '#a855f7', '#14b8a6', '#facc15'];
@@ -95,72 +112,84 @@ function describeArc(cx: number, cy: number, r: number, startAngle: number, endA
   return `M ${cx} ${cy} L ${start.x} ${start.y} A ${r} ${r} 0 ${largeArc} 1 ${end.x} ${end.y} Z`;
 }
 
+/* ── registry ─────────────────────────────────────────────────── */
+
 export const { registry } = defineRegistry(catalog, {
   components: {
+    /* ── shadcn-backed: Card ───────────────────────────────────── */
     Card: ({ props, children }) => {
-      const paddingClass = props.padding ? paddingMap[props.padding] : paddingMap.md;
+      const paddingClass = props.padding ? paddingMap[props.padding] : undefined;
       return (
-        <div className={cn('rounded-lg border border-[var(--border)] bg-[var(--card)] text-[var(--card-foreground)] shadow-sm', paddingClass)}>
-          <div className="space-y-1">
-            <div className="text-base font-semibold">{props.title}</div>
+        <ShadcnCard className={cn(props.className)}>
+          <CardHeader className={cn(paddingClass, 'pb-2')}>
+            <CardTitle className="text-base">{props.title}</CardTitle>
             {props.description && (
-              <div className="text-sm text-[var(--muted-foreground)]">{props.description}</div>
+              <CardDescription>{props.description}</CardDescription>
             )}
-          </div>
-          {children && <div className="mt-4">{children}</div>}
-        </div>
+          </CardHeader>
+          {children && (
+            <CardContent className={cn(paddingClass)}>
+              {children}
+            </CardContent>
+          )}
+        </ShadcnCard>
       );
     },
+
+    /* ── custom: Text ──────────────────────────────────────────── */
     Text: ({ props }) => (
-      <p className={cn(textVariants[props.variant ?? 'body'])}>{props.content}</p>
+      <p className={cn(textVariants[props.variant ?? 'body'], props.className)}>{props.content}</p>
     ),
+
+    /* ── shadcn-backed: Button ─────────────────────────────────── */
     Button: ({ props, emit }) => (
-      <button
+      <ShadcnButton
         type={props.action === 'submit' ? 'submit' : 'button'}
-        className={cn(
-          'inline-flex items-center justify-center rounded-md px-3 py-2 text-sm font-medium transition-colors',
-          buttonVariants[props.variant ?? 'primary']
-        )}
+        variant={buttonVariantMap[props.variant ?? 'primary']}
+        size="sm"
+        className={cn(props.className)}
         onClick={() => emit?.('press')}
         data-action={props.action}
       >
         {props.label}
-      </button>
+      </ShadcnButton>
     ),
+
+    /* ── shadcn-backed: Table ──────────────────────────────────── */
     Table: ({ props }) => (
-      <div className="w-full overflow-x-auto rounded-lg border border-[var(--border)]">
-        <table className="w-full text-sm">
-          <thead className="bg-[var(--muted)] text-[var(--foreground)]">
-            <tr>
+      <div className={cn('rounded-lg border border-[var(--border)]', props.className)}>
+        <ShadcnTable>
+          <TableHeader>
+            <TableRow>
               {props.columns.map((column) => (
-                <th key={column.key} className="px-3 py-2 text-left font-medium">
-                  {column.label}
-                </th>
+                <TableHead key={column.key}>{column.label}</TableHead>
               ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--border)]">
+            </TableRow>
+          </TableHeader>
+          <TableBody>
             {props.rows.map((row) => {
               const rowId = row.id ?? row.key ?? row._id;
               const rowKey = (typeof rowId === 'string' || typeof rowId === 'number')
                 ? String(rowId)
                 : props.columns.map((column) => String(row[column.key] ?? '')).join('|') || JSON.stringify(row);
               return (
-                <tr key={rowKey} className="odd:bg-[var(--background)] even:bg-[var(--muted)]/30">
-                {props.columns.map((column) => (
-                  <td key={column.key} className="px-3 py-2 text-[var(--foreground)]">
-                    {String(row[column.key] ?? '')}
-                  </td>
-                ))}
-                </tr>
+                <TableRow key={rowKey}>
+                  {props.columns.map((column) => (
+                    <TableCell key={column.key}>
+                      {String(row[column.key] ?? '')}
+                    </TableCell>
+                  ))}
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
+          </TableBody>
+        </ShadcnTable>
       </div>
     ),
+
+    /* ── custom: Metric (uses shadcn Card internally) ──────────── */
     Metric: ({ props }) => (
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] px-4 py-3">
+      <ShadcnCard className={cn('px-4 py-3', props.className)}>
         <div className="text-xs text-[var(--muted-foreground)]">{props.label}</div>
         <div className="mt-1 text-2xl font-semibold text-[var(--foreground)]">{props.value}</div>
         {props.change && (
@@ -177,13 +206,15 @@ export const { registry } = defineRegistry(catalog, {
             {props.change}
           </div>
         )}
-      </div>
+      </ShadcnCard>
     ),
+
+    /* ── custom: Chart ─────────────────────────────────────────── */
     Chart: ({ props }) => {
       const points = normalizeChartData(props.data, props.xKey, props.yKey);
       if (points.length === 0) {
         return (
-          <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 text-center text-xs text-[var(--muted-foreground)]">
+          <div className={cn('rounded-lg border border-[var(--border)] bg-[var(--background)] p-4 text-center text-xs text-[var(--muted-foreground)]', props.className)}>
             No data to display
           </div>
         );
@@ -199,7 +230,7 @@ export const { registry } = defineRegistry(catalog, {
         const total = points.reduce((sum, point) => sum + point.y, 0) || 1;
         let startAngle = -90;
         return (
-          <div className="flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+          <div className={cn('flex items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--background)] p-3', props.className)}>
             <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img">
               <title>Chart</title>
               {points.map((point, index) => {
@@ -219,7 +250,7 @@ export const { registry } = defineRegistry(catalog, {
       }
 
       return (
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--background)] p-3">
+        <div className={cn('rounded-lg border border-[var(--border)] bg-[var(--background)] p-3', props.className)}>
           <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img">
             <title>Chart</title>
             <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="var(--border)" />
@@ -263,6 +294,8 @@ export const { registry } = defineRegistry(catalog, {
         </div>
       );
     },
+
+    /* ── custom: Form ──────────────────────────────────────────── */
     Form: ({ props, children, emit }) => {
       const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
@@ -271,7 +304,7 @@ export const { registry } = defineRegistry(catalog, {
 
       return (
         <form
-          className="space-y-3 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4"
+          className={cn('space-y-3 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4', props.className)}
           onSubmit={handleSubmit}
         >
           {props.title && <div className="text-sm font-semibold text-[var(--foreground)]">{props.title}</div>}
@@ -279,6 +312,8 @@ export const { registry } = defineRegistry(catalog, {
         </form>
       );
     },
+
+    /* ── shadcn-backed: Input ──────────────────────────────────── */
     Input: ({ props }) => {
       const { get, set } = useStateStore();
       const fieldName = slugify(props.label);
@@ -294,42 +329,49 @@ export const { registry } = defineRegistry(catalog, {
       };
 
       return (
-        <label className="flex flex-col gap-1 text-sm text-[var(--foreground)]">
+        <label className={cn('flex flex-col gap-1 text-sm text-[var(--foreground)]', props.className)}>
           <span className="text-xs text-[var(--muted-foreground)]">{props.label}</span>
-          <input
+          <ShadcnInput
             name={fieldName}
             type={props.type ?? 'text'}
             value={String(value)}
             onChange={handleChange}
             placeholder={props.placeholder}
-            className="rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
           />
         </label>
       );
     },
+
+    /* ── shadcn-backed: Select ─────────────────────────────────── */
     Select: ({ props }) => {
       const { get, set } = useStateStore();
       const fieldName = slugify(props.label);
-      const value = get(`/form/${fieldName}`) ?? '';
+      const value = (get(`/form/${fieldName}`) ?? '') as string;
       return (
-        <label className="flex flex-col gap-1 text-sm text-[var(--foreground)]">
+        <label className={cn('flex flex-col gap-1 text-sm text-[var(--foreground)]', props.className)}>
           <span className="text-xs text-[var(--muted-foreground)]">{props.label}</span>
-          <select
-            name={fieldName}
-            value={String(value)}
-            onChange={(event) => set(`/form/${fieldName}`, event.target.value)}
-            className="rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)]"
+          <ShadcnSelect
+            value={value}
+            onValueChange={(newValue) => set(`/form/${fieldName}`, newValue)}
           >
-            <option value="" disabled>Choose an option</option>
-            {props.options.map((option) => (
-              <option key={option.value} value={option.value}>{option.label}</option>
-            ))}
-          </select>
+            <SelectTrigger>
+              <SelectValue placeholder="Choose an option" />
+            </SelectTrigger>
+            <SelectContent>
+              {props.options.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </ShadcnSelect>
         </label>
       );
     },
+
+    /* ── custom: Image ─────────────────────────────────────────── */
     Image: ({ props }) => (
-      <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)]">
+      <div className={cn('overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)]', props.className)}>
         <img
           src={props.src}
           alt={props.alt ?? 'Image'}
@@ -339,55 +381,427 @@ export const { registry } = defineRegistry(catalog, {
         />
       </div>
     ),
-    Badge: ({ props }) => (
-      <span
-        className={cn(
-          'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium',
-          badgeVariants[props.variant ?? 'default']
-        )}
-      >
-        {props.text}
-      </span>
-    ),
+
+    /* ── shadcn-backed: Badge ──────────────────────────────────── */
+    Badge: ({ props }) => {
+      const mapping = badgeVariantMap[props.variant ?? 'default'];
+      return (
+        <ShadcnBadge
+          variant={mapping.variant}
+          className={cn(mapping.className, props.className)}
+        >
+          {props.text}
+        </ShadcnBadge>
+      );
+    },
+
+    /* ── shadcn-backed: Alert ──────────────────────────────────── */
     Alert: ({ props }) => (
-      <div className={cn('rounded-lg border px-3 py-2 text-sm', alertVariants[props.variant ?? 'info'])}>
-        {props.title && <div className="text-xs font-semibold uppercase tracking-wide">{props.title}</div>}
-        <div className="mt-1 text-sm">{props.message}</div>
-      </div>
+      <ShadcnAlert className={cn(alertColorMap[props.variant ?? 'info'], props.className)}>
+        {props.title && <AlertTitle className="text-xs uppercase tracking-wide">{props.title}</AlertTitle>}
+        <AlertDescription>{props.message}</AlertDescription>
+      </ShadcnAlert>
     ),
+
+    /* ── custom layout: Row ────────────────────────────────────── */
     Row: ({ props, children }) => (
-      <div className={cn('flex flex-row', spacingMap[props.gap ?? 'md'], alignMap[props.align ?? 'start'])}>
+      <div className={cn('flex flex-row', spacingMap[props.gap ?? 'md'], alignMap[props.align ?? 'start'], props.className)}>
         {children}
       </div>
     ),
+
+    /* ── custom layout: Column ─────────────────────────────────── */
     Column: ({ props, children }) => (
-      <div className={cn('flex flex-col', spacingMap[props.gap ?? 'md'], alignMap[props.align ?? 'start'])}>
+      <div className={cn('flex flex-col', spacingMap[props.gap ?? 'md'], alignMap[props.align ?? 'start'], props.className)}>
         {children}
       </div>
     ),
+
+    /* ── custom layout: Stack ──────────────────────────────────── */
     Stack: ({ props, children }) => (
-      <div className={cn('flex', props.direction === 'horizontal' ? 'flex-row' : 'flex-col', spacingMap[props.gap ?? 'md'])}>
+      <div className={cn('flex', props.direction === 'horizontal' ? 'flex-row' : 'flex-col', spacingMap[props.gap ?? 'md'], props.className)}>
         {children}
       </div>
     ),
-    Divider: () => (
-      <div className="h-px w-full bg-[var(--border)]" />
+
+    /* ── shadcn-backed: Divider → Separator ────────────────────── */
+    Divider: ({ props }) => (
+      <Separator className={cn(props.className)} />
     ),
+
+    /* ── custom: Link ──────────────────────────────────────────── */
     Link: ({ props, emit }) => (
       <a
         href={props.href}
         target={props.external ? '_blank' : undefined}
         rel={props.external ? 'noopener noreferrer' : undefined}
         onClick={() => emit?.('press')}
-        className="text-sm font-medium text-[var(--primary)] underline underline-offset-2 hover:opacity-80"
+        className={cn('text-sm font-medium text-[var(--primary)] underline underline-offset-2 hover:opacity-80', props.className)}
       >
         {props.label}
       </a>
     ),
+
+    /* ── custom: Code ──────────────────────────────────────────── */
     Code: ({ props }) => (
-      <pre className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--muted)] p-3 text-xs text-[var(--foreground)]">
+      <pre className={cn('overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--muted)] p-3 text-xs text-[var(--foreground)]', props.className)}>
         <code data-language={props.language}>{props.content}</code>
       </pre>
     ),
+
+    /* ── Phase 2: Landing page components ────────────────────────── */
+
+    /* ── Hero ─────────────────────────────────────────────────────── */
+    Hero: ({ props, children }) => {
+      const gradientMap: Record<string, string> = {
+        none: '',
+        blue: 'bg-gradient-to-br from-blue-600 to-indigo-700 text-white',
+        purple: 'bg-gradient-to-br from-purple-600 to-pink-600 text-white',
+        green: 'bg-gradient-to-br from-emerald-600 to-teal-700 text-white',
+        orange: 'bg-gradient-to-br from-orange-500 to-red-600 text-white',
+        dark: 'bg-gradient-to-br from-gray-900 to-gray-800 text-white',
+      };
+      const gradient = gradientMap[props.backgroundGradient ?? 'none'] ?? '';
+      const alignment = props.align === 'left' ? 'text-left items-start' : 'text-center items-center';
+
+      return (
+        <section
+          className={cn(
+            'relative flex w-full flex-col justify-center px-6 py-20 md:py-32',
+            gradient,
+            alignment,
+            props.className,
+          )}
+          style={props.backgroundImage ? { backgroundImage: `url(${props.backgroundImage})`, backgroundSize: 'cover', backgroundPosition: 'center' } : undefined}
+        >
+          <div className={cn('mx-auto flex max-w-4xl flex-col', alignment, 'gap-4')}>
+            <h1 className="text-4xl font-bold tracking-tight md:text-5xl lg:text-6xl">{props.headline}</h1>
+            {props.subheadline && (
+              <p className="max-w-2xl text-lg opacity-80 md:text-xl">{props.subheadline}</p>
+            )}
+            {children && <div className="mt-4 flex flex-wrap gap-3">{children}</div>}
+          </div>
+        </section>
+      );
+    },
+
+    /* ── Section ──────────────────────────────────────────────────── */
+    Section: ({ props, children }) => {
+      const sectionBgMap: Record<string, string> = {
+        default: 'bg-[var(--background)]',
+        muted: 'bg-[var(--muted)]',
+        primary: 'bg-[var(--primary)] text-[var(--primary-foreground)]',
+        dark: 'bg-gray-900 text-white',
+      };
+      const sectionPaddingMap: Record<string, string> = {
+        sm: 'py-8',
+        md: 'py-12',
+        lg: 'py-16',
+        xl: 'py-24',
+      };
+      const bg = sectionBgMap[props.background ?? 'default'] ?? '';
+      const pad = sectionPaddingMap[props.padding ?? 'lg'] ?? 'py-16';
+
+      return (
+        <section className={cn('w-full px-6', bg, pad, props.className)}>
+          {(props.title || props.subtitle) && (
+            <div className="mx-auto mb-10 max-w-3xl text-center">
+              {props.title && <h2 className="text-3xl font-bold tracking-tight">{props.title}</h2>}
+              {props.subtitle && <p className="mt-2 text-lg opacity-70">{props.subtitle}</p>}
+            </div>
+          )}
+          {children}
+        </section>
+      );
+    },
+
+    /* ── Container ────────────────────────────────────────────────── */
+    Container: ({ props, children }) => {
+      const maxWidthMap: Record<string, string> = {
+        sm: 'max-w-screen-sm',
+        md: 'max-w-screen-md',
+        lg: 'max-w-screen-lg',
+        xl: 'max-w-screen-xl',
+        full: 'max-w-full',
+      };
+      return (
+        <div className={cn('mx-auto px-4', maxWidthMap[props.maxWidth ?? 'lg'], props.className)}>
+          {children}
+        </div>
+      );
+    },
+
+    /* ── Grid ─────────────────────────────────────────────────────── */
+    Grid: ({ props, children }) => {
+      const cols = String(props.columns ?? 3);
+      const colsMap: Record<string, string> = {
+        '1': 'grid-cols-1',
+        '2': 'grid-cols-1 md:grid-cols-2',
+        '3': 'grid-cols-1 md:grid-cols-3',
+        '4': 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4',
+      };
+      return (
+        <div className={cn('grid', colsMap[cols] ?? 'grid-cols-1 md:grid-cols-3', spacingMap[props.gap ?? 'md'], props.className)}>
+          {children}
+        </div>
+      );
+    },
+
+    /* ── Navbar ────────────────────────────────────────────────────── */
+    Navbar: ({ props }) => (
+      <nav className={cn('flex w-full items-center justify-between px-6 py-4 border-b border-[var(--border)] bg-[var(--background)]', props.className)}>
+        <div className="flex items-center gap-2">
+          {props.logoSrc ? (
+            <img src={props.logoSrc} alt={props.logo ?? 'Logo'} className="h-8 w-auto" />
+          ) : props.logo ? (
+            <span className="text-lg font-bold text-[var(--foreground)]">{props.logo}</span>
+          ) : null}
+        </div>
+        <div className="hidden items-center gap-6 md:flex">
+          {props.links?.map((link) => (
+            <a key={link.href} href={link.href} className="text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+              {link.label}
+            </a>
+          ))}
+        </div>
+        {props.ctaLabel && (
+          <ShadcnButton size="sm" asChild>
+            <a href={props.ctaHref ?? '#'}>{props.ctaLabel}</a>
+          </ShadcnButton>
+        )}
+      </nav>
+    ),
+
+    /* ── Footer ────────────────────────────────────────────────────── */
+    Footer: ({ props }) => (
+      <footer className={cn('w-full bg-gray-900 px-6 py-12 text-gray-300', props.className)}>
+        <div className="mx-auto max-w-screen-lg">
+          {props.columns && props.columns.length > 0 && (
+            <div className={cn('grid gap-8 mb-8', props.columns.length <= 2 ? 'grid-cols-1 md:grid-cols-2' : props.columns.length === 3 ? 'grid-cols-1 md:grid-cols-3' : 'grid-cols-2 md:grid-cols-4')}>
+              {props.columns.map((col) => (
+                <div key={col.title}>
+                  <h4 className="mb-3 text-sm font-semibold text-white">{col.title}</h4>
+                  <ul className="space-y-2">
+                    {col.links.map((link) => (
+                      <li key={link.href}>
+                        <a href={link.href} className="text-sm text-gray-400 hover:text-white transition-colors">{link.label}</a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center justify-between border-t border-gray-700 pt-6">
+            {props.logo && <span className="text-sm font-semibold text-white">{props.logo}</span>}
+            {props.copyright && <span className="text-xs text-gray-500">{props.copyright}</span>}
+          </div>
+        </div>
+      </footer>
+    ),
+
+    /* ── Feature ───────────────────────────────────────────────────── */
+    Feature: ({ props }) => (
+      <div className={cn('flex flex-col gap-2', props.className)}>
+        {props.icon && <span className="text-3xl">{props.icon}</span>}
+        <h3 className="text-base font-semibold text-[var(--foreground)]">{props.title}</h3>
+        {props.description && (
+          <p className="text-sm text-[var(--muted-foreground)]">{props.description}</p>
+        )}
+      </div>
+    ),
+
+    /* ── Testimonial ──────────────────────────────────────────────── */
+    Testimonial: ({ props }) => (
+      <ShadcnCard className={cn('p-6', props.className)}>
+        <blockquote className="text-sm italic text-[var(--foreground)] leading-relaxed">
+          &ldquo;{props.quote}&rdquo;
+        </blockquote>
+        <div className="mt-4 flex items-center gap-3">
+          {props.avatarSrc ? (
+            <ShadcnAvatar className="h-10 w-10">
+              <AvatarImage src={props.avatarSrc} alt={props.author} />
+              <AvatarFallback>{props.author.slice(0, 2).toUpperCase()}</AvatarFallback>
+            </ShadcnAvatar>
+          ) : (
+            <ShadcnAvatar className="h-10 w-10">
+              <AvatarFallback>{props.author.slice(0, 2).toUpperCase()}</AvatarFallback>
+            </ShadcnAvatar>
+          )}
+          <div>
+            <div className="text-sm font-medium text-[var(--foreground)]">{props.author}</div>
+            {props.role && <div className="text-xs text-[var(--muted-foreground)]">{props.role}</div>}
+          </div>
+        </div>
+      </ShadcnCard>
+    ),
+
+    /* ── PricingCard ──────────────────────────────────────────────── */
+    PricingCard: ({ props }) => (
+      <ShadcnCard className={cn(
+        'flex flex-col p-6',
+        props.highlighted && 'border-[var(--primary)] ring-2 ring-[var(--primary)]',
+        props.className,
+      )}>
+        <div className="mb-4">
+          <h3 className="text-lg font-semibold text-[var(--foreground)]">{props.tier}</h3>
+          {props.description && <p className="mt-1 text-sm text-[var(--muted-foreground)]">{props.description}</p>}
+        </div>
+        <div className="mb-6 text-3xl font-bold text-[var(--foreground)]">{props.price}</div>
+        <ul className="mb-6 flex-1 space-y-2">
+          {props.features.map((feature) => (
+            <li key={feature} className="flex items-start gap-2 text-sm text-[var(--foreground)]">
+              <span className="mt-0.5 text-emerald-500">&#10003;</span>
+              {feature}
+            </li>
+          ))}
+        </ul>
+        {props.ctaLabel && (
+          <ShadcnButton variant={props.highlighted ? 'default' : 'outline'} className="w-full">
+            {props.ctaLabel}
+          </ShadcnButton>
+        )}
+      </ShadcnCard>
+    ),
+
+    /* ── CTA ──────────────────────────────────────────────────────── */
+    CTA: ({ props, children }) => (
+      <section className={cn('w-full rounded-lg bg-[var(--primary)] px-6 py-16 text-center text-[var(--primary-foreground)]', props.className)}>
+        <h2 className="text-3xl font-bold">{props.headline}</h2>
+        {props.description && <p className="mx-auto mt-3 max-w-2xl text-lg opacity-80">{props.description}</p>}
+        {children && <div className="mt-6 flex flex-wrap items-center justify-center gap-3">{children}</div>}
+      </section>
+    ),
+
+    /* ── Accordion (uses shadcn Collapsible) ──────────────────────── */
+    Accordion: ({ props }) => (
+      <div className={cn('divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]', props.className)}>
+        {props.items.map((item) => (
+          <Collapsible key={item.title}>
+            <CollapsibleTrigger className="group flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors">
+              {item.title}
+              <span className="text-[var(--muted-foreground)] transition-transform group-data-[state=open]:rotate-180">&#9660;</span>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="px-4 pb-3 text-sm text-[var(--muted-foreground)]">
+              {item.content}
+            </CollapsibleContent>
+          </Collapsible>
+        ))}
+      </div>
+    ),
+
+    /* ── Avatar ────────────────────────────────────────────────────── */
+    Avatar: ({ props }) => {
+      const sizeMap: Record<string, string> = {
+        sm: 'h-8 w-8 text-xs',
+        md: 'h-10 w-10 text-sm',
+        lg: 'h-14 w-14 text-base',
+      };
+      return (
+        <ShadcnAvatar className={cn(sizeMap[props.size ?? 'md'], props.className)}>
+          {props.src ? (
+            <AvatarImage src={props.src} alt={props.alt ?? ''} />
+          ) : null}
+          <AvatarFallback>{props.fallback ?? '?'}</AvatarFallback>
+        </ShadcnAvatar>
+      );
+    },
+
+    /* ── Spacer ────────────────────────────────────────────────────── */
+    Spacer: ({ props }) => {
+      const spacerSizeMap: Record<string, string> = {
+        sm: 'h-4',
+        md: 'h-8',
+        lg: 'h-12',
+        xl: 'h-16',
+      };
+      return <div className={cn(spacerSizeMap[props.size ?? 'md'], props.className)} aria-hidden="true" />;
+    },
+
+    /* ── Primitive components ────────────────────────────────────── */
+
+    /* ── Box ──────────────────────────────────────────────────────── */
+    Box: ({ props, children }) => (
+      <div className={cn(props.className)}>{children}</div>
+    ),
+
+    /* ── Flex ─────────────────────────────────────────────────────── */
+    Flex: ({ props, children }) => {
+      const directionMap: Record<string, string> = {
+        row: 'flex-row',
+        col: 'flex-col',
+        'row-reverse': 'flex-row-reverse',
+        'col-reverse': 'flex-col-reverse',
+      };
+      const justifyMap: Record<string, string> = {
+        start: 'justify-start',
+        center: 'justify-center',
+        end: 'justify-end',
+        between: 'justify-between',
+        around: 'justify-around',
+        evenly: 'justify-evenly',
+      };
+      const itemsMap: Record<string, string> = {
+        start: 'items-start',
+        center: 'items-center',
+        end: 'items-end',
+        stretch: 'items-stretch',
+        baseline: 'items-baseline',
+      };
+      return (
+        <div className={cn(
+          'flex',
+          directionMap[props.direction ?? 'row'],
+          props.wrap && 'flex-wrap',
+          props.justify && justifyMap[props.justify],
+          props.items && itemsMap[props.items],
+          props.gap && spacingMap[props.gap],
+          props.className,
+        )}>
+          {children}
+        </div>
+      );
+    },
+
+    /* ── Heading ──────────────────────────────────────────────────── */
+    Heading: ({ props }) => {
+      const level = props.level ?? '2';
+      const sizeMap: Record<string, string> = {
+        '1': 'text-4xl font-bold tracking-tight',
+        '2': 'text-3xl font-bold tracking-tight',
+        '3': 'text-2xl font-semibold',
+        '4': 'text-xl font-semibold',
+        '5': 'text-lg font-medium',
+        '6': 'text-base font-medium',
+      };
+      const cls = cn(sizeMap[level], 'text-[var(--foreground)]', props.className);
+      if (level === '1') return <h1 className={cls}>{props.content}</h1>;
+      if (level === '3') return <h3 className={cls}>{props.content}</h3>;
+      if (level === '4') return <h4 className={cls}>{props.content}</h4>;
+      if (level === '5') return <h5 className={cls}>{props.content}</h5>;
+      if (level === '6') return <h6 className={cls}>{props.content}</h6>;
+      return <h2 className={cls}>{props.content}</h2>;
+    },
+
+    /* ── Paragraph ────────────────────────────────────────────────── */
+    Paragraph: ({ props }) => (
+      <p className={cn('text-sm leading-relaxed text-[var(--foreground)]', props.className)}>{props.content}</p>
+    ),
+
+    /* ── List ─────────────────────────────────────────────────────── */
+    List: ({ props }) => {
+      const Tag = props.ordered ? 'ol' : 'ul';
+      return (
+        <Tag className={cn(
+          'space-y-1 pl-5 text-sm text-[var(--foreground)]',
+          props.ordered ? 'list-decimal' : 'list-disc',
+          props.className,
+        )}>
+          {props.items.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </Tag>
+      );
+    },
   },
 });

@@ -1,41 +1,67 @@
 import type { ReactNode } from 'react';
-import { useMemo, useState } from 'react';
 import { ActionProvider, Renderer, StateProvider, VisibilityProvider } from '@json-render/react';
 import { registry } from '../../lib/ui-registry';
-import { cn } from '../../lib/utils';
 
 interface UIPartViewProps {
   spec: any;
   loading?: boolean;
 }
 
-const COLLAPSE_THRESHOLD = 2200;
-
-function safeStringify(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
+/**
+ * Normalize a spec to the flat elements map format that @json-render/react expects.
+ * Handles both formats:
+ * - Flat format: { root: "card-1", elements: { "card-1": { type, props, children: ["child-key"] } } }
+ * - Nested format: { root: { type, props, children: [{ type, props, children: [...] }] } }
+ */
+function normalizeSpec(spec: any): any {
+  // Already in flat format
+  if (typeof spec?.root === 'string' && spec?.elements) {
+    return spec;
   }
+
+  // Nested format — convert to flat
+  if (spec?.root && typeof spec.root === 'object' && spec.root.type) {
+    const elements: Record<string, any> = {};
+    let counter = 0;
+
+    function flattenElement(node: any): string {
+      counter++;
+      const key = `${(node.type || 'el').toLowerCase()}-${counter}`;
+      const childKeys: string[] = [];
+
+      if (Array.isArray(node.children)) {
+        for (const child of node.children) {
+          if (typeof child === 'object' && child.type) {
+            childKeys.push(flattenElement(child));
+          }
+        }
+      }
+
+      elements[key] = {
+        type: node.type,
+        props: node.props || {},
+        ...(childKeys.length > 0 ? { children: childKeys } : {}),
+      };
+
+      return key;
+    }
+
+    const rootKey = flattenElement(spec.root);
+    return { root: rootKey, elements };
+  }
+
+  // Unknown format — pass through and let Renderer handle it
+  return spec;
 }
 
 export function UIPartView({ spec, loading }: UIPartViewProps) {
-  const [expanded, setExpanded] = useState(false);
-  const jsonPreview = useMemo(() => safeStringify(spec), [spec]);
-  const isLarge = jsonPreview.length > COLLAPSE_THRESHOLD;
-  const shouldCollapse = isLarge && !expanded;
-
   if (loading) {
     return (
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
-        <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-          <span className="rounded-full border border-[var(--border)] px-2 py-0.5">Generated UI</span>
-          <span className="animate-pulse">Rendering…</span>
-        </div>
-        <div className="mt-4 space-y-3">
-          <div className="h-4 w-1/3 rounded bg-[var(--muted)] animate-pulse" />
-          <div className="h-20 rounded bg-[var(--muted)] animate-pulse" />
-          <div className="h-10 w-1/2 rounded bg-[var(--muted)] animate-pulse" />
+      <div className="rounded-md border border-[var(--border)] p-3 my-2">
+        <div className="space-y-3 animate-pulse">
+          <div className="h-4 w-1/3 rounded bg-[var(--muted)]" />
+          <div className="h-20 rounded bg-[var(--muted)]" />
+          <div className="h-10 w-1/2 rounded bg-[var(--muted)]" />
         </div>
       </div>
     );
@@ -54,7 +80,6 @@ export function UIPartView({ spec, loading }: UIPartViewProps) {
             },
             submit: (params: { data?: Record<string, unknown> }) => {
               if (params?.data && typeof params.data === 'object') {
-                // Placeholder for WS6 streaming hook
                 console.info('Form submit', params.data);
               }
             },
@@ -64,52 +89,23 @@ export function UIPartView({ spec, loading }: UIPartViewProps) {
           }}
         >
           <VisibilityProvider>
-            <Renderer spec={spec} registry={registry} />
+            <Renderer spec={normalizeSpec(spec)} registry={registry} />
           </VisibilityProvider>
         </ActionProvider>
       </StateProvider>
     );
   } catch (error) {
     content = (
-      <div className="rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-xs text-[var(--foreground)]">
-        <div className="mb-2 text-[10px] font-semibold uppercase text-[var(--muted-foreground)]">UI render failed</div>
-        <pre className="whitespace-pre-wrap font-mono text-xs">{jsonPreview}</pre>
+      <div className="text-xs text-[var(--muted-foreground)]">
+        <pre className="whitespace-pre-wrap font-mono text-xs">{String(error)}</pre>
       </div>
     );
     console.error('Failed to render UI spec', error);
   }
 
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--card)] p-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-          <span className="rounded-full border border-[var(--border)] px-2 py-0.5">Generated UI</span>
-          <span>Interactive</span>
-        </div>
-        {isLarge && (
-          <button
-            type="button"
-            onClick={() => setExpanded((prev) => !prev)}
-            className="text-xs font-medium text-[var(--primary)] hover:opacity-80"
-          >
-            {expanded ? 'Collapse' : 'Expand'}
-          </button>
-        )}
-      </div>
-      <div
-        className={cn(
-          'relative mt-3 overflow-hidden rounded-md border border-[var(--border)] bg-[var(--background)] p-3',
-          shouldCollapse && 'max-h-[320px]'
-        )}
-      >
-        {content}
-        {shouldCollapse && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--background)] to-transparent" />
-        )}
-      </div>
-      {shouldCollapse && (
-        <div className="mt-2 text-xs text-[var(--muted-foreground)]">Expand to view full UI</div>
-      )}
+    <div className="rounded-md border border-[var(--border)] p-3 my-2">
+      {content}
     </div>
   );
 }

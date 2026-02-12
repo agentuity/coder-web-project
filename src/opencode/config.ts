@@ -51,7 +51,7 @@ export function generateOpenCodeConfig(
 		$schema: 'https://opencode.ai/config.json',
 		plugin: ['@agentuity/opencode'],
 		default_agent: 'Agentuity Coder Lead',
-		instructions: ['~/.config/opencode/dynamic-ui.md'],
+		instructions: ['~/.config/opencode/ui-spec-instructions.md'],
 		agent: {
 			build: {
 				mode: 'primary',

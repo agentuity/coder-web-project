@@ -24,9 +24,6 @@ import { Badge } from '../ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
 import { FileExplorer } from '../chat/FileExplorer';
-import { UIPartView } from '../chat/UIPartView';
-import { WebPreview } from '../chat/WebPreview';
-
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
 import { GitPanel, useGitStatus } from '../chat/GitPanel';
@@ -35,8 +32,6 @@ import type {
 	Part,
 	ReasoningPart,
 	ToolPart,
-	UISpecPart,
-	WebPreviewPart,
 } from '../../types/opencode';
 import { TextPartView } from '../chat/TextPartView';
 import { ToolCallCard } from '../chat/ToolCallCard';
@@ -1130,23 +1125,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<div key={part.id} className="text-[10px] italic text-[var(--muted-foreground)]">
 					{'🗜️'} Context compacted{part.auto ? ' (auto)' : ''}
 				</div>
-			);
-		case 'ui_spec':
-			return (
-				<MessageResponse key={part.id}>
-					<UIPartView
-						spec={(part as UISpecPart).spec}
-						loading={isStreaming && message.id === lastAssistantMessage?.id}
-					/>
-				</MessageResponse>
-			);
-		case 'web_preview':
-			return (
-				<WebPreview
-					key={part.id}
-					url={(part as WebPreviewPart).url}
-					title={(part as WebPreviewPart).title}
-				/>
 			);
 		case 'retry':
 			return (

@@ -3,6 +3,7 @@
  * Each chat session gets its own sandbox with an OpenCode server.
  */
 import { sandboxExecute } from '@agentuity/server';
+import { JSON_RENDER_CORE_SKILL, JSON_RENDER_REACT_SKILL, UI_SPEC_INSTRUCTIONS } from './json-render-skills';
 
 const OPENCODE_PORT = 4096;
 const OPENCODE_RUNTIME = 'opencode:latest';
@@ -300,81 +301,32 @@ export async function createSandbox(
       }
     }
 
-    // 4. Write Dynamic UI instructions to the sandbox
-    //    These instructions tell the agent to output special code fences
-    //    that our SSE interceptor detects and processes into rich UI parts.
-    ctx.logger.info('Writing Dynamic UI instructions to sandbox...');
+    // 3c. Install json-render skills for inline UI generation
+    //     These teach the agent how to create json-render specs that render
+    //     as interactive UI components in the chat interface.
+    ctx.logger.info('Installing json-render skills...');
+    const jsonRenderSkills = getJsonRenderSkills();
+    for (const skill of jsonRenderSkills) {
+      const skillDir = `${workDir}/.agents/skills/${skill.slug}`;
+      await sandbox.execute({
+        command: [
+          'bash', '-c',
+          `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'JRSKILLEOF'\n${skill.content}\nJRSKILLEOF`,
+        ],
+      });
+    }
+
+    // 3d. Write ui_spec instructions for inline UI rendering
+    //     Tells the agent how to output ui_spec code fences that get rendered as
+    //     interactive components in the chat interface.
     await sandbox.execute({
       command: [
         'bash', '-c',
-        `cat > ~/.config/opencode/dynamic-ui.md << 'INSTRUCTIONS_EOF'
-# Dynamic UI Capabilities
-
-You can render rich interactive content directly in chat by outputting special fenced code blocks. The system detects these blocks and renders them as interactive components.
-
-## Inline UI Components (preferred for data display)
-
-Output a fenced code block with language tag ui_spec containing a JSON component spec:
-
-\`\`\`ui_spec
-{
-  "type": "Card",
-  "props": { "title": "Dashboard" },
-  "children": [
-    { "type": "Metric", "props": { "label": "Revenue", "value": "$12,345", "change": "+12%" } }
-  ]
-}
-\`\`\`
-
-### Available Components
-Card (title, description?, padding?), Text (content, variant?), Button (label, variant?, action?),
-Table (columns [{key,label}], rows [{key:value}]), Metric (label, value, change?, trend?),
-Chart (type: bar/line/pie, data [{label,value}], xKey?, yKey?), Form (title?), Input (label, placeholder?, type?),
-Select (label, options [{value,label}]), Image (src, alt?, width?, height?),
-Badge (text, variant?), Alert (message, variant?, title?), Row (gap?, align?),
-Column (gap?, align?), Stack (gap?, direction?), Divider, Link (href, label, external?), Code (language?, content)
-
-### Spec Format
-Each node has "type" (component name), "props" (component props), and optional "children" array.
-Layout components (Row, Column, Stack, Card, Form) accept children.
-Card is the best top-level container.
-
-### When to use
-- Displaying data as tables, charts, or metrics
-- Simple dashboards with cards and stats
-- Forms for collecting user input
-- Status displays with badges and alerts
-- Any UI that does not need a full web server
-
-## Web Preview (full web apps)
-
-Output a fenced code block with language tag web_preview containing a JSON object:
-
-\`\`\`web_preview
-{"path": "web-preview/", "title": "My App"}
-\`\`\`
-
-The path field is the directory (relative to working directory) containing your web files.
-
-### Workflow
-1. Create a directory for web files (e.g., web-preview/)
-2. Write files: src/index.html (HTML shell with div#root and script src=/app.js) and src/app.tsx (React entry)
-3. Output the web_preview code fence with the directory path
-
-### When to use
-- Full web applications with routing
-- Pages needing custom npm dependencies beyond React/Hono
-- Complex interactive features (drag-and-drop, animations, canvas)
-- Landing pages, portfolios, or multi-page sites
-
-## Decision Guide
-Default to ui_spec when possible — it renders instantly with no sandbox overhead.
-Use web_preview only when you need a full web server, custom deps, or complex interactivity.
-INSTRUCTIONS_EOF`,
+        `cat > ~/.config/opencode/ui-spec-instructions.md << 'UISPEC_EOF'\n${getUISpecInstructions()}\nUISPEC_EOF`,
       ],
     });
 
-    // 5. Start OpenCode server
+    // 4. Start OpenCode server
 
     await sandbox.execute({
       command: [
@@ -545,6 +497,30 @@ export async function checkSandboxHealth(
   } catch {
     return false;
   }
+}
+
+/**
+ * Return the json-render skill files to install in sandboxes.
+ * These are embedded at build time from the skill markdown files.
+ */
+function getJsonRenderSkills(): Array<{ slug: string; content: string }> {
+  return [
+    {
+      slug: 'json-render-core',
+      content: JSON_RENDER_CORE_SKILL,
+    },
+    {
+      slug: 'json-render-react',
+      content: JSON_RENDER_REACT_SKILL,
+    },
+  ];
+}
+
+/**
+ * Instructions for the agent on how to output ui_spec code fences.
+ */
+function getUISpecInstructions(): string {
+  return UI_SPEC_INSTRUCTIONS;
 }
 
 export { OPENCODE_PORT };
