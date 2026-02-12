@@ -1,4 +1,4 @@
-import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react';
+import { type ChangeEvent, type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import { defineRegistry, useStateStore } from '@json-render/react';
 import { catalog } from './ui-catalog';
 import { cn } from './utils';
@@ -39,6 +39,84 @@ const alignMap: Record<'start' | 'center' | 'end' | 'stretch', string> = {
   end: 'items-end',
   stretch: 'items-stretch',
 };
+
+/* ── Mermaid text-contrast helpers ──────────────────────────── */
+
+function mermaidGetLuminance(hex: string): number {
+  const rgb = hex.replace('#', '').match(/.{2}/g);
+  if (!rgb || rgb.length < 3) return 0.5;
+  const vals = rgb.map(c => {
+    const v = parseInt(c, 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * (vals[0] ?? 0) + 0.7152 * (vals[1] ?? 0) + 0.0722 * (vals[2] ?? 0);
+}
+
+function mermaidColorToHex(color: string): string | null {
+  if (!color) return null;
+  const trimmed = color.trim().toLowerCase();
+  if (/^#[0-9a-f]{3,8}$/i.test(trimmed)) {
+    const hex = trimmed.replace('#', '');
+    if (hex.length === 3) return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`;
+    if (hex.length >= 6) return `#${hex.slice(0, 6)}`;
+    return null;
+  }
+  const rgbMatch = trimmed.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (rgbMatch && rgbMatch[1] && rgbMatch[2] && rgbMatch[3]) {
+    const toHex = (n: string) => parseInt(n).toString(16).padStart(2, '0');
+    return `#${toHex(rgbMatch[1])}${toHex(rgbMatch[2])}${toHex(rgbMatch[3])}`;
+  }
+  const named: Record<string, string> = {
+    white: '#ffffff', black: '#000000', red: '#ff0000', green: '#008000',
+    blue: '#0000ff', yellow: '#ffff00', orange: '#ffa500', pink: '#ffc0cb',
+    purple: '#800080', gray: '#808080', grey: '#808080', transparent: '#ffffff',
+    lightgray: '#d3d3d3', lightgrey: '#d3d3d3', darkgray: '#a9a9a9', darkgrey: '#a9a9a9',
+  };
+  if (named[trimmed]) return named[trimmed];
+  return null;
+}
+
+function mermaidFixTextContrast(container: HTMLElement) {
+  const textEls = container.querySelectorAll<SVGTextElement | SVGTSpanElement>('text, tspan');
+  for (const textEl of textEls) {
+    let fillColor: string | null = null;
+    let ancestor: Element | null = textEl.parentElement;
+    while (ancestor && ancestor !== container) {
+      if (ancestor.tagName.toLowerCase() === 'g') {
+        const shape = ancestor.querySelector('rect, circle, ellipse, polygon, path');
+        if (shape) {
+          const shapeFill = shape.getAttribute('fill') || (shape as HTMLElement).style?.fill;
+          if (shapeFill && shapeFill !== 'none' && shapeFill !== 'transparent') {
+            fillColor = shapeFill;
+            break;
+          }
+        }
+      }
+      const ancestorFill = ancestor.getAttribute('fill') || (ancestor as HTMLElement).style?.fill;
+      if (ancestorFill && ancestorFill !== 'none' && ancestorFill !== 'transparent' &&
+          ['rect', 'circle', 'ellipse', 'polygon', 'path'].includes(ancestor.tagName.toLowerCase())) {
+        fillColor = ancestorFill;
+        break;
+      }
+      ancestor = ancestor.parentElement;
+    }
+    if (!fillColor) continue;
+    const hex = mermaidColorToHex(fillColor);
+    if (!hex) {
+      textEl.setAttribute('fill', '#1a1a2e');
+      textEl.style.textShadow = '0 0 3px rgba(255,255,255,0.7)';
+      continue;
+    }
+    const lum = mermaidGetLuminance(hex);
+    if (lum < 0.5) {
+      textEl.setAttribute('fill', '#ffffff');
+      textEl.style.textShadow = '0 0 3px rgba(0,0,0,0.5)';
+    } else {
+      textEl.setAttribute('fill', '#1a1a2e');
+      textEl.style.textShadow = '0 0 3px rgba(255,255,255,0.7)';
+    }
+  }
+}
 
 const textVariants: Record<'heading' | 'subheading' | 'body' | 'caption', string> = {
   heading: 'text-lg font-semibold text-[var(--foreground)]',
@@ -1086,6 +1164,10 @@ export const { registry } = defineRegistry(catalog, {
       const containerRef = useRef<HTMLDivElement | null>(null);
       const [error, setError] = useState<string | null>(null);
       const [copied, setCopied] = useState(false);
+      const [scale, setScale] = useState(1);
+      const [translate, setTranslate] = useState({ x: 0, y: 0 });
+      const [isDragging, setIsDragging] = useState(false);
+      const dragStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
       // Curated theme list — dark themes first when in dark mode, light first when in light
       const mermaidThemes = [
@@ -1132,6 +1214,9 @@ export const { registry } = defineRegistry(catalog, {
               svgEl.style.height = 'auto';
               svgEl.style.maxHeight = '600px';
             }
+
+            // Fix text contrast on colored node fills
+            mermaidFixTextContrast(containerRef.current);
           } catch (err) {
             if (!cancelled) {
               setError(err instanceof Error ? err.message : 'Failed to render diagram');
@@ -1141,6 +1226,50 @@ export const { registry } = defineRegistry(catalog, {
 
         return () => { cancelled = true; };
       }, [props.code, selectedTheme]);
+
+      // ── Zoom/pan handlers ──────────────────────────────────────
+      const zoomIn = useCallback(() => setScale(s => Math.min(s * 1.25, 4)), []);
+      const zoomOut = useCallback(() => setScale(s => Math.max(s / 1.25, 0.25)), []);
+      const resetView = useCallback(() => { setScale(1); setTranslate({ x: 0, y: 0 }); }, []);
+
+      const handleWheel = useCallback((e: React.WheelEvent<HTMLDivElement>) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        const rect = e.currentTarget.getBoundingClientRect();
+        const cursorX = e.clientX - rect.left;
+        const cursorY = e.clientY - rect.top;
+        const delta = e.deltaY > 0 ? 1 / 1.1 : 1.1;
+
+        setScale(prevScale => {
+          const newScale = Math.min(Math.max(prevScale * delta, 0.25), 4);
+          const ratio = newScale / prevScale;
+          setTranslate(prev => ({
+            x: cursorX - ratio * (cursorX - prev.x),
+            y: cursorY - ratio * (cursorY - prev.y),
+          }));
+          return newScale;
+        });
+      }, []);
+
+      const handleMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        // Don't start drag on button/select clicks
+        if ((e.target as HTMLElement).closest('button, select, option')) return;
+        e.preventDefault();
+        setIsDragging(true);
+        dragStart.current = { x: e.clientX, y: e.clientY, tx: translate.x, ty: translate.y };
+      }, [translate.x, translate.y]);
+
+      const handleMouseMove = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (!isDragging || !dragStart.current) return;
+        const dx = e.clientX - dragStart.current.x;
+        const dy = e.clientY - dragStart.current.y;
+        setTranslate({ x: dragStart.current.tx + dx, y: dragStart.current.ty + dy });
+      }, [isDragging]);
+
+      const handleMouseUp = useCallback(() => {
+        setIsDragging(false);
+        dragStart.current = null;
+      }, []);
 
       const handleCopy = () => {
         void navigator.clipboard.writeText(props.code).then(() => {
@@ -1161,23 +1290,54 @@ export const { registry } = defineRegistry(catalog, {
       return (
         <div className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--muted)] border-b border-[var(--border)]">
-            <select
-              value={selectedTheme}
-              onChange={(e) => setSelectedTheme(e.target.value)}
-              className="text-[10px] bg-transparent text-[var(--muted-foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 hover:text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)] cursor-pointer"
-              title="Diagram theme"
-            >
-              <optgroup label="Dark">
-                {mermaidThemes.filter((t) => t.dark).map((t) => (
-                  <option key={t.key} value={t.key}>{t.label}</option>
-                ))}
-              </optgroup>
-              <optgroup label="Light">
-                {mermaidThemes.filter((t) => !t.dark).map((t) => (
-                  <option key={t.key} value={t.key}>{t.label}</option>
-                ))}
-              </optgroup>
-            </select>
+            <div className="flex items-center gap-2">
+              <select
+                value={selectedTheme}
+                onChange={(e) => setSelectedTheme(e.target.value)}
+                className="text-[10px] bg-[var(--muted)] text-[var(--muted-foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 hover:text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)] cursor-pointer [&_option]:bg-[var(--muted)] [&_option]:text-[var(--foreground)] [&_optgroup]:bg-[var(--muted)] [&_optgroup]:text-[var(--muted-foreground)]"
+                title="Diagram theme"
+              >
+                <optgroup label="Dark">
+                  {mermaidThemes.filter((t) => t.dark).map((t) => (
+                    <option key={t.key} value={t.key}>{t.label}</option>
+                  ))}
+                </optgroup>
+                <optgroup label="Light">
+                  {mermaidThemes.filter((t) => !t.dark).map((t) => (
+                    <option key={t.key} value={t.key}>{t.label}</option>
+                  ))}
+                </optgroup>
+              </select>
+              <div className="flex items-center gap-0.5 border border-[var(--border)] rounded">
+                <button
+                  type="button"
+                  onClick={zoomOut}
+                  className="px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] transition-colors rounded-l"
+                  title="Zoom out"
+                >
+                  −
+                </button>
+                <span className="px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)] min-w-[3.5em] text-center select-none">
+                  {Math.round(scale * 100)}%
+                </span>
+                <button
+                  type="button"
+                  onClick={zoomIn}
+                  className="px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] transition-colors"
+                  title="Zoom in"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  onClick={resetView}
+                  className="px-1.5 py-0.5 text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)] transition-colors rounded-r border-l border-[var(--border)]"
+                  title="Reset zoom and position"
+                >
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182" /></svg>
+                </button>
+              </div>
+            </div>
             <button
               type="button"
               onClick={handleCopy}
@@ -1198,9 +1358,18 @@ export const { registry } = defineRegistry(catalog, {
             </button>
           </div>
           <div
-            ref={containerRef}
-            className="p-4 overflow-auto"
-          />
+            className="relative overflow-hidden"
+            style={{ cursor: isDragging ? 'grabbing' : 'grab' }}
+            onWheel={handleWheel}
+            onMouseDown={handleMouseDown}
+            onMouseMove={handleMouseMove}
+            onMouseUp={handleMouseUp}
+            onMouseLeave={handleMouseUp}
+          >
+            <div style={{ transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})`, transformOrigin: '0 0', transition: isDragging ? 'none' : 'transform 0.1s ease-out' }}>
+              <div ref={containerRef} className="p-4" />
+            </div>
+          </div>
         </div>
       );
     },
