@@ -725,9 +725,18 @@ export const { registry } = defineRegistry(catalog, {
 
     /* ── Map (MapLibre GL) ───────────────────────────────────────── */
     Map: ({ props }) => {
+      const stateStore = useStateStore();
       const containerRef = useRef<HTMLDivElement>(null);
       const mapRef = useRef<maplibregl.Map | null>(null);
+      const domMarkersRef = useRef<maplibregl.Marker[]>([]);
 
+      // Read markers from state if markersPath provided
+      const stateMarkers = props.markersPath
+        ? ((stateStore.get(props.markersPath) as Array<{ longitude: number; latitude: number; label?: string; popup?: string }>) ?? [])
+        : [];
+      const allMarkers = [...(props.markers ?? []), ...stateMarkers];
+
+      // Initialize map
       useEffect(() => {
         if (!containerRef.current || mapRef.current) return;
 
@@ -745,36 +754,20 @@ export const { registry } = defineRegistry(catalog, {
 
         mapRef.current = map;
 
+        // Click-to-add markers
+        if (props.interactive && props.markersPath) {
+          map.on('click', (e) => {
+            const current = (stateStore.get(props.markersPath!) as Array<{ longitude: number; latitude: number; label?: string }>) ?? [];
+            stateStore.set(props.markersPath!, [...current, {
+              longitude: e.lngLat.lng,
+              latitude: e.lngLat.lat,
+              label: `Point ${current.length + 1}`,
+            }]);
+          });
+        }
+
+        // Draw route line
         map.on('load', () => {
-          // Add markers
-          if (props.markers) {
-            for (const marker of props.markers) {
-              const el = document.createElement('div');
-              el.style.cssText = 'width:24px;height:24px;background:#3b82f6;border:2px solid #fff;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);';
-
-              const m = new maplibregl.Marker({ element: el })
-                .setLngLat([marker.longitude, marker.latitude])
-                .addTo(map);
-
-              if (marker.popup) {
-                m.setPopup(new maplibregl.Popup({ offset: 16 }).setText(marker.popup));
-              }
-
-              if (marker.label) {
-                new maplibregl.Popup({
-                  offset: 16,
-                  closeButton: false,
-                  closeOnClick: false,
-                  className: 'maplibre-label-popup',
-                })
-                  .setLngLat([marker.longitude, marker.latitude])
-                  .setText(marker.label)
-                  .addTo(map);
-              }
-            }
-          }
-
-          // Draw route line
           if (props.route && props.route.length >= 2) {
             map.addSource('route', {
               type: 'geojson',
@@ -802,6 +795,44 @@ export const { registry } = defineRegistry(catalog, {
           mapRef.current = null;
         };
       }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+      // Sync markers to map whenever they change
+      useEffect(() => {
+        const map = mapRef.current;
+        if (!map) return;
+
+        // Remove old markers
+        for (const m of domMarkersRef.current) m.remove();
+        domMarkersRef.current = [];
+
+        // Add all markers
+        for (const marker of allMarkers) {
+          const el = document.createElement('div');
+          el.style.cssText = 'width:24px;height:24px;background:#3b82f6;border:2px solid #fff;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);';
+
+          const m = new maplibregl.Marker({ element: el })
+            .setLngLat([marker.longitude, marker.latitude])
+            .addTo(map);
+
+          if (marker.popup) {
+            m.setPopup(new maplibregl.Popup({ offset: 16 }).setText(marker.popup));
+          }
+
+          if (marker.label) {
+            new maplibregl.Popup({
+              offset: 16,
+              closeButton: false,
+              closeOnClick: false,
+              className: 'maplibre-label-popup',
+            })
+              .setLngLat([marker.longitude, marker.latitude])
+              .setText(marker.label)
+              .addTo(map);
+          }
+
+          domMarkersRef.current.push(m);
+        }
+      }, [JSON.stringify(allMarkers)]); // eslint-disable-line
 
       return (
         <div

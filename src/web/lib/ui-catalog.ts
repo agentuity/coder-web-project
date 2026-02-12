@@ -318,9 +318,11 @@ export const catalog = defineCatalog(schema, {
         })).optional(),
         route: z.array(z.tuple([z.number(), z.number()])).optional(),
         height: z.string().optional(),
+        markersPath: z.string().optional(),
+        interactive: z.boolean().optional(),
         className: z.string().optional(),
       }),
-      description: 'Interactive map with markers, popups, and routes (MapLibre, no API key needed)',
+      description: 'Interactive map with markers, popups, and routes (MapLibre, no API key needed). Use markersPath to read markers from state and interactive to allow click-to-add.',
     },
     AutoForm: {
       props: z.object({

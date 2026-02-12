@@ -357,6 +357,127 @@ Key rules:
 - Layout components (Box, Flex, Row, Column, Stack, Card, Form, Section, Container, Grid, Hero, CTA) use \`children\` to nest other elements
 - Leaf components (Text, Heading, Paragraph, List, Metric, Chart, Button, Feature, Testimonial, PricingCard, Map, AutoForm, ApiReference, etc.) typically have no children
 
+## State & Interactivity
+
+State support is a general-purpose system — ANY component can participate in state through event bindings, visibility conditions, and dynamic props. Use state when the UI needs user interaction beyond static display.
+
+### Initial State
+
+Specs can include a top-level \`"state"\` object to define initial state values. If omitted, defaults to \`{ "form": {} }\`.
+
+\`\`\`json
+{
+  "root": "my-root",
+  "elements": { ... },
+  "state": { "submitted": false, "tab": "overview", "count": 0 }
+}
+\`\`\`
+
+### Event Bindings (\`on\`)
+
+ANY element can use an \`"on"\` field to bind component events to actions. The event name is component-specific (Button emits "press", Form emits "submit", etc.). The \`on\` field maps event names to action bindings:
+
+\`\`\`json
+{
+  "type": "Button",
+  "props": { "label": "Click me" },
+  "on": {
+    "press": { "action": "setState", "actionParams": { "path": "/count", "value": 1 } }
+  }
+}
+\`\`\`
+
+Available actions:
+- **setState** — Set a value at a state path: \`{ "action": "setState", "actionParams": { "path": "/count", "value": 5 } }\`
+- **toggleState** — Toggle a boolean value: \`{ "action": "toggleState", "actionParams": { "path": "/showPanel" } }\`
+- **appendItem** — Add an item to an array: \`{ "action": "appendItem", "actionParams": { "path": "/items", "item": { "name": "new" } } }\`
+- **removeItem** — Remove an item from an array by index: \`{ "action": "removeItem", "actionParams": { "path": "/items", "index": 0 } }\`
+- **navigate** — Navigate to a URL: \`{ "action": "navigate", "actionParams": { "url": "https://example.com" } }\`
+- **submit** — Submit form data: \`{ "action": "submit", "actionParams": { "data": { ... } } }\`
+
+### Conditional Visibility (\`visible\`)
+
+ANY element can use a \`"visible"\` field to show/hide based on state conditions:
+
+- Truthy check: \`{ "path": "/key" }\` — visible when value at path is truthy
+- Equality: \`{ "eq": [{ "path": "/role" }, "admin"] }\`
+- Inequality: \`{ "ne": [{ "path": "/status" }, "disabled"] }\`
+- Comparison: \`gt\`, \`gte\`, \`lt\`, \`lte\` — e.g. \`{ "gt": [{ "path": "/count" }, 0] }\`
+- Logic: \`{ "and": [...] }\`, \`{ "or": [...] }\`, \`{ "not": { ... } }\`
+
+### Dynamic Props
+
+Any prop value can reference state with \`{ "$path": "/state/key" }\`. Conditional props: \`{ "$cond": { "eq": [...] }, "$then": "A", "$else": "B" }\`.
+
+### When to Use State
+
+- **Form with feedback** — use state for submitted flag, show success/error messages with \`visible\`
+- **Tabs/toggles** — use state for activeTab, show/hide panels with \`visible\` conditions
+- **Interactive maps** — use state for markers array with \`markersPath\` + \`interactive\`
+- **Counters** — use state for count values, buttons with setState
+- **Multi-step flows** — use state for current step, show/hide steps with \`visible\`
+- **Live filters** — use state for filter values, apply \`visible\` conditions on results
+- **Don't use state** when the UI is purely informational (dashboards, status pages, landing pages, documentation)
+
+### State Examples
+
+**Interactive Form with Success Message:**
+
+\`\`\`ui_spec
+{
+  "root": "col-1",
+  "elements": {
+    "col-1": { "type": "Column", "props": { "gap": "md" }, "children": ["form-1", "success"] },
+    "form-1": { "type": "Form", "props": { "title": "Contact" }, "children": ["name", "email", "btn"] },
+    "name": { "type": "Input", "props": { "label": "Name" } },
+    "email": { "type": "Input", "props": { "label": "Email", "type": "email" } },
+    "btn": {
+      "type": "Button", "props": { "label": "Submit" },
+      "on": { "press": { "action": "setState", "actionParams": { "path": "/submitted", "value": true } } }
+    },
+    "success": {
+      "type": "Alert", "props": { "message": "Thank you!", "variant": "success" },
+      "visible": { "path": "/submitted" }
+    }
+  },
+  "state": { "submitted": false }
+}
+\`\`\`
+
+**Tabbed Interface:**
+
+\`\`\`ui_spec
+{
+  "root": "tabs",
+  "elements": {
+    "tabs": { "type": "Column", "props": { "gap": "md" }, "children": ["btns", "tab-a", "tab-b"] },
+    "btns": { "type": "Row", "props": { "gap": "sm" }, "children": ["btn-a", "btn-b"] },
+    "btn-a": { "type": "Button", "props": { "label": "Overview" }, "on": { "press": { "action": "setState", "actionParams": { "path": "/tab", "value": "a" } } } },
+    "btn-b": { "type": "Button", "props": { "label": "Details" }, "on": { "press": { "action": "setState", "actionParams": { "path": "/tab", "value": "b" } } } },
+    "tab-a": { "type": "Card", "props": { "title": "Overview" }, "visible": { "eq": [{ "path": "/tab" }, "a"] }, "children": ["text-a"] },
+    "tab-b": { "type": "Card", "props": { "title": "Details" }, "visible": { "eq": [{ "path": "/tab" }, "b"] }, "children": ["text-b"] },
+    "text-a": { "type": "Text", "props": { "content": "Overview content here." } },
+    "text-b": { "type": "Text", "props": { "content": "Detailed information here." } }
+  },
+  "state": { "tab": "a" }
+}
+\`\`\`
+
+**Interactive Map (click to add markers):**
+
+\`\`\`ui_spec
+{
+  "root": "map-1",
+  "elements": {
+    "map-1": {
+      "type": "Map",
+      "props": { "center": [-74.006, 40.7128], "zoom": 11, "markersPath": "/markers", "interactive": true, "height": "400px" }
+    }
+  },
+  "state": { "markers": [] }
+}
+\`\`\`
+
 ## Available Components
 
 ### Primitive Components
@@ -424,7 +545,7 @@ Key rules:
 
 | Component | Key Props | Description |
 |-----------|-----------|-------------|
-| Map | center? [lng,lat], zoom?, markers? [{longitude, latitude, label?, popup?}], route? [[lng,lat]...], height? | Interactive map with markers, popups, and routes (MapLibre, no API key needed) |
+| Map | center? [lng,lat], zoom?, markers? [{longitude, latitude, label?, popup?}], route? [[lng,lat]...], height?, markersPath?, interactive? | Interactive map with markers, popups, and routes (MapLibre, no API key needed). Use markersPath (JSON Pointer to state array) + interactive (click-to-add) for state-driven markers. |
 | AutoForm | schema {fieldName: {type, label?, description?, required?, placeholder?, options?, min?, max?, default?}}, title?, submitLabel? | Auto-generated form from a JSON field schema — describe fields and types, form is built automatically |
 | ApiReference | specUrl?, spec? (inline JSON), className? | Interactive OpenAPI/Swagger API reference viewer with try-it-out testing |
 
@@ -648,7 +769,7 @@ Use ui_spec whenever the response benefits from visual formatting over plain tex
 - For text content: use Heading + Paragraph + List for readable document-style output
 - Use \`Box\` when you just need a styled wrapper with no layout opinion
 - Use \`Flex\` when Row/Column constraints aren't enough (e.g. \`justify: "between"\`, \`wrap: true\`)
-- For maps: use \`Map\` with \`center\` and \`markers\` for location data. Routes draw lines between coordinate pairs. No API key needed.
+- For maps: use \`Map\` with \`center\` and \`markers\` for location data. Routes draw lines between coordinate pairs. No API key needed. For interactive maps, use \`markersPath\` (state path to markers array) + \`interactive: true\` with a \`state: { "markers": [] }\` block.
 - For forms described as field lists: prefer \`AutoForm\` over composing Form+Input+Select manually — just describe the schema as JSON. Field types: string, number, boolean, select.
 - For API docs: use \`ApiReference\` with either \`specUrl\` (URL to OpenAPI JSON/YAML) or \`spec\` (inline OpenAPI JSON object).
 - Keep element keys descriptive and unique within the spec

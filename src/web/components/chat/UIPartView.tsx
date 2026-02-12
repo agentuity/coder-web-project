@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { ActionProvider, Renderer, StateProvider, VisibilityProvider } from '@json-render/react';
+import { useMemo, type ReactNode } from 'react';
+import { ActionProvider, Renderer, StateProvider, VisibilityProvider, useStateStore } from '@json-render/react';
 import { registry } from '../../lib/ui-registry';
 import { specToReact } from '../../lib/spec-to-react';
 
@@ -66,6 +66,59 @@ function normalizeSpec(spec: any): any {
   return spec;
 }
 
+function UIPartViewInner({ spec }: { spec: any }) {
+  const { get, set } = useStateStore();
+
+  const handlers = useMemo(() => ({
+    setState: (params: { path?: string; value?: unknown }) => {
+      if (typeof params?.path === 'string') {
+        set(params.path, params.value);
+      }
+    },
+    toggleState: (params: { path?: string }) => {
+      if (typeof params?.path === 'string') {
+        set(params.path, !get(params.path));
+      }
+    },
+    appendItem: (params: { path?: string; item?: unknown }) => {
+      if (typeof params?.path === 'string') {
+        const current = get(params.path);
+        const arr = Array.isArray(current) ? current : [];
+        set(params.path, [...arr, params.item]);
+      }
+    },
+    removeItem: (params: { path?: string; index?: number }) => {
+      if (typeof params?.path === 'string' && typeof params?.index === 'number') {
+        const current = get(params.path);
+        if (Array.isArray(current)) {
+          set(params.path, current.filter((_: unknown, i: number) => i !== params.index));
+        }
+      }
+    },
+    navigate: (params: { url?: unknown }) => {
+      if (typeof window !== 'undefined' && typeof params?.url === 'string') {
+        window.location.assign(params.url);
+      }
+    },
+    submit: (params: { data?: Record<string, unknown> }) => {
+      if (params?.data && typeof params.data === 'object') {
+        console.info('Form submit', params.data);
+      }
+    },
+    action: (params: Record<string, unknown>) => {
+      console.info('Action', params);
+    },
+  }), [get, set]);
+
+  return (
+    <ActionProvider handlers={handlers}>
+      <VisibilityProvider>
+        <Renderer spec={normalizeSpec(spec)} registry={registry} />
+      </VisibilityProvider>
+    </ActionProvider>
+  );
+}
+
 export function UIPartView({ spec, loading }: UIPartViewProps) {
   if (loading) {
     return (
@@ -79,31 +132,13 @@ export function UIPartView({ spec, loading }: UIPartViewProps) {
     );
   }
 
+  const initialState = spec?.state ?? { form: {} };
+
   let content: ReactNode;
   try {
     content = (
-      <StateProvider initialState={{ form: {} }}>
-        <ActionProvider
-          handlers={{
-            navigate: (params: { url?: unknown }) => {
-              if (typeof window !== 'undefined' && typeof params?.url === 'string') {
-                window.location.assign(params.url);
-              }
-            },
-            submit: (params: { data?: Record<string, unknown> }) => {
-              if (params?.data && typeof params.data === 'object') {
-                console.info('Form submit', params.data);
-              }
-            },
-            action: (params: Record<string, unknown>) => {
-              console.info('Action', params);
-            },
-          }}
-        >
-          <VisibilityProvider>
-            <Renderer spec={normalizeSpec(spec)} registry={registry} />
-          </VisibilityProvider>
-        </ActionProvider>
+      <StateProvider initialState={initialState}>
+        <UIPartViewInner spec={spec} />
       </StateProvider>
     );
   } catch (error) {
