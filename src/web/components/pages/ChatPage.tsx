@@ -313,10 +313,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   // Only initialize from session.agent if it's a real agent (not a template command).
   // Template commands (memory-save, cadence, etc.) are one-shot and shouldn't persist.
+  // DB stores without '/' prefix, picker uses with '/' — normalize on load.
   const [selectedCommand, setSelectedCommand] = useState(() => {
     const agent = session.agent || '';
     const templateCommands = new Set(['agentuity-cadence', 'agentuity-memory-save', 'agentuity-memory-share', 'agentuity-cloud', 'agentuity-sandbox']);
-    return templateCommands.has(agent) ? '' : agent;
+    if (!agent || templateCommands.has(agent)) return '';
+    return agent.startsWith('/') ? agent : `/${agent}`;
   });
   const [hasManuallySelectedCommand, setHasManuallySelectedCommand] = useState(false);
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
