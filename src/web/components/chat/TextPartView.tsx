@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Streamdown } from 'streamdown';
 import { createCodePlugin } from '@streamdown/code';
@@ -141,7 +141,7 @@ const components = {
   ),
 };
 
-export function TextPartView({ part, isStreaming }: TextPartViewProps) {
+export const TextPartView = React.memo(function TextPartView({ part, isStreaming }: TextPartViewProps) {
   if (part.ignored) return null;
   return (
     <div className="max-w-none text-sm text-[var(--foreground)]">
@@ -156,4 +156,4 @@ export function TextPartView({ part, isStreaming }: TextPartViewProps) {
       </Streamdown>
     </div>
   );
-}
+});

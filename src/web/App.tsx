@@ -181,7 +181,7 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [workspaceId]);
 
-	const handleNewSession = useCallback(async (data: { repoUrl?: string; branch?: string; prompt?: string }) => {
+	const handleNewSession = useCallback(async (data: { repoUrl?: string; branch?: string; prompt?: string; snapshotId?: string }) => {
 		if (!workspaceId) return;
 		// Ref-based guard prevents double submission (state updates are async)
 		if (isCreatingRef.current) return;
@@ -363,6 +363,7 @@ function AppContent() {
         onCreate={handleNewSession}
         isCreating={isCreating}
         githubAvailable={githubAvailable}
+        workspaceId={workspaceId ?? undefined}
       />
     </>
   );

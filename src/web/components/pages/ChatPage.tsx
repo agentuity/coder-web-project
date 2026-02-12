@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEventHandler } from 'react';
 import {
 	Check,
+	Clock,
 	Code2,
 	Copy,
 	GitBranch,
 	GitFork,
+	Camera,
 	Circle,
 	ListOrdered,
 	ListTodo,
@@ -306,12 +308,17 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [isSending, setIsSending] = useState(false);
 	const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
   const [selectedCommand, setSelectedCommand] = useState('');
+  const [hasManuallySelectedCommand, setHasManuallySelectedCommand] = useState(false);
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
 	const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
 	const [showTodos, setShowTodos] = useState(false);
 	const [showChanges, setShowChanges] = useState(false);
 	const [isForking, setIsForking] = useState(false);
 	const [isSharing, setIsSharing] = useState(false);
+	const [showSnapshotDialog, setShowSnapshotDialog] = useState(false);
+	const [snapshotName, setSnapshotName] = useState('');
+	const [snapshotDescription, setSnapshotDescription] = useState('');
+	const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
 	const [shareUrl, setShareUrl] = useState<string | null>(null);
 	const [shareCopied, setShareCopied] = useState(false);
 	const [urlState, setUrlState] = useUrlState();
@@ -529,6 +536,23 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		setAttachments([]);
 	}, [sessionId]);
 
+	// Load user's default agent preference (once on mount)
+	const hasManuallySelectedRef = useRef(false);
+	useEffect(() => {
+		hasManuallySelectedRef.current = hasManuallySelectedCommand;
+	}, [hasManuallySelectedCommand]);
+
+	useEffect(() => {
+		fetch('/api/user/settings')
+			.then((r) => r.json())
+			.then((data: { defaultCommand?: string }) => {
+				if (!hasManuallySelectedRef.current && data.defaultCommand) {
+					setSelectedCommand(data.defaultCommand);
+				}
+			})
+			.catch(() => {});
+	}, []);
+
 
 	const activeFilePath = activeTab?.filePath ?? null;
 	const isBusy = sessionStatus.type === 'busy';
@@ -553,15 +577,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 	const promptPlaceholder = session.status === 'active'
 		? 'Message the agent...'
-		: session.status === 'terminated'
-			? 'This session is read-only.'
-			: session.status === 'error'
-				? 'Session failed to start.'
-				: 'Waiting for sandbox to be ready...';
+		: session.status === 'creating'
+			? 'Type your message... (will send when ready)'
+			: session.status === 'terminated'
+				? 'This session is read-only.'
+				: session.status === 'error'
+					? 'Session failed to start.'
+					: 'Waiting for sandbox to be ready...';
 	const attachmentAccept = Array.from(ALLOWED_EXTENSIONS)
 		.map((ext) => `.${ext}`)
 		.join(',');
-	const attachmentDisabled = session.status !== 'active' || attachments.length >= MAX_ATTACHMENTS;
+	const isSessionInputEnabled = session.status === 'active' || session.status === 'creating';
+	const attachmentDisabled = !isSessionInputEnabled || attachments.length >= MAX_ATTACHMENTS;
 
 	const sendMessage = useCallback(
 		async (payload: QueuedMessage) => {
@@ -628,7 +655,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			clearComments();
 		}
 
-		if (isBusy || isSending) {
+		if (isBusy || isSending || session.status === 'creating') {
 			setMessageQueue((prev) => [...prev, payload]);
 			return;
 		}
@@ -638,12 +665,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	handleSendRef.current = handleSend;
 
 	useEffect(() => {
-		if (isBusy || isSending || messageQueue.length === 0) return;
+		if (session.status !== 'active' || isBusy || isSending || messageQueue.length === 0) return;
 		const [next, ...rest] = messageQueue;
 		if (!next) return;
 		setMessageQueue(rest);
 		void sendMessage(next);
-	}, [isBusy, isSending, messageQueue, sendMessage]);
+	}, [session.status, isBusy, isSending, messageQueue, sendMessage]);
 
 
 
@@ -665,6 +692,31 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       setIsForking(false);
     }
   };
+
+	const handleCreateSnapshot = async () => {
+		if (isSavingSnapshot || !snapshotName.trim()) return;
+		setIsSavingSnapshot(true);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/snapshot`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: snapshotName.trim(), description: snapshotDescription.trim() || undefined }),
+			});
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				throw new Error(data.error || 'Failed to save snapshot');
+			}
+			toast({ type: 'success', message: 'Snapshot saved!' });
+			track('snapshot_created');
+			setShowSnapshotDialog(false);
+			setSnapshotName('');
+			setSnapshotDescription('');
+		} catch (error) {
+			toast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to save snapshot' });
+		} finally {
+			setIsSavingSnapshot(false);
+		}
+	};
 
 	const handleShare = async () => {
 		if (isSharing) return;
@@ -793,7 +845,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const hasStreamingContent = lastAssistantParts.length > 0;
 	const isStreaming = isBusy;
 	const submitDisabled =
-		session.status !== 'active'
+		!isSessionInputEnabled
 		|| isSending
 		|| (!inputText.trim() && attachments.length === 0);
 
@@ -1417,7 +1469,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						value={inputText}
 						onChange={handleInputChange}
 						placeholder={promptPlaceholder}
-						disabled={session.status !== 'active'}
+						disabled={!isSessionInputEnabled}
 					/>
 					{attachments.length > 0 && (
 						<div className="flex flex-wrap gap-2 px-3 pb-2">
@@ -1446,7 +1498,10 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				)}
 				<PromptInputFooter>
 					<div className="flex flex-wrap items-center gap-1 sm:gap-2 text-[10px] text-[var(--muted-foreground)]">
-					<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
+					<CommandPicker value={selectedCommand} onChange={(cmd) => {
+					setSelectedCommand(cmd);
+					setHasManuallySelectedCommand(true);
+				}} />
 					<ModelSelector value={selectedModel} onChange={handleModelChange} />
 					<span className="hidden md:inline">Enter to send · Shift+Enter for new line</span>
 							{commentCount > 0 && (
@@ -1501,7 +1556,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 								disabled={submitDisabled}
 								status={isBusy ? 'streaming' : 'ready'}
 								onStop={handleAbort}
-							/>
+							>
+								{session.status === 'creating' ? <Clock className="h-4 w-4" /> : undefined}
+							</PromptInputSubmit>
 						</div>
 					</PromptInputFooter>
 				</PromptInput>
@@ -1552,21 +1609,33 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						</button>
 					</h2>
 				)}
-				{session.status === 'active' && (
-					<Button
-						variant="ghost"
-						size="sm"
-              onClick={handleFork}
-              className="h-7 w-7 p-0"
-              title="Fork session"
-              disabled={isForking}
-            >
-              {isForking ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <GitFork className="h-3.5 w-3.5" />
-              )}
-            </Button>
+			{session.status === 'active' && (
+				<Popover>
+					<PopoverTrigger asChild>
+						<Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Fork & Snapshot">
+							<GitFork className="h-3.5 w-3.5" />
+						</Button>
+					</PopoverTrigger>
+					<PopoverContent className="w-48 p-1" align="end">
+						<button
+							type="button"
+							onClick={handleFork}
+							disabled={isForking}
+							className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-[var(--accent)] disabled:opacity-50"
+						>
+							{isForking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
+							Fork Session
+						</button>
+						<button
+							type="button"
+							onClick={() => setShowSnapshotDialog(true)}
+							className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-[var(--accent)]"
+						>
+							<Camera className="h-3.5 w-3.5" />
+							Save Snapshot
+						</button>
+					</PopoverContent>
+				</Popover>
           )}
 				{shareUrl ? (
 					<Button
@@ -1873,8 +1942,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									<PromptInputTextarea
 										value={inputText}
 										onChange={handleInputChange}
-										placeholder="Message the agent..."
-										disabled={session.status !== 'active'}
+										placeholder={promptPlaceholder}
+										disabled={!isSessionInputEnabled}
 									/>
 								</div>
 								{commentCount > 0 && (
@@ -1910,7 +1979,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									disabled={submitDisabled}
 									status={isBusy ? 'streaming' : 'ready'}
 									onStop={handleAbort}
-								/>
+								>
+									{session.status === 'creating' ? <Clock className="h-4 w-4" /> : undefined}
+								</PromptInputSubmit>
 							</div>
 						</PromptInput>
 					</PromptInputProvider>
@@ -1945,6 +2016,49 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			</>
 		)}
 
+		{/* Snapshot dialog */}
+		{showSnapshotDialog && (
+			<div
+				className="fixed inset-0 z-50 flex items-center justify-center"
+				style={{ backgroundColor: 'color-mix(in oklab, var(--foreground) 50%, transparent)' }}
+			>
+				<div className="w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-xl">
+					<h3 className="text-sm font-semibold text-[var(--foreground)]">Save Snapshot</h3>
+					<p className="text-xs text-[var(--muted-foreground)] mt-1">
+						Save the current state of your sandbox for reuse in new sessions.
+					</p>
+					<input
+						type="text"
+						value={snapshotName}
+						onChange={(e) => setSnapshotName(e.target.value)}
+						placeholder="Snapshot name"
+						className="mt-3 w-full rounded-md border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] outline-none focus:ring-1 focus:ring-[var(--ring)]"
+					/>
+					<textarea
+						value={snapshotDescription}
+						onChange={(e) => setSnapshotDescription(e.target.value)}
+						placeholder="Description (optional)"
+						rows={2}
+						className="mt-2 w-full rounded-md border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] outline-none focus:ring-1 focus:ring-[var(--ring)] resize-none"
+					/>
+					<div className="flex justify-end gap-2 mt-3">
+						<Button variant="outline" size="sm" onClick={() => { setShowSnapshotDialog(false); setSnapshotName(''); setSnapshotDescription(''); }}>
+							Cancel
+						</Button>
+						<Button size="sm" onClick={handleCreateSnapshot} disabled={isSavingSnapshot || !snapshotName.trim()}>
+							{isSavingSnapshot ? (
+								<>
+									<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+									Saving...
+								</>
+							) : (
+								'Save'
+							)}
+						</Button>
+					</div>
+				</div>
+			</div>
+		)}
 		</div>
 	);
 }

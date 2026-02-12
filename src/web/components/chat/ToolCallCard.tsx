@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { ToolPart } from '../../types/opencode';
 import { FileDiff as PierreDiff } from '@pierre/diffs/react';
 import { parseDiffFromFile, type DiffLineAnnotation, type SelectedLineRange } from '@pierre/diffs';
@@ -540,7 +540,7 @@ function DefaultView({ input, output }: { input: Record<string, unknown>; output
 // Main component
 // ---------------------------------------------------------------------------
 
-export function ToolCallCard({
+export const ToolCallCard = React.memo(function ToolCallCard({
 	part,
 	onAddComment,
 	getDiffAnnotations,
@@ -686,4 +686,4 @@ export function ToolCallCard({
 			</ToolContent>
 		</Tool>
 	);
-}
+});

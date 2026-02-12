@@ -3,10 +3,11 @@
  */
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
-import { chatSessions, skills, sources, userSettings } from '../db/schema';
+import { chatSessions, sandboxSnapshots, skills, sources, userSettings } from '../db/schema';
 import { eq, desc } from '@agentuity/drizzle';
 import {
 	createSandbox,
+	createSandboxFromSnapshot,
 	generateOpenCodeConfig,
 	serializeOpenCodeConfig,
 	getOpencodeClient,
@@ -32,6 +33,7 @@ interface CreateSessionBody {
 	prompt?: string;
 	agent?: string;
 	model?: string;
+	snapshotId?: string;
 }
 
 // POST /api/workspaces/:wid/sessions — create session with sandbox
@@ -44,15 +46,16 @@ api.post('/', async (c) => {
 	c.var.session.metadata.workspaceId = workspaceId;
 	const body: CreateSessionBody = await c.req.json<CreateSessionBody>().catch(() => ({}));
 
-	// Fetch workspace skills and sources for config
-	const [workspaceSkills, workspaceSources] = await Promise.all([
+	// Fetch workspace skills, sources, and user settings for config
+	const [workspaceSkills, workspaceSources, [userSettingsRow]] = await Promise.all([
 		db.select().from(skills).where(eq(skills.workspaceId, workspaceId)),
 		db.select().from(sources).where(eq(sources.workspaceId, workspaceId)),
+		db.select().from(userSettings).where(eq(userSettings.userId, user.id)),
 	]);
 
 	// Generate OpenCode config
 	const opencodeConfig = generateOpenCodeConfig(
-		{ model: body.model },
+		{ model: body.model, defaultCommand: userSettingsRow?.defaultCommand },
 		workspaceSources.map((s) => ({
 			name: s.name,
 			type: s.type,
@@ -69,12 +72,26 @@ api.post('/', async (c) => {
 		.filter((s) => s.type === 'registry' && s.repo)
 		.map((s) => ({ repo: s.repo as string, skillName: s.name }));
 
-	// Auto-title from initial prompt
-	const title = body.prompt
-		? body.prompt.length > 60
-			? body.prompt.slice(0, 57) + '...'
-			: body.prompt
-		: null;
+	// Look up snapshot if creating from one
+	let snapshotRecord: typeof sandboxSnapshots.$inferSelect | undefined;
+	if (body.snapshotId) {
+		const [snap] = await db
+			.select()
+			.from(sandboxSnapshots)
+			.where(eq(sandboxSnapshots.id, body.snapshotId));
+		if (snap) {
+			snapshotRecord = snap;
+		}
+	}
+
+	// Auto-title: prefer snapshot name, then initial prompt, then null
+	const title = snapshotRecord?.name
+		? snapshotRecord.name
+		: body.prompt
+			? body.prompt.length > 60
+				? body.prompt.slice(0, 57) + '...'
+				: body.prompt
+			: null;
 
 	// Create session record first (status: creating)
 	// Generate UUID client-side for idempotent INSERT with onConflictDoNothing.
@@ -130,6 +147,9 @@ api.post('/', async (c) => {
 		await tracer.startActiveSpan('session.create-sandbox', async (parentSpan) => {
 			parentSpan.setAttribute('sessionDbId', session!.id);
 			parentSpan.setAttribute('workspaceId', workspaceId);
+			if (snapshotRecord) {
+				parentSpan.setAttribute('snapshotId', snapshotRecord.snapshotId);
+			}
 			try {
 				const sandboxCtx: SandboxContext = {
 					sandbox: sandbox as any,
@@ -137,24 +157,43 @@ api.post('/', async (c) => {
 				};
 				let githubToken: string | undefined;
 				try {
-					const [settings] = await db
-						.select()
-						.from(userSettings)
-						.where(eq(userSettings.userId, user.id));
-					if (settings?.githubPat) {
-						githubToken = decrypt(settings.githubPat);
+					if (userSettingsRow?.githubPat) {
+						githubToken = decrypt(userSettingsRow.githubPat);
 					}
 				} catch {
 					logger.warn('Failed to load GitHub token for sandbox', { userId: user.id });
 				}
-				const { sandboxId, sandboxUrl, cloneError } = await createSandbox(sandboxCtx, {
-					repoUrl: body.repoUrl,
-					branch: body.branch,
-					opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
-					customSkills,
-					registrySkills,
-					githubToken,
-				});
+
+				let sandboxId: string;
+				let sandboxUrl: string;
+				let cloneError: string | undefined;
+
+				if (snapshotRecord) {
+					// ── Snapshot-based creation (skip clone, use snapshot filesystem) ──
+					const snapMeta = (snapshotRecord.metadata ?? {}) as Record<string, unknown>;
+					const workDir = typeof snapMeta.workDir === 'string' ? snapMeta.workDir : '/home/agentuity/project';
+					const result = await createSandboxFromSnapshot(sandboxCtx, {
+						snapshotId: snapshotRecord.snapshotId,
+						workDir,
+						githubToken,
+						opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
+					});
+					sandboxId = result.sandboxId;
+					sandboxUrl = result.sandboxUrl;
+				} else {
+					// ── Normal creation (clone repo) ──
+					const result = await createSandbox(sandboxCtx, {
+						repoUrl: body.repoUrl,
+						branch: body.branch,
+						opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
+						customSkills,
+						registrySkills,
+						githubToken,
+					});
+					sandboxId = result.sandboxId;
+					sandboxUrl = result.sandboxUrl;
+					cloneError = result.cloneError;
+				}
 
 				if (cloneError) {
 					logger.warn('Git clone failed during session creation', {

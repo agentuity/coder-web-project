@@ -111,7 +111,7 @@ export async function createSandbox(
       command: [
         'bash', '-c',
         [
-          `mkdir -p ~/.config/opencode`,
+          `mkdir -p ~/.config/opencode/skills`,
           `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
           `gh auth setup-git 2>/dev/null || true`,
         ].join('\n'),
@@ -275,7 +275,7 @@ export async function createSandbox(
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/^-|-$/g, '');
-        const skillDir = `${workDir}/.agents/skills/custom-${slug}`;
+        const skillDir = `~/.config/opencode/skills/custom-${slug}`;
         const skillContent = skill.content.startsWith('---')
           ? skill.content
           : `---\nname: "${skill.name}"\n---\n\n${skill.content}`;
@@ -289,7 +289,7 @@ export async function createSandbox(
     if (config.registrySkills && config.registrySkills.length > 0) {
       for (const skill of config.registrySkills) {
         postCloneScriptParts.push(
-          `cd "${workDir}" && bunx skills add "${skill.repo}" --skill "${skill.skillName}" --agent opencode -y 2>/dev/null || true`,
+          `cd /tmp && bunx skills add "${skill.repo}" --skill "${skill.skillName}" --agent opencode -y 2>/dev/null && cp -r /tmp/.agents/skills/* ~/.config/opencode/skills/ 2>/dev/null || true`,
         );
       }
     }
@@ -297,7 +297,7 @@ export async function createSandbox(
     // 3e. json-render skills — write skill files with unique heredoc delimiters
     const jsonRenderSkills = getJsonRenderSkills();
     for (const [i, jrSkill] of jsonRenderSkills.entries()) {
-      const skillDir = `${workDir}/.agents/skills/${jrSkill.slug}`;
+      const skillDir = `~/.config/opencode/skills/${jrSkill.slug}`;
       postCloneScriptParts.push(
         `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'JREOF_${i}'\n${jrSkill.content}\nJREOF_${i}`,
       );
@@ -453,6 +453,96 @@ export async function forkSandbox(
       await ctx.sandbox.snapshot.delete(snapshotId);
     } catch {
       // Ignore snapshot cleanup errors
+    }
+    throw error;
+  }
+}
+
+export interface SnapshotSandboxConfig {
+  /** Agentuity snapshot ID to create the sandbox from */
+  snapshotId: string;
+  /** Working directory inside the sandbox */
+  workDir: string;
+  /** Environment variables */
+  env?: Record<string, string>;
+  /** GitHub token for git operations */
+  githubToken?: string;
+  /** OpenCode config JSON to write (may have changed since snapshot) */
+  opencodeConfigJson: string;
+}
+
+/**
+ * Create a new sandbox from a saved snapshot.
+ * Similar to forkSandbox but uses an existing (persistent) snapshot ID
+ * rather than creating a new ephemeral snapshot.
+ */
+export async function createSandboxFromSnapshot(
+  ctx: SandboxContext,
+  config: SnapshotSandboxConfig,
+): Promise<{ sandboxId: string; sandboxUrl: string }> {
+  ctx.logger.info(`Creating sandbox from snapshot ${config.snapshotId}...`);
+
+  // 1. Create sandbox from snapshot
+  const sandbox = await ctx.sandbox.create({
+    snapshot: config.snapshotId,
+    network: { enabled: true, port: OPENCODE_PORT },
+    resources: { memory: '4Gi', cpu: '4000m' },
+    timeout: { idle: '2h' },
+    env: {
+      ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
+      OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      ...(config.githubToken
+        ? { GH_TOKEN: config.githubToken, GITHUB_TOKEN: config.githubToken }
+        : {}),
+      ...(config.env || {}),
+    },
+  });
+
+  const sandboxId = sandbox.id as string;
+  ctx.logger.info(`Snapshot sandbox created: ${sandboxId}`);
+
+  try {
+    // 2. Write updated opencode config + setup gh auth
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        [
+          `mkdir -p ~/.config/opencode/skills`,
+          `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
+          `gh auth setup-git 2>/dev/null || true`,
+        ].join('\n'),
+      ],
+    });
+
+    // 3. Start OpenCode server (filesystem already has everything from snapshot)
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
+      ],
+    });
+
+    // 4. Wait for health check
+    ctx.logger.info('Waiting for OpenCode server to be ready in snapshot sandbox...');
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        `for i in $(seq 1 45); do if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then exit 0; fi; fi; sleep 1; done; exit 1`,
+      ],
+    });
+
+    // 5. Get sandbox info for URL
+    const sandboxInfo = await ctx.sandbox.get(sandboxId);
+    const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+
+    ctx.logger.info(`Snapshot sandbox ready at ${sandboxUrl}`);
+    return { sandboxId, sandboxUrl };
+  } catch (error) {
+    ctx.logger.error('Failed to setup snapshot sandbox, destroying...', { error });
+    try {
+      await ctx.sandbox.destroy(sandboxId);
+    } catch {
+      // Ignore destroy errors
     }
     throw error;
   }

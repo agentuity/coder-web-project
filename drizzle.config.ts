@@ -8,5 +8,5 @@ export default defineConfig({
 	},
 	verbose: true,
 	// Only manage our app tables — Better Auth manages its own tables
-	tablesFilter: ['workspaces', 'chat_sessions', 'skills', 'sources', 'user_settings'],
+	tablesFilter: ['workspaces', 'chat_sessions', 'skills', 'sources', 'user_settings', 'sandbox_snapshots'],
 });

@@ -5,7 +5,7 @@
  * reducer, and exposes sorted messages, parts, permissions, questions, todos,
  * and connection state.
  */
-import { useEffect, useReducer, useRef, useCallback } from 'react';
+import { useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
 import type {
 	Message,
 	Part,
@@ -373,11 +373,12 @@ export function useSessionEvents(sessionId: string | undefined) {
 	// -----------------------------------------------------------------------
 
 	/** Messages sorted by creation time (ascending). */
-	const sortedMessages = useCallback(() => {
-		return Array.from(state.messages.values()).sort(
+	const sortedMessages = useMemo(
+		() => Array.from(state.messages.values()).sort(
 			(a, b) => a.time.created - b.time.created,
-		);
-	}, [state.messages]);
+		),
+		[state.messages],
+	);
 
 	/** Get all parts belonging to a given message. */
 	const getPartsForMessage = useCallback(
@@ -388,15 +389,25 @@ export function useSessionEvents(sessionId: string | undefined) {
 		[state.partsByMessage],
 	);
 
-	return {
-		messages: sortedMessages(),
+	const memoizedPermissions = useMemo(
+		() => Array.from(state.pendingPermissions.values()),
+		[state.pendingPermissions],
+	);
+
+	const memoizedQuestions = useMemo(
+		() => Array.from(state.pendingQuestions.values()),
+		[state.pendingQuestions],
+	);
+
+	return useMemo(() => ({
+		messages: sortedMessages,
 		getPartsForMessage,
 		sessionStatus: state.sessionStatus,
-		pendingPermissions: Array.from(state.pendingPermissions.values()),
-		pendingQuestions: Array.from(state.pendingQuestions.values()),
+		pendingPermissions: memoizedPermissions,
+		pendingQuestions: memoizedQuestions,
 		todos: state.todos,
 		isConnected: state.isConnected,
 		error: state.error,
 		revertState: state.revertState,
-	};
+	}), [sortedMessages, getPartsForMessage, state.sessionStatus, memoizedPermissions, memoizedQuestions, state.todos, state.isConnected, state.error, state.revertState]);
 }

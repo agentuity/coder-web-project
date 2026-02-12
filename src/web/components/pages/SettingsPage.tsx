@@ -5,6 +5,7 @@ import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { GitHubSettings } from '../settings/GitHubSettings';
 import { VoiceSettings } from '../settings/VoiceSettings';
+import { DefaultAgentSetting } from '../settings/DefaultAgentSetting';
 
 interface Workspace {
 	id: string;
@@ -158,7 +159,7 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 	}
 
 	return (
-		<div className="h-full overflow-y-auto p-6 max-w-2xl">
+		<div className="h-full overflow-y-auto p-6">
 			{/* Header */}
 			<div className="flex items-center gap-2 mb-6">
 				<Settings className="h-5 w-5 text-[var(--primary)]" />
@@ -322,6 +323,15 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 					{settingsError}
 				</div>
 			)}
+
+			{/* Default Agent */}
+			<Card className="p-4 mt-8 mb-6">
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-2">Default Agent</h3>
+				<p className="text-xs text-[var(--muted-foreground)] mb-3">
+					Choose which agent is pre-selected when you start a new chat session.
+				</p>
+				<DefaultAgentSetting />
+			</Card>
 
 			{/* Voice */}
 			<Card className="p-4 mb-6">

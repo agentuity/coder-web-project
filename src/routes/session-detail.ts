@@ -3,7 +3,7 @@
  */
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
-import { chatSessions, skills, sources, userSettings } from '../db/schema';
+import { chatSessions, sandboxSnapshots, skills, sources, userSettings } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
 import { randomUUID } from 'node:crypto';
 import {
@@ -336,6 +336,62 @@ api.post('/:id/fork', async (c) => {
 	})();
 
 	return c.json(session, 201);
+});
+
+// POST /api/sessions/:id/snapshot — create a reusable snapshot from a session's sandbox
+api.post('/:id/snapshot', async (c) => {
+	const user = c.get('user')!;
+	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+
+	c.var.session.metadata.action = 'create-snapshot';
+	c.var.session.metadata.sessionDbId = session.id;
+
+	if (!session.sandboxId) {
+		return c.json({ error: 'Session has no active sandbox to snapshot' }, 400);
+	}
+
+	const body = await c.req.json<{ name: string; description?: string }>().catch(() => ({ name: '', description: undefined as string | undefined }));
+	if (!body.name?.trim()) {
+		return c.json({ error: 'Snapshot name is required' }, 400);
+	}
+
+	try {
+		// Create the sandbox snapshot via Agentuity API
+		const snapshotName = body.name.trim();
+		const snapshotDesc = body.description?.trim();
+		const snapshot = await c.var.sandbox.snapshot.create(session.sandboxId, {
+			name: snapshotName,
+			description: snapshotDesc,
+		});
+
+		// Gather session metadata for recreating later
+		const metadata = parseMetadata(session);
+		const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
+		const branch = typeof metadata.branch === 'string' ? metadata.branch : undefined;
+		const repoName = repoUrl ? repoUrl.split('/').pop()?.replace('.git', '') || 'project' : 'project';
+		const workDir = `/home/agentuity/${repoName}`;
+
+		// Store in DB
+		const [snapshotRecord] = await db
+			.insert(sandboxSnapshots)
+			.values({
+				workspaceId: session.workspaceId,
+				createdBy: user.id,
+				name: snapshotName,
+				description: snapshotDesc || null,
+				snapshotId: snapshot.snapshotId,
+				sourceSessionId: session.id,
+				metadata: { repoUrl, branch, workDir },
+			})
+			.returning();
+
+		c.var.logger.info(`Snapshot created: ${snapshot.snapshotId} for session ${session.id}`);
+		return c.json(snapshotRecord, 201);
+	} catch (error) {
+		c.var.logger.error('Failed to create snapshot', { error, sessionId: session.id });
+		return c.json({ error: 'Failed to create snapshot' }, 500);
+	}
 });
 
 // DELETE /api/sessions/:id — delete session and destroy sandbox

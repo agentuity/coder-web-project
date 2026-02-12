@@ -65,6 +65,18 @@ export const sources = pgTable('sources', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
+export const sandboxSnapshots = pgTable('sandbox_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  createdBy: text('created_by').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  snapshotId: text('snapshot_id').notNull(),
+  sourceSessionId: uuid('source_session_id'),
+  metadata: jsonb('metadata').default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 export const userSettings = pgTable('user_settings', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: text('user_id').notNull().unique(),
@@ -74,7 +86,8 @@ export const userSettings = pgTable('user_settings', {
   voiceName: text('voice_name').default('coral'),
   voiceAutoSpeak: boolean('voice_auto_speak').default(true),
   voiceSpeed: text('voice_speed').default('1.0'),
-  preferredMic: text('preferred_mic'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+	preferredMic: text('preferred_mic'),
+	defaultCommand: text('default_command').default(''),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
