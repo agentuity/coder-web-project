@@ -20,6 +20,8 @@ import {
 	isSandboxHealthy,
 	getCachedHealthTimestamp,
 	setCachedHealthTimestamp,
+	recordHealthResult,
+	shouldMarkTerminated,
 	SANDBOX_STATUS_TTL_MS,
 } from '../lib/sandbox-health';
 import { decrypt } from '../lib/encryption';
@@ -37,13 +39,15 @@ api.get('/:id', async (c) => {
 	c.var.session.metadata.sessionDbId = session.id;
 
 	let effectiveSession = session;
-	if (session.sandboxId && session.sandboxUrl && ['active', 'creating'].includes(session.status)) {
+	// Only health-check 'active' sessions — NOT 'creating' (sandbox is still booting)
+	if (session.sandboxId && session.sandboxUrl && session.status === 'active') {
 		const now = Date.now();
 		const lastChecked = getCachedHealthTimestamp(session.id) ?? 0;
 		if (now - lastChecked >= SANDBOX_STATUS_TTL_MS) {
 			setCachedHealthTimestamp(session.id, now);
 			const healthy = await isSandboxHealthy(session.sandboxUrl);
-			if (!healthy) {
+			recordHealthResult(session.id, healthy);
+			if (!healthy && shouldMarkTerminated(session.id)) {
 				const [updated] = await db
 					.update(chatSessions)
 					.set({ status: 'terminated', updatedAt: new Date() })
@@ -117,10 +121,18 @@ api.post('/:id/retry', async (c) => {
 	for (let attempt = 1; attempt <= 5; attempt++) {
 		try {
 			const opencodeSession = await client.session.create({ body: {} });
-			opencodeSessionId = (opencodeSession as any)?.data?.id || (opencodeSession as any)?.id || null;
+			opencodeSessionId =
+				(opencodeSession as any)?.data?.id ||
+				(opencodeSession as any)?.id ||
+				(opencodeSession as any)?.sessionId ||
+				(opencodeSession as any)?.session?.id ||
+				null;
 			if (opencodeSessionId) break;
+			c.var.logger.warn(`retry session.create attempt ${attempt}: no session ID`, {
+				response: JSON.stringify(opencodeSession).slice(0, 500),
+			});
 		} catch (err) {
-			c.var.logger.warn(`retry session.create attempt ${attempt} failed`, { error: err });
+			c.var.logger.warn(`retry session.create attempt ${attempt} failed`, { error: String(err) });
 		}
 		if (attempt < 5) await new Promise(r => setTimeout(r, 2000));
 	}
