@@ -308,17 +308,18 @@ export async function createSandbox(
       `cat > ~/.config/opencode/ui-spec-instructions.md << 'UISPECEOF'\n${getUISpecInstructions()}\nUISPECEOF`,
     );
 
-    // Execute the entire post-clone setup as one bash script
-    await sandbox.execute({
+    // Execute post-clone setup AND server start in parallel.
+    // Skills are read from disk at query time, not at boot, so the server
+    // can start while skills are still being written.
+    ctx.logger.info('Starting OpenCode server + installing skills in parallel...');
+    sandbox.execute({
       command: [
         'bash', '-c',
         postCloneScriptParts.join('\n'),
       ],
     });
 
-    // ── Batch 4: Start server + health check ──────────────────────────────
-    // Launch OpenCode server and poll until both /global/health and /session respond.
-    ctx.logger.info('Starting OpenCode server and waiting for readiness...');
+    // ── Batch 4: Start server + health check (runs in parallel with skills) ──
     await sandbox.execute({
       command: [
         'bash', '-c',
