@@ -16,6 +16,8 @@ import {
 	isSandboxHealthy,
 	getCachedHealthTimestamp,
 	setCachedHealthTimestamp,
+	recordHealthResult,
+	shouldMarkTerminated,
 	SANDBOX_STATUS_TTL_MS,
 } from '../lib/sandbox-health';
 import { decrypt } from '../lib/encryption';
@@ -163,6 +165,11 @@ api.post('/', async (c) => {
 
 				const client = getOpencodeClient(sandboxId, sandboxUrl);
 				let opencodeSessionId: string | null = null;
+
+				// Wait for the OpenCode API to be truly ready before attempting session.create.
+				// Even after the health check passes, internal initialization may still be in progress.
+				await new Promise((r) => setTimeout(r, 3000));
+
 				for (let attempt = 1; attempt <= 5; attempt++) {
 					try {
 						const opencodeSession = await client.session.create({ body: {} });
@@ -173,7 +180,8 @@ api.post('/', async (c) => {
 					} catch (err) {
 						logger.warn(`session.create attempt ${attempt} failed`, { error: err });
 					}
-					if (attempt < 5) await new Promise((r) => setTimeout(r, 2000));
+					// Exponential backoff: 1s, 2s, 4s, 8s
+					if (attempt < 5) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
 				}
 
 				const newStatus = opencodeSessionId ? 'active' : 'creating';
@@ -229,12 +237,28 @@ api.post('/', async (c) => {
 
 				parentSpan.setStatus({ code: SpanStatusCode.OK });
 			} catch (error) {
-				parentSpan.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+				const errorMsg = String(error);
+				parentSpan.setStatus({ code: SpanStatusCode.ERROR, message: errorMsg });
+
+				// Surface actionable hints for common failures
+				const isConnectionError = /websocket|ECONNREFUSED|ECONNRESET|ETIMEDOUT|fetch failed|network/i.test(errorMsg);
+				const isAuthError = /unauthorized|401|403|api.key|auth/i.test(errorMsg);
+				let hint = '';
+				if (isAuthError) {
+					hint = ' — This may indicate missing API keys. Ensure ANTHROPIC_API_KEY and OPENAI_API_KEY org secrets are configured via "agentuity cloud env set".';
+				} else if (isConnectionError) {
+					hint = ' — Sandbox connection failed. This may indicate the OpenCode server did not start. Check that org secrets (ANTHROPIC_API_KEY, OPENAI_API_KEY) are set and the sandbox has network access.';
+				}
+				logger.error(`Session creation failed: ${errorMsg}${hint}`, {
+					sessionId: session!.id,
+					workspaceId,
+				});
+
 				await db
 					.update(chatSessions)
 					.set({
 						status: 'error',
-						metadata: { repoUrl: body.repoUrl, branch: body.branch, error: String(error) },
+						metadata: { repoUrl: body.repoUrl, branch: body.branch, error: `${errorMsg}${hint}` },
 						updatedAt: new Date(),
 					})
 					.where(eq(chatSessions.id, session!.id));
@@ -268,7 +292,13 @@ api.get('/', async (c) => {
 
 			setCachedHealthTimestamp(session.id, now);
 			const healthy = await isSandboxHealthy(session.sandboxUrl);
+			recordHealthResult(session.id, healthy);
+
 			if (healthy) return session;
+
+			// Only mark as terminated after multiple consecutive failures
+			// to avoid false positives from transient network issues.
+			if (!shouldMarkTerminated(session.id)) return session;
 
 			const [updated] = await db
 				.update(chatSessions)
