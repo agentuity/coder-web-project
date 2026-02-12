@@ -159,15 +159,17 @@ export const PromptInputSubmit = ({
 
 	const isStreaming = status === 'streaming' && onStop;
 
+	const { onClick, ...restProps } = props;
+
 	return (
 		<Button
-			aria-label="Submit"
+			aria-label={isStreaming ? 'Stop' : 'Submit'}
 			className={cn('h-9 w-9', className)}
-			onClick={isStreaming ? onStop : props.onClick}
 			size="icon"
 			type={isStreaming ? 'button' : 'submit'}
 			variant={isStreaming ? 'destructive' : variant}
-			{...props}
+			{...restProps}
+			onClick={isStreaming ? onStop : onClick}
 		>
 			{children ?? Icon}
 		</Button>
