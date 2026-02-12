@@ -280,6 +280,10 @@ function AppContent() {
 		track('workspace_switched', { workspaceId: id });
 	}, [track]);
 
+	const handleQuickSession = useCallback((prompt: string) => {
+		handleNewSession({ prompt });
+	}, [handleNewSession]);
+
 	const handleForkedSession = useCallback((session: Session) => {
 		setSessions(prev => [session, ...prev]);
 		setUrlState({ s: session.id, p: 'chat' });
@@ -326,6 +330,7 @@ function AppContent() {
         workspaceId={workspaceId ?? undefined}
         sessions={sessions}
         onNewSession={() => setShowNewDialog(true)}
+        onQuickSession={handleQuickSession}
         onSelectSession={handleSelectSession}
         onNavigate={handleNavigate}
       />
