@@ -140,14 +140,7 @@ export function WorkspacePage({ sessions = [], onNewSession, onQuickSession, onS
 					</div>
 				)}
 
-				{/* Keyboard shortcut hint */}
-				<p className="text-center text-xs text-[var(--muted-foreground)]">
-					Press{' '}
-					<kbd className="rounded border border-[var(--border)] bg-[var(--muted)] px-1.5 py-0.5 text-[10px] font-mono">
-						⌘N
-					</kbd>{' '}
-					to start a session with a repository
-				</p>
+	
 			</div>
 		</div>
 	);

@@ -64,7 +64,7 @@ function AppContent() {
   const isCreatingRef = useRef(false);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [sessionsLoading, setSessionsLoading] = useState(true);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
   const [githubAvailable, setGithubAvailable] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
