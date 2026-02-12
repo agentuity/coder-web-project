@@ -1085,6 +1085,7 @@ export const { registry } = defineRegistry(catalog, {
     Mermaid: ({ props }) => {
       const containerRef = useRef<HTMLDivElement | null>(null);
       const [error, setError] = useState<string | null>(null);
+      const [copied, setCopied] = useState(false);
 
       useEffect(() => {
         let cancelled = false;
@@ -1095,13 +1096,13 @@ export const { registry } = defineRegistry(catalog, {
             const { renderMermaid, THEMES } = await import('beautiful-mermaid');
             if (cancelled) return;
 
-            // Pick theme based on prop or detect from CSS
+            // Detect dark mode: explicit prop > html.dark class > prefers-color-scheme
             const isDark = props.theme === 'dark' ||
               (!props.theme && typeof window !== 'undefined' &&
-                window.getComputedStyle(document.documentElement).colorScheme === 'dark');
-            const theme = isDark ? THEMES['zinc-dark'] : THEMES['zinc-light'];
+                document.documentElement.classList.contains('dark'));
+            const theme = isDark ? THEMES['tokyo-night'] : THEMES['github-light'];
 
-            const svg = await renderMermaid(props.code, { ...theme, transparent: true });
+            const svg = await renderMermaid(props.code, theme);
             if (cancelled || !containerRef.current) return;
             containerRef.current.innerHTML = svg;
 
@@ -1122,6 +1123,13 @@ export const { registry } = defineRegistry(catalog, {
         return () => { cancelled = true; };
       }, [props.code, props.theme]);
 
+      const handleCopy = () => {
+        void navigator.clipboard.writeText(props.code).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        });
+      };
+
       if (error) {
         return (
           <div className={cn('rounded-lg border border-red-500/30 bg-red-500/5 p-4', props.className)}>
@@ -1132,10 +1140,32 @@ export const { registry } = defineRegistry(catalog, {
       }
 
       return (
-        <div
-          ref={containerRef}
-          className={cn('rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 overflow-auto', props.className)}
-        />
+        <div className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}>
+          <div className="flex items-center justify-end px-3 py-1.5 bg-[var(--muted)] border-b border-[var(--border)]">
+            <button
+              type="button"
+              onClick={handleCopy}
+              className="inline-flex items-center gap-1 text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors"
+              title="Copy Mermaid code"
+            >
+              {copied ? (
+                <>
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" /></svg>
+                  Copied
+                </>
+              ) : (
+                <>
+                  <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9.75a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" /></svg>
+                  Copy code
+                </>
+              )}
+            </button>
+          </div>
+          <div
+            ref={containerRef}
+            className="p-4 overflow-auto"
+          />
+        </div>
       );
     },
   },
