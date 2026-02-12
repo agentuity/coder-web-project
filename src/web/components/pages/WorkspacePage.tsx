@@ -93,7 +93,7 @@ export function WorkspacePage() {
 						<PromptInputFooter>
 							<div className="flex items-center gap-2">
 								<CommandPicker value={selectedCommand} onChange={setSelectedCommand} hideCommands />
-								<ModelSelector value={selectedModel} onChange={setSelectedModel} />
+								<ModelSelector value={selectedModel} onChange={setSelectedModel} disabled={selectedCommand === '/agentuity-coder' || selectedCommand === '/agentuity-cadence'} />
 							</div>
 							<PromptInputSubmit
 								disabled={!prompt.trim()}

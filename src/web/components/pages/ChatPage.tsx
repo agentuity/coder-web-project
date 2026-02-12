@@ -1512,7 +1512,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					setSelectedCommand(cmd);
 					setHasManuallySelectedCommand(true);
 				}} />
-					<ModelSelector value={selectedModel} onChange={handleModelChange} />
+					<ModelSelector value={selectedModel} onChange={handleModelChange} disabled={selectedCommand === '/agentuity-coder' || selectedCommand === '/agentuity-cadence'} />
 					<span className="hidden md:inline">Enter to send · Shift+Enter for new line</span>
 							{commentCount > 0 && (
 								<Badge variant="secondary" className="text-[10px]">

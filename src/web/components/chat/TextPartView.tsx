@@ -109,10 +109,10 @@ const components = {
     );
   },
   ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
-    <ul className="text-sm list-disc ml-4 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ul>
+    <ul className="text-sm list-disc ml-6 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ul>
   ),
   ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
-    <ol className="text-sm list-decimal ml-4 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ol>
+    <ol className="text-sm list-decimal ml-6 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ol>
   ),
   li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
     <li className="text-sm text-[var(--foreground)]" {...props}>{children}</li>

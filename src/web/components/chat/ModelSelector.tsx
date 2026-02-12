@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Cpu } from 'lucide-react';
+import { cn } from '../../lib/utils';
 
 const MODEL_GROUPS = [
   {
@@ -36,9 +37,10 @@ const MODEL_GROUPS = [
 interface ModelSelectorProps {
   value: string;
   onChange: (model: string) => void;
+  disabled?: boolean;
 }
 
-export function ModelSelector({ value, onChange }: ModelSelectorProps) {
+export function ModelSelector({ value, onChange, disabled }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -76,9 +78,12 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     <div ref={containerRef} className="relative">
 		<button
 			type="button"
-			onClick={() => setOpen((prev) => !prev)}
-			className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] hover:bg-[var(--muted)]"
-			title="Select model"
+			onClick={() => !disabled && setOpen((prev) => !prev)}
+			className={cn(
+				"inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)]",
+				disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-[var(--muted)]"
+			)}
+			title={disabled ? "Model is managed by the selected agent" : "Select model"}
 			aria-label="Select model"
 		>
 			<Cpu className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />

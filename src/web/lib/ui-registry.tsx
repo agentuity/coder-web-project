@@ -1169,21 +1169,9 @@ export const { registry } = defineRegistry(catalog, {
       const [isDragging, setIsDragging] = useState(false);
       const dragStart = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
 
-      // Curated theme list — dark themes first when in dark mode, light first when in light
       const mermaidThemes = [
-        { key: 'github-dark', label: 'GitHub Dark', dark: true },
-        { key: 'dracula', label: 'Dracula', dark: true },
-        { key: 'tokyo-night', label: 'Tokyo Night', dark: true },
-        { key: 'catppuccin-mocha', label: 'Catppuccin Mocha', dark: true },
-        { key: 'nord', label: 'Nord', dark: true },
-        { key: 'one-dark', label: 'One Dark', dark: true },
-        { key: 'solarized-dark', label: 'Solarized Dark', dark: true },
-        { key: 'zinc-dark', label: 'Zinc Dark', dark: true },
-        { key: 'github-light', label: 'GitHub Light', dark: false },
-        { key: 'catppuccin-latte', label: 'Catppuccin Latte', dark: false },
-        { key: 'nord-light', label: 'Nord Light', dark: false },
-        { key: 'solarized-light', label: 'Solarized Light', dark: false },
-        { key: 'zinc-light', label: 'Zinc Light', dark: false },
+        { key: 'github-dark', label: 'GitHub Dark' },
+        { key: 'github-light', label: 'GitHub Light' },
       ];
 
       const getDefaultTheme = () => {
@@ -1294,19 +1282,12 @@ export const { registry } = defineRegistry(catalog, {
               <select
                 value={selectedTheme}
                 onChange={(e) => setSelectedTheme(e.target.value)}
-                className="text-[10px] bg-[var(--muted)] text-[var(--muted-foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 hover:text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)] cursor-pointer [&_option]:bg-[var(--muted)] [&_option]:text-[var(--foreground)] [&_optgroup]:bg-[var(--muted)] [&_optgroup]:text-[var(--muted-foreground)]"
+                className="text-[10px] bg-[var(--muted)] text-[var(--muted-foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 hover:text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)] cursor-pointer [&_option]:bg-[var(--muted)] [&_option]:text-[var(--foreground)]"
                 title="Diagram theme"
               >
-                <optgroup label="Dark">
-                  {mermaidThemes.filter((t) => t.dark).map((t) => (
-                    <option key={t.key} value={t.key}>{t.label}</option>
-                  ))}
-                </optgroup>
-                <optgroup label="Light">
-                  {mermaidThemes.filter((t) => !t.dark).map((t) => (
-                    <option key={t.key} value={t.key}>{t.label}</option>
-                  ))}
-                </optgroup>
+                {mermaidThemes.map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
               </select>
               <div className="flex items-center gap-0.5 border border-[var(--border)] rounded">
                 <button
