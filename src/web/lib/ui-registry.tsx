@@ -758,10 +758,13 @@ export const { registry } = defineRegistry(catalog, {
         if (props.interactive && props.markersPath) {
           map.on('click', (e) => {
             const current = (stateStore.get(props.markersPath!) as Array<{ longitude: number; latitude: number; label?: string }>) ?? [];
+            const label = props.labelPath
+              ? (stateStore.get(props.labelPath) as string) || `Point ${current.length + 1}`
+              : `Point ${current.length + 1}`;
             stateStore.set(props.markersPath!, [...current, {
               longitude: e.lngLat.lng,
               latitude: e.lngLat.lat,
-              label: `Point ${current.length + 1}`,
+              label,
             }]);
           });
         }

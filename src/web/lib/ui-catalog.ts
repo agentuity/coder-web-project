@@ -319,10 +319,11 @@ export const catalog = defineCatalog(schema, {
         route: z.array(z.tuple([z.number(), z.number()])).optional(),
         height: z.string().optional(),
         markersPath: z.string().optional(),
+        labelPath: z.string().optional(),
         interactive: z.boolean().optional(),
         className: z.string().optional(),
       }),
-      description: 'Interactive map with markers, popups, and routes (MapLibre, no API key needed). Use markersPath to read markers from state and interactive to allow click-to-add.',
+      description: 'Interactive map with markers, popups, and routes (MapLibre, no API key needed). Use markersPath to read markers from state and interactive to allow click-to-add. Use labelPath to read marker label from state when adding interactively.',
     },
     AutoForm: {
       props: z.object({

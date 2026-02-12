@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo, useRef, type ReactNode } from 'react';
 import { ActionProvider, Renderer, StateProvider, VisibilityProvider, useStateStore } from '@json-render/react';
 import { registry } from '../../lib/ui-registry';
 import { specToReact } from '../../lib/spec-to-react';
@@ -66,54 +66,179 @@ function normalizeSpec(spec: any): any {
   return spec;
 }
 
+/**
+ * Resolve $path expressions in action params by reading from state.
+ * E.g., { "label": { "$path": "/form/label" } } -> { "label": "actual value" }
+ * Also supports $concat for string concatenation:
+ * { "msg": { "$concat": ["Hello ", { "$path": "/name" }] } }
+ * And $template for string interpolation:
+ * { "msg": { "$template": "Hello ${/name}, welcome!" } }
+ */
+function resolveExpressions(params: unknown, get: (path: string) => unknown): unknown {
+  if (params === null || params === undefined) return params;
+
+  // Handle object expressions
+  if (typeof params === 'object' && !Array.isArray(params)) {
+    const obj = params as Record<string, unknown>;
+
+    // $path — read from state
+    if (typeof obj.$path === 'string') {
+      return get(obj.$path);
+    }
+
+    // $concat — concatenate values (resolve each, join as string)
+    if (Array.isArray(obj.$concat)) {
+      return obj.$concat.map(item => resolveExpressions(item, get)).join('');
+    }
+
+    // $template — string template with ${/path} replacements
+    if (typeof obj.$template === 'string') {
+      return obj.$template.replace(/\$\{([^}]+)\}/g, (_, path) => {
+        const val = get(path.trim());
+        return val !== undefined && val !== null ? String(val) : '';
+      });
+    }
+
+    // Regular object — recursively resolve all values
+    const resolved: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      resolved[key] = resolveExpressions(value, get);
+    }
+    return resolved;
+  }
+
+  // Array — recursively resolve each item
+  if (Array.isArray(params)) {
+    return params.map(item => resolveExpressions(item, get));
+  }
+
+  // Primitive — return as-is
+  return params;
+}
+
 function UIPartViewInner({ spec }: { spec: any }) {
   const { get, set } = useStateStore();
 
-  const handlers = useMemo(() => ({
-    setState: (params: { path?: string; value?: unknown }) => {
-      if (typeof params?.path === 'string') {
-        set(params.path, params.value);
-      }
-    },
-    toggleState: (params: { path?: string }) => {
-      if (typeof params?.path === 'string') {
-        set(params.path, !get(params.path));
-      }
-    },
-    appendItem: (params: { path?: string; item?: unknown }) => {
-      if (typeof params?.path === 'string') {
-        const current = get(params.path);
-        const arr = Array.isArray(current) ? current : [];
-        set(params.path, [...arr, params.item]);
-      }
-    },
-    removeItem: (params: { path?: string; index?: number }) => {
-      if (typeof params?.path === 'string' && typeof params?.index === 'number') {
-        const current = get(params.path);
-        if (Array.isArray(current)) {
-          set(params.path, current.filter((_: unknown, i: number) => i !== params.index));
+  // Build a dispatch function that all handlers can reference (including self-referencing meta-actions)
+  const dispatchRef = useRef<(action: string, params: Record<string, unknown>) => void>(() => {});
+
+  const handlers = useMemo(() => {
+    const h: Record<string, (params: any) => void> = {
+      setState: (params: Record<string, unknown>) => {
+        const r = resolveExpressions(params, get) as { path?: string; value?: unknown };
+        if (typeof r?.path === 'string') {
+          set(r.path, r.value);
         }
-      }
-    },
-    navigate: (params: { url?: unknown }) => {
-      if (typeof window !== 'undefined' && typeof params?.url === 'string') {
-        window.location.assign(params.url);
-      }
-    },
-    submit: (params: { data?: Record<string, unknown> }) => {
-      if (params?.data && typeof params.data === 'object') {
-        console.info('Form submit', params.data);
-      }
-    },
-    action: (params: Record<string, unknown>) => {
-      console.info('Action', params);
-    },
-  }), [get, set]);
+      },
+      toggleState: (params: Record<string, unknown>) => {
+        const r = resolveExpressions(params, get) as { path?: string };
+        if (typeof r?.path === 'string') {
+          set(r.path, !get(r.path));
+        }
+      },
+      appendItem: (params: Record<string, unknown>) => {
+        const r = resolveExpressions(params, get) as { path?: string; item?: unknown };
+        if (typeof r?.path === 'string') {
+          const current = get(r.path);
+          const arr = Array.isArray(current) ? current : [];
+          set(r.path, [...arr, r.item]);
+        }
+      },
+      removeItem: (params: Record<string, unknown>) => {
+        const r = resolveExpressions(params, get) as { path?: string; index?: number };
+        if (typeof r?.path === 'string' && typeof r?.index === 'number') {
+          const current = get(r.path);
+          if (Array.isArray(current)) {
+            set(r.path, current.filter((_: unknown, i: number) => i !== r.index));
+          }
+        }
+      },
+      navigate: (params: Record<string, unknown>) => {
+        const r = resolveExpressions(params, get) as { url?: string };
+        if (typeof window !== 'undefined' && typeof r?.url === 'string') {
+          window.location.assign(r.url);
+        }
+      },
+      submit: (params: Record<string, unknown>) => {
+        const r = resolveExpressions(params, get) as { data?: Record<string, unknown> };
+        if (r?.data && typeof r.data === 'object') {
+          console.info('Form submit', r.data);
+        }
+      },
+      action: (params: Record<string, unknown>) => {
+        console.info('Action', resolveExpressions(params, get));
+      },
+      // Meta-action: run multiple actions in sequence
+      sequence: (params: Record<string, unknown>) => {
+        const r = resolveExpressions(params, get) as {
+          actions?: Array<{ action: string; actionParams?: Record<string, unknown> }>;
+        };
+        if (Array.isArray(r?.actions)) {
+          for (const step of r.actions) {
+            if (step.action) {
+              dispatchRef.current(step.action, step.actionParams ?? {});
+            }
+          }
+        }
+      },
+      // Meta-action: conditionally dispatch an action
+      conditional: (params: Record<string, unknown>) => {
+        const r = resolveExpressions(params, get) as {
+          condition?: unknown;
+          then?: { action: string; actionParams?: Record<string, unknown> };
+          else?: { action: string; actionParams?: Record<string, unknown> };
+        };
+
+        let conditionMet = false;
+        const cond = r?.condition;
+
+        if (cond && typeof cond === 'object') {
+          const condObj = cond as Record<string, unknown>;
+          if (typeof condObj.path === 'string') {
+            conditionMet = !!get(condObj.path);
+          } else if (Array.isArray(condObj.eq)) {
+            const [left, right] = condObj.eq.map(v => resolveExpressions(v, get));
+            conditionMet = left === right;
+          } else if (Array.isArray(condObj.ne)) {
+            const [left, right] = condObj.ne.map(v => resolveExpressions(v, get));
+            conditionMet = left !== right;
+          } else if (Array.isArray(condObj.gt)) {
+            const [left, right] = condObj.gt.map(v => resolveExpressions(v, get));
+            conditionMet = Number(left) > Number(right);
+          } else if (Array.isArray(condObj.gte)) {
+            const [left, right] = condObj.gte.map(v => resolveExpressions(v, get));
+            conditionMet = Number(left) >= Number(right);
+          } else if (Array.isArray(condObj.lt)) {
+            const [left, right] = condObj.lt.map(v => resolveExpressions(v, get));
+            conditionMet = Number(left) < Number(right);
+          } else if (Array.isArray(condObj.lte)) {
+            const [left, right] = condObj.lte.map(v => resolveExpressions(v, get));
+            conditionMet = Number(left) <= Number(right);
+          }
+        } else {
+          conditionMet = !!cond;
+        }
+
+        const branch = conditionMet ? r?.then : r?.else;
+        if (branch?.action) {
+          dispatchRef.current(branch.action, branch.actionParams ?? {});
+        }
+      },
+    };
+
+    dispatchRef.current = (action, params) => {
+      if (h[action]) h[action](params);
+    };
+
+    return h;
+  }, [get, set]);
 
   return (
     <ActionProvider handlers={handlers}>
       <VisibilityProvider>
-        <Renderer spec={normalizeSpec(spec)} registry={registry} />
+        <div className="w-full">
+          <Renderer spec={normalizeSpec(spec)} registry={registry} />
+        </div>
       </VisibilityProvider>
     </ActionProvider>
   );
@@ -151,7 +276,7 @@ export function UIPartView({ spec, loading }: UIPartViewProps) {
   }
 
   return (
-    <div className="group/ui relative rounded-md border border-[var(--border)] p-3 my-2">
+    <div className="group/ui relative w-full rounded-md border border-[var(--border)] p-3 my-2">
       <button
         type="button"
         onClick={() => downloadComponent(spec)}

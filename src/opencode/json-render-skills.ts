@@ -352,6 +352,7 @@ The spec follows the @json-render/react flat element tree format:
   - \`children\` — Array of string keys referencing child elements (optional, omit for leaf nodes)
 
 Key rules:
+- **IMPORTANT: Always use full-width root elements.** Use Column or Section as the root element to ensure the UI fills the available width. Do NOT use Card as a root — wrap it in a Column.
 - Every element referenced in a \`children\` array MUST exist in the \`elements\` map
 - Use descriptive, unique keys (e.g. "header-card", "sales-chart", "submit-btn")
 - Layout components (Box, Flex, Row, Column, Stack, Card, Form, Section, Container, Grid, Hero, CTA) use \`children\` to nest other elements
@@ -394,6 +395,8 @@ Available actions:
 - **removeItem** — Remove an item from an array by index: \`{ "action": "removeItem", "actionParams": { "path": "/items", "index": 0 } }\`
 - **navigate** — Navigate to a URL: \`{ "action": "navigate", "actionParams": { "url": "https://example.com" } }\`
 - **submit** — Submit form data: \`{ "action": "submit", "actionParams": { "data": { ... } } }\`
+- **sequence** — Run multiple actions in order: \`{ "action": "sequence", "actionParams": { "actions": [...] } }\`
+- **conditional** — Conditionally dispatch an action: \`{ "action": "conditional", "actionParams": { "condition": ..., "then": ..., "else": ... } }\`
 
 ### Conditional Visibility (\`visible\`)
 
@@ -418,6 +421,80 @@ Any prop value can reference state with \`{ "$path": "/state/key" }\`. Condition
 - **Multi-step flows** — use state for current step, show/hide steps with \`visible\`
 - **Live filters** — use state for filter values, apply \`visible\` conditions on results
 - **Don't use state** when the UI is purely informational (dashboards, status pages, landing pages, documentation)
+
+### Expression Values in Actions
+
+Action params can include $path expressions to read from state at dispatch time:
+
+\`\`\`json
+{
+  "action": "appendItem",
+  "actionParams": {
+    "path": "/items",
+    "item": {
+      "name": { "$path": "/form/name" },
+      "email": { "$path": "/form/email" }
+    }
+  }
+}
+\`\`\`
+
+Available expressions:
+- \`{ "$path": "/state/path" }\` — Read value from state
+- \`{ "$concat": ["Hello ", { "$path": "/name" }] }\` — Concatenate values into a string
+- \`{ "$template": "Hello \${/name}, welcome!" }\` — String template with \${/path} replacements
+
+This lets you wire form inputs to actions without custom code. Any value in actionParams can be an expression, including nested objects and arrays.
+
+### Action Sequences
+
+Trigger multiple actions in order with the \`sequence\` meta-action:
+
+\`\`\`json
+{
+  "on": {
+    "press": {
+      "action": "sequence",
+      "actionParams": {
+        "actions": [
+          { "action": "appendItem", "actionParams": { "path": "/items", "item": { "name": { "$path": "/form/name" } } } },
+          { "action": "setState", "actionParams": { "path": "/form/name", "value": "" } }
+        ]
+      }
+    }
+  }
+}
+\`\`\`
+
+### Conditional Actions
+
+Choose actions based on state with the \`conditional\` meta-action:
+
+\`\`\`json
+{
+  "on": {
+    "press": {
+      "action": "conditional",
+      "actionParams": {
+        "condition": { "path": "/form/name" },
+        "then": { "action": "appendItem", "actionParams": { "path": "/items", "item": { "name": { "$path": "/form/name" } } } },
+        "else": { "action": "setState", "actionParams": { "path": "/error", "value": "Name required" } }
+      }
+    }
+  }
+}
+\`\`\`
+
+Condition formats:
+- \`{ "path": "/key" }\` — truthy check
+- \`{ "eq": [valueA, valueB] }\` — equality (values can include $path expressions)
+- \`{ "ne": [valueA, valueB] }\` — not equal
+- \`{ "gt": [valueA, valueB] }\` — greater than
+- \`{ "gte": [valueA, valueB] }\` — greater than or equal
+- \`{ "lt": [valueA, valueB] }\` — less than
+- \`{ "lte": [valueA, valueB] }\` — less than or equal
+
+Sequences and conditionals can be nested — e.g. a conditional's \`then\` can be a \`sequence\`.
 
 ### State Examples
 
@@ -475,6 +552,66 @@ Any prop value can reference state with \`{ "$path": "/state/key" }\`. Condition
     }
   },
   "state": { "markers": [] }
+}
+\`\`\`
+
+**Interactive Map with Custom Labels:**
+
+\`\`\`ui_spec
+{
+  "root": "col",
+  "elements": {
+    "col": { "type": "Column", "props": { "gap": "md" }, "children": ["label-input", "map-1"] },
+    "label-input": { "type": "Input", "props": { "label": "Marker label", "placeholder": "Name this location..." } },
+    "map-1": {
+      "type": "Map",
+      "props": { "center": [-74.006, 40.7128], "zoom": 11, "markersPath": "/markers", "labelPath": "/form/marker-label", "interactive": true, "height": "400px" }
+    }
+  },
+  "state": { "markers": [], "form": { "marker-label": "" } }
+}
+\`\`\`
+
+**Complex Interactive: Form with Validation + List:**
+
+\`\`\`ui_spec
+{
+  "root": "app",
+  "elements": {
+    "app": { "type": "Column", "props": { "gap": "md" }, "children": ["form", "error", "list"] },
+    "form": { "type": "Row", "props": { "gap": "sm" }, "children": ["input", "add-btn"] },
+    "input": { "type": "Input", "props": { "label": "New item", "placeholder": "Type something..." } },
+    "add-btn": {
+      "type": "Button",
+      "props": { "label": "Add" },
+      "on": {
+        "press": {
+          "action": "conditional",
+          "actionParams": {
+            "condition": { "path": "/form/new-item" },
+            "then": {
+              "action": "sequence",
+              "actionParams": {
+                "actions": [
+                  { "action": "appendItem", "actionParams": { "path": "/items", "item": { "name": { "$path": "/form/new-item" } } } },
+                  { "action": "setState", "actionParams": { "path": "/form/new-item", "value": "" } },
+                  { "action": "setState", "actionParams": { "path": "/error", "value": "" } }
+                ]
+              }
+            },
+            "else": { "action": "setState", "actionParams": { "path": "/error", "value": "Please enter an item name" } }
+          }
+        }
+      }
+    },
+    "error": {
+      "type": "Alert", "props": { "message": { "$path": "/error" }, "variant": "error" },
+      "visible": { "path": "/error" }
+    },
+    "list": { "type": "Column", "props": { "gap": "sm" }, "children": ["list-heading"] },
+    "list-heading": { "type": "Heading", "props": { "content": "Items", "level": "3" } }
+  },
+  "state": { "form": { "new-item": "" }, "items": [], "error": "" }
 }
 \`\`\`
 
@@ -545,7 +682,7 @@ Any prop value can reference state with \`{ "$path": "/state/key" }\`. Condition
 
 | Component | Key Props | Description |
 |-----------|-----------|-------------|
-| Map | center? [lng,lat], zoom?, markers? [{longitude, latitude, label?, popup?}], route? [[lng,lat]...], height?, markersPath?, interactive? | Interactive map with markers, popups, and routes (MapLibre, no API key needed). Use markersPath (JSON Pointer to state array) + interactive (click-to-add) for state-driven markers. |
+| Map | center? [lng,lat], zoom?, markers? [{longitude, latitude, label?, popup?}], route? [[lng,lat]...], height?, markersPath?, labelPath?, interactive? | Interactive map with markers, popups, and routes (MapLibre, no API key needed). Use markersPath (JSON Pointer to state array) + interactive (click-to-add) for state-driven markers. Use labelPath to read the marker label from a state path (e.g. from an Input field) when adding markers interactively. |
 | AutoForm | schema {fieldName: {type, label?, description?, required?, placeholder?, options?, min?, max?, default?}}, title?, submitLabel? | Auto-generated form from a JSON field schema — describe fields and types, form is built automatically |
 | ApiReference | specUrl?, spec? (inline JSON), className? | Interactive OpenAPI/Swagger API reference viewer with try-it-out testing |
 
@@ -769,7 +906,7 @@ Use ui_spec whenever the response benefits from visual formatting over plain tex
 - For text content: use Heading + Paragraph + List for readable document-style output
 - Use \`Box\` when you just need a styled wrapper with no layout opinion
 - Use \`Flex\` when Row/Column constraints aren't enough (e.g. \`justify: "between"\`, \`wrap: true\`)
-- For maps: use \`Map\` with \`center\` and \`markers\` for location data. Routes draw lines between coordinate pairs. No API key needed. For interactive maps, use \`markersPath\` (state path to markers array) + \`interactive: true\` with a \`state: { "markers": [] }\` block.
+- For maps: use \`Map\` with \`center\` and \`markers\` for location data. Routes draw lines between coordinate pairs. No API key needed. For interactive maps, use \`markersPath\` (state path to markers array) + \`interactive: true\` with a \`state: { "markers": [] }\` block. Use \`labelPath\` to read the label from a form field when adding markers interactively.
 - For forms described as field lists: prefer \`AutoForm\` over composing Form+Input+Select manually — just describe the schema as JSON. Field types: string, number, boolean, select.
 - For API docs: use \`ApiReference\` with either \`specUrl\` (URL to OpenAPI JSON/YAML) or \`spec\` (inline OpenAPI JSON object).
 - Keep element keys descriptive and unique within the spec
