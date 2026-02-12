@@ -168,7 +168,7 @@ export const ToolOutput = ({
 		}
 		if (typeof output === 'string') {
 			return (
-				<div className="p-3 text-xs overflow-auto max-h-96">
+				<div className="p-3 text-[11px] font-mono leading-relaxed overflow-auto max-h-96 [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5 [&_p]:text-[11px] [&_p]:my-1 [&_li]:text-[11px] [&_pre]:text-[10px] [&_pre]:my-1 [&_code]:text-[10px] [&_table]:text-[10px]">
 					<Streamdown>{output}</Streamdown>
 				</div>
 			);

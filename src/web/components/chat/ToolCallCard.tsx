@@ -214,12 +214,10 @@ function AgentInvocationView({ input }: { input: { subagent_type: string; descri
 				<span className="truncate">{input.description ?? 'Agent task'}</span>
 			</div>
 		{input.prompt && (
-			<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] p-4 text-xs text-[var(--foreground)] overflow-hidden">
-				<div className="max-w-none prose-sm">
-					<Streamdown plugins={{ code: toolCallCodePlugin }}>
-						{input.prompt}
-					</Streamdown>
-				</div>
+			<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-[11px] font-mono text-[var(--foreground)] overflow-hidden leading-relaxed max-h-64 overflow-y-auto [&_h1]:text-xs [&_h1]:font-bold [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-xs [&_h2]:font-bold [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-[11px] [&_h3]:font-semibold [&_h3]:mt-1.5 [&_h3]:mb-0.5 [&_p]:text-[11px] [&_p]:my-1 [&_li]:text-[11px] [&_ul]:my-1 [&_ol]:my-1 [&_pre]:text-[10px] [&_pre]:my-1 [&_pre]:p-2 [&_code]:text-[10px] [&_table]:text-[10px] [&_th]:text-[10px] [&_th]:px-1.5 [&_th]:py-0.5 [&_td]:text-[10px] [&_td]:px-1.5 [&_td]:py-0.5 [&_blockquote]:text-[11px]">
+				<Streamdown plugins={{ code: toolCallCodePlugin }}>
+					{input.prompt}
+				</Streamdown>
 			</div>
 		)}
 		</div>
