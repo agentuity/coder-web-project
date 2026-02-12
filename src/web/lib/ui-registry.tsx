@@ -4,7 +4,6 @@ import { catalog } from './ui-catalog';
 import { cn } from './utils';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import { ApiReferenceReact } from '@scalar/api-reference-react';
 
 /* ── shadcn component imports ─────────────────────────────────── */
 import { Card as ShadcnCard, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
@@ -938,28 +937,6 @@ export const { registry } = defineRegistry(catalog, {
             {props.submitLabel ?? 'Submit'}
           </ShadcnButton>
         </form>
-      );
-    },
-
-    /* ── ApiReference (Scalar) ───────────────────────────────────── */
-    ApiReference: ({ props }) => {
-      const configuration: Record<string, unknown> = {
-        darkMode: true,
-      };
-      if (props.specUrl) {
-        configuration.url = props.specUrl;
-      }
-      if (props.spec) {
-        configuration.content = props.spec;
-      }
-
-      return (
-        <div
-          className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}
-          style={{ height: '600px' }}
-        >
-          <ApiReferenceReact configuration={configuration as never} />
-        </div>
       );
     },
 

@@ -349,15 +349,6 @@ export const catalog = defineCatalog(schema, {
       }),
       description: 'Auto-generated form from a JSON field schema — describe fields and types, form is built automatically',
     },
-    ApiReference: {
-      props: z.object({
-        specUrl: z.string().optional(),
-        spec: z.record(z.string(), z.unknown()).optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Interactive OpenAPI/Swagger API reference viewer with try-it-out testing',
-    },
-
     /* ── Primitive components ─────────────────────────────────────── */
 
     Box: {
