@@ -64,6 +64,7 @@ function AppContent() {
   const isCreatingRef = useRef(false);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [sessionsLoading, setSessionsLoading] = useState(true);
   const [githubAvailable, setGithubAvailable] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
@@ -168,12 +169,18 @@ function AppContent() {
   // Fetch sessions
   useEffect(() => {
     if (!workspaceId) return;
+    setSessionsLoading(true);
     
     const fetchSessions = () => {
       fetch(`/api/workspaces/${workspaceId}/sessions`)
         .then(r => r.json())
-        .then(s => setSessions(s))
-        .catch(() => {});
+        .then(s => {
+          setSessions(s);
+          setSessionsLoading(false);
+        })
+        .catch(() => {
+          setSessionsLoading(false);
+        });
     };
 
     fetchSessions();
@@ -223,6 +230,10 @@ function AppContent() {
 		const keepSession = page === 'sources';
 		setUrlState({ s: keepSession ? (activeSessionId ?? null) : null, p: page });
 	}, [setUrlState, activeSessionId]);
+
+	const handleGoHome = useCallback(() => {
+		setUrlState({ s: null, p: null });
+	}, [setUrlState]);
 
   const handleFlagSession = useCallback(async (id: string, flagged: boolean) => {
     try {
@@ -343,6 +354,7 @@ function AppContent() {
         userEmail={userEmail}
         userName={userName}
         sessions={sessions}
+        sessionsLoading={sessionsLoading}
         activeSessionId={activeSessionId}
         currentPage={currentPage}
         theme={theme}
@@ -350,6 +362,7 @@ function AppContent() {
         onNewSession={() => setShowNewDialog(true)}
         onSelectSession={handleSelectSession}
         onNavigate={handleNavigate}
+        onGoHome={handleGoHome}
         onFlagSession={handleFlagSession}
         onRetrySession={handleRetrySession}
         onDeleteSession={handleDeleteSession}

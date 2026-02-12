@@ -19,10 +19,12 @@ interface Session {
 
 interface SidebarProps {
   sessions: Session[];
+  sessionsLoading?: boolean;
   activeSessionId?: string;
   onNewSession: () => void;
   onSelectSession: (id: string) => void;
   onNavigate: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
+  onGoHome?: () => void;
   onFlagSession?: (id: string, flagged: boolean) => void;
   onRetrySession?: (id: string) => void;
   onDeleteSession?: (id: string) => void;
@@ -37,6 +39,29 @@ interface SidebarProps {
   onSignOut: () => void;
 }
 
+function SessionSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
+  return (
+    <>
+      {[75, 60, 85, 50, 70].map((width) => (
+        <div
+          key={width}
+          className={cn(
+            'flex items-center gap-2 rounded-md py-2 animate-pulse',
+            isCollapsed ? 'justify-center px-2' : 'px-3'
+          )}
+        >
+          <div className="h-2 w-2 rounded-full bg-[var(--muted)]" />
+          {!isCollapsed && (
+            <div className="flex-1">
+              <div className="h-3 rounded bg-[var(--muted)]" style={{ width: `${width}%` }} />
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
+}
+
 function getStatusColor(status: string) {
   switch (status) {
     case 'active': return 'bg-green-500';
@@ -49,10 +74,12 @@ function getStatusColor(status: string) {
 
 export function Sidebar({
   sessions,
+  sessionsLoading,
   activeSessionId,
   onNewSession,
   onSelectSession,
   onNavigate,
+  onGoHome,
   onFlagSession,
   onRetrySession,
   onDeleteSession,
@@ -193,10 +220,15 @@ export function Sidebar({
 				: 'hidden md:flex',
 		)}
     >
-      <div className={cn('flex items-center gap-2 px-4 py-3', isCollapsed && 'justify-center px-2')}>
+      <button
+        type="button"
+        onClick={onGoHome}
+        className={cn('flex items-center gap-2 px-4 py-3 hover:opacity-80 transition-opacity cursor-pointer', isCollapsed && 'justify-center px-2')}
+        title="Go to home"
+      >
         <AgentuityLogo size={20} className="text-cyan-400" />
         {!isCollapsed && <span id="logo" className="text-xl font-semibold tracking-tight">Coder</span>}
-      </div>
+      </button>
       <div className={cn('p-3', isCollapsed && 'px-2')}>
         {isCollapsed ? (
           <Button
@@ -222,48 +254,65 @@ export function Sidebar({
         <div className="space-y-3">
           {isCollapsed ? (
             <div className="space-y-1">
-              {activeSessions.map(renderSessionRow)}
+              {sessionsLoading ? (
+                <SessionSkeleton isCollapsed={true} />
+              ) : (
+                activeSessions.map(renderSessionRow)
+              )}
             </div>
           ) : (
             <>
-              {activeSessions.length > 0 && (
+              {sessionsLoading ? (
                 <div>
                   <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">
-                    Active
+                    Sessions
                   </div>
                   <div className="space-y-1">
-                    {activeSessions.map(renderSessionRow)}
+                    <SessionSkeleton isCollapsed={false} />
                   </div>
                 </div>
-              )}
-              {terminatedSessions.length > 0 && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowTerminated((prev) => !prev)}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
-                  >
-                    {showTerminated ? (
-                      <ChevronDown className="h-3 w-3" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3" />
-                    )}
-                    Terminated
-                    <Badge variant="secondary" className="ml-auto text-[9px]">
-                      {terminatedSessions.length}
-                    </Badge>
-                  </button>
-                  {showTerminated && (
-                    <div className="mt-1 space-y-1">
-                      {terminatedSessions.map(renderSessionRow)}
+              ) : (
+                <>
+                  {activeSessions.length > 0 && (
+                    <div>
+                      <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">
+                        Active
+                      </div>
+                      <div className="space-y-1">
+                        {activeSessions.map(renderSessionRow)}
+                      </div>
                     </div>
                   )}
-                </div>
-              )}
-              {sessions.length === 0 && (
-                <p className="px-3 py-6 text-center text-sm text-[var(--muted-foreground)]">
-                  No sessions yet. Create one to get started.
-                </p>
+                  {terminatedSessions.length > 0 && (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setShowTerminated((prev) => !prev)}
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
+                      >
+                        {showTerminated ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3" />
+                        )}
+                        Terminated
+                        <Badge variant="secondary" className="ml-auto text-[9px]">
+                          {terminatedSessions.length}
+                        </Badge>
+                      </button>
+                      {showTerminated && (
+                        <div className="mt-1 space-y-1">
+                          {terminatedSessions.map(renderSessionRow)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {sessions.length === 0 && (
+                    <p className="px-3 py-6 text-center text-sm text-[var(--muted-foreground)]">
+                      No sessions yet. Create one to get started.
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}

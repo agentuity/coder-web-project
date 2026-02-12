@@ -18,6 +18,7 @@ interface AppShellProps {
   userEmail?: string;
   userName?: string;
   sessions: Session[];
+  sessionsLoading?: boolean;
   activeSessionId?: string;
   currentPage: string;
   theme: 'light' | 'dark';
@@ -25,6 +26,7 @@ interface AppShellProps {
   onNewSession: () => void;
   onSelectSession: (id: string) => void;
 	onNavigate: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
+  onGoHome?: () => void;
   onFlagSession?: (id: string, flagged: boolean) => void;
   onRetrySession?: (id: string) => void;
   onDeleteSession?: (id: string) => void;
@@ -35,6 +37,7 @@ export function AppShell({
   userEmail,
   userName,
   sessions,
+  sessionsLoading,
   activeSessionId,
   currentPage,
   theme,
@@ -42,6 +45,7 @@ export function AppShell({
   onNewSession,
   onSelectSession,
   onNavigate,
+  onGoHome,
   onFlagSession,
   onRetrySession,
   onDeleteSession,
@@ -82,10 +86,12 @@ export function AppShell({
 
       <Sidebar
         sessions={sessions}
+        sessionsLoading={sessionsLoading}
         activeSessionId={activeSessionId}
         onNewSession={handleNewSession}
         onSelectSession={handleSelectSession}
         onNavigate={handleNavigate}
+        onGoHome={onGoHome}
         onFlagSession={onFlagSession}
         onRetrySession={onRetrySession}
         onDeleteSession={onDeleteSession}
