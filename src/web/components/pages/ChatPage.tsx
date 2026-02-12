@@ -337,6 +337,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const navigate = useNavigate({ from: '/session/$sessionId' });
 	const [sshCopied, setSshCopied] = useState(false);
 	const [sandboxCopied, setSandboxCopied] = useState(false);
+	const [attachCopied, setAttachCopied] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -570,6 +571,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const isBusy = sessionStatus.type === 'busy';
 	const displayMessages = session.status === 'terminated' ? archivedMessages : messages;
 	const sshCommand = session.sandboxId ? `agentuity cloud ssh ${session.sandboxId}` : '';
+	const attachCommand = session.sandboxUrl ? `opencode attach ${session.sandboxUrl}` : '';
 	const getDisplayParts = useCallback(
 		(messageID: string) => {
 			if (session.status === 'terminated') {
@@ -798,6 +800,17 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			toast({ type: 'error', message: 'Failed to copy sandbox ID' });
 		}
 	}, [session.sandboxId, toast]);
+
+	const handleCopyAttachCommand = useCallback(async () => {
+		if (!attachCommand) return;
+		try {
+			await navigator.clipboard.writeText(attachCommand);
+			setAttachCopied(true);
+			setTimeout(() => setAttachCopied(false), 2000);
+		} catch {
+			toast({ type: 'error', message: 'Failed to copy attach command' });
+		}
+	}, [attachCommand, toast]);
 
   // Abort
   const handleAbort = async () => {
@@ -1764,6 +1777,28 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									</button>
 								</div>
 							</div>
+							{attachCommand && (
+							<div>
+								<p className="text-xs text-[var(--muted-foreground)] mb-1">OpenCode Attach</p>
+								<div className="flex items-center gap-2">
+									<code className="text-xs bg-[var(--muted)] px-2 py-1 rounded flex-1 block truncate">
+										{attachCommand}
+									</code>
+									<button
+										type="button"
+										onClick={handleCopyAttachCommand}
+										className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+										title="Copy attach command"
+									>
+										{attachCopied ? (
+											<Check className="h-3.5 w-3.5 text-green-500" />
+										) : (
+											<Copy className="h-3.5 w-3.5" />
+										)}
+									</button>
+								</div>
+							</div>
+							)}
 						</div>
 					</PopoverContent>
 					</Popover>
