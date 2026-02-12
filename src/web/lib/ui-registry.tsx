@@ -1087,6 +1087,30 @@ export const { registry } = defineRegistry(catalog, {
       const [error, setError] = useState<string | null>(null);
       const [copied, setCopied] = useState(false);
 
+      // Curated theme list — dark themes first when in dark mode, light first when in light
+      const mermaidThemes = [
+        { key: 'github-dark', label: 'GitHub Dark', dark: true },
+        { key: 'dracula', label: 'Dracula', dark: true },
+        { key: 'tokyo-night', label: 'Tokyo Night', dark: true },
+        { key: 'catppuccin-mocha', label: 'Catppuccin Mocha', dark: true },
+        { key: 'nord', label: 'Nord', dark: true },
+        { key: 'one-dark', label: 'One Dark', dark: true },
+        { key: 'solarized-dark', label: 'Solarized Dark', dark: true },
+        { key: 'zinc-dark', label: 'Zinc Dark', dark: true },
+        { key: 'github-light', label: 'GitHub Light', dark: false },
+        { key: 'catppuccin-latte', label: 'Catppuccin Latte', dark: false },
+        { key: 'nord-light', label: 'Nord Light', dark: false },
+        { key: 'solarized-light', label: 'Solarized Light', dark: false },
+        { key: 'zinc-light', label: 'Zinc Light', dark: false },
+      ];
+
+      const getDefaultTheme = () => {
+        const isDark = typeof window !== 'undefined' && document.documentElement.classList.contains('dark');
+        return isDark ? 'github-dark' : 'github-light';
+      };
+
+      const [selectedTheme, setSelectedTheme] = useState(getDefaultTheme);
+
       useEffect(() => {
         let cancelled = false;
         setError(null);
@@ -1096,12 +1120,7 @@ export const { registry } = defineRegistry(catalog, {
             const { renderMermaid, THEMES } = await import('beautiful-mermaid');
             if (cancelled) return;
 
-            // Detect dark mode: explicit prop > html.dark class > prefers-color-scheme
-            const isDark = props.theme === 'dark' ||
-              (!props.theme && typeof window !== 'undefined' &&
-                document.documentElement.classList.contains('dark'));
-            const theme = isDark ? THEMES['tokyo-night'] : THEMES['github-light'];
-
+            const theme = THEMES[selectedTheme as keyof typeof THEMES] || THEMES['github-dark'];
             const svg = await renderMermaid(props.code, theme);
             if (cancelled || !containerRef.current) return;
             containerRef.current.innerHTML = svg;
@@ -1121,7 +1140,7 @@ export const { registry } = defineRegistry(catalog, {
         })();
 
         return () => { cancelled = true; };
-      }, [props.code, props.theme]);
+      }, [props.code, selectedTheme]);
 
       const handleCopy = () => {
         void navigator.clipboard.writeText(props.code).then(() => {
@@ -1141,7 +1160,24 @@ export const { registry } = defineRegistry(catalog, {
 
       return (
         <div className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}>
-          <div className="flex items-center justify-end px-3 py-1.5 bg-[var(--muted)] border-b border-[var(--border)]">
+          <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--muted)] border-b border-[var(--border)]">
+            <select
+              value={selectedTheme}
+              onChange={(e) => setSelectedTheme(e.target.value)}
+              className="text-[10px] bg-transparent text-[var(--muted-foreground)] border border-[var(--border)] rounded px-1.5 py-0.5 hover:text-[var(--foreground)] focus:outline-none focus:ring-1 focus:ring-[var(--ring)] cursor-pointer"
+              title="Diagram theme"
+            >
+              <optgroup label="Dark">
+                {mermaidThemes.filter((t) => t.dark).map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Light">
+                {mermaidThemes.filter((t) => !t.dark).map((t) => (
+                  <option key={t.key} value={t.key}>{t.label}</option>
+                ))}
+              </optgroup>
+            </select>
             <button
               type="button"
               onClick={handleCopy}
