@@ -1025,5 +1025,60 @@ export const { registry } = defineRegistry(catalog, {
         </Tag>
       );
     },
+
+    /* ── HtmlViewer ──────────────────────────────────────────────── */
+    HtmlViewer: ({ props }) => {
+      const height = props.height || '300px';
+      // Wrap the HTML in a basic document with theme-aware styles
+      const srcdoc = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #e4e4e7;
+    background: #18181b;
+  }
+  a { color: #60a5fa; }
+  img { max-width: 100%; height: auto; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { border: 1px solid #3f3f46; padding: 8px; text-align: left; }
+  th { background: #27272a; }
+  pre { background: #27272a; padding: 12px; border-radius: 6px; overflow-x: auto; }
+  code { font-family: ui-monospace, monospace; font-size: 13px; }
+</style>
+</head>
+<body>${props.html}</body>
+</html>`;
+
+      return (
+        <div className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}>
+          {props.title && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--muted)] border-b border-[var(--border)]">
+              <div className="flex gap-1.5">
+                <div className="h-2.5 w-2.5 rounded-full bg-red-500/60" />
+                <div className="h-2.5 w-2.5 rounded-full bg-yellow-500/60" />
+                <div className="h-2.5 w-2.5 rounded-full bg-green-500/60" />
+              </div>
+              <span className="text-xs text-[var(--muted-foreground)] truncate">{props.title}</span>
+            </div>
+          )}
+          <iframe
+            srcDoc={srcdoc}
+            sandbox="allow-scripts"
+            className="w-full border-0 bg-[#18181b]"
+            style={{ height }}
+            title={props.title || 'HTML preview'}
+          />
+        </div>
+      );
+    },
   },
 });

@@ -160,9 +160,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
   useEffect(() => {
     setSession(initialSession);
-    if (initialSession.agent) {
-      setSelectedCommand(initialSession.agent);
-    }
   }, [initialSession]);
 
   useEffect(() => {

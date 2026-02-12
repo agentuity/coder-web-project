@@ -265,9 +265,11 @@ api.post('/', async (c) => {
 				// Send initial prompt async (fire-and-forget)
 				if (body.prompt && opencodeSessionId) {
 					try {
+						// If an agent command was specified, prepend it so OpenCode routes correctly
+						const promptText = body.agent ? `${body.agent} ${body.prompt}` : body.prompt;
 						await client.session.promptAsync({
 							path: { id: opencodeSessionId },
-							body: { parts: [{ type: 'text', text: body.prompt }] },
+							body: { parts: [{ type: 'text', text: promptText }] },
 						});
 					} catch (err) {
 						logger.warn('Failed to send initial prompt', { error: err });
