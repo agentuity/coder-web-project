@@ -104,7 +104,7 @@ export const ToolHeader = ({
 	>
 		<div className="flex items-center gap-2">
 			<WrenchIcon className="h-4 w-4 text-[var(--muted-foreground)]" />
-			<span className="text-xs font-medium text-[var(--foreground)] group-data-[state=closed]:text-[var(--muted-foreground)]">
+			<span className="text-xs font-bold font-mono text-[var(--foreground)] group-data-[state=closed]:text-[var(--muted-foreground)]">
 				{title ?? type.split('-').slice(1).join('-')}
 			</span>
 			{getStatusBadge(status, state)}

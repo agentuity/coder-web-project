@@ -205,19 +205,27 @@ api.post('/', async (c) => {
 				const client = getOpencodeClient(sandboxId, sandboxUrl);
 				let opencodeSessionId: string | null = null;
 
-				// Wait for the OpenCode API to be truly ready before attempting session.create.
-				// Even after the health check passes, internal initialization may still be in progress.
-				await new Promise((r) => setTimeout(r, 3000));
-
 				for (let attempt = 1; attempt <= 5; attempt++) {
 					try {
 						const opencodeSession = await client.session.create({ body: {} });
+						// Log the full response structure for debugging
+						logger.info(`session.create attempt ${attempt} response`, {
+							responseType: typeof opencodeSession,
+							keys: opencodeSession && typeof opencodeSession === 'object' ? Object.keys(opencodeSession) : [],
+							hasData: !!(opencodeSession as any)?.data,
+						});
 						opencodeSessionId =
-							(opencodeSession as any)?.data?.id || (opencodeSession as any)?.id || null;
+							(opencodeSession as any)?.data?.id ||
+							(opencodeSession as any)?.id ||
+							(opencodeSession as any)?.sessionId ||
+							(opencodeSession as any)?.session?.id ||
+							null;
 						if (opencodeSessionId) break;
-						logger.warn(`session.create attempt ${attempt}: no session ID returned`);
+						logger.warn(`session.create attempt ${attempt}: no session ID returned`, {
+							response: JSON.stringify(opencodeSession).slice(0, 500),
+						});
 					} catch (err) {
-						logger.warn(`session.create attempt ${attempt} failed`, { error: err });
+						logger.warn(`session.create attempt ${attempt} failed`, { error: String(err) });
 					}
 					// Exponential backoff: 1s, 2s, 4s, 8s
 					if (attempt < 5) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt - 1)));
@@ -327,7 +335,7 @@ api.get('/', async (c) => {
 	const updatedSessions = await Promise.all(
 		result.map(async (session) => {
 			if (!session.sandboxId || !session.sandboxUrl) return session;
-			if (!['active', 'creating'].includes(session.status)) return session;
+			if (session.status !== 'active') return session;
 			const lastChecked = getCachedHealthTimestamp(session.id) ?? 0;
 			if (now - lastChecked < SANDBOX_STATUS_TTL_MS) return session;
 

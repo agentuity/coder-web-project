@@ -17,7 +17,7 @@ const sandboxStatusCache = new Map<string, HealthCacheEntry>();
 export const SANDBOX_STATUS_TTL_MS = 15_000;
 
 /** Number of consecutive failures required before marking a sandbox as terminated. */
-const TERMINATION_THRESHOLD = 3;
+const TERMINATION_THRESHOLD = 5;
 
 export function getCachedHealthTimestamp(sessionId: string): number | undefined {
 	return sandboxStatusCache.get(sessionId)?.lastChecked;

@@ -880,23 +880,32 @@ Use \`Column\` as root, \`Section\` for each content block, \`Container\` inside
 - Use \`Box\` with \`className\` when you need a container with completely custom styling
 - For landing pages specifically: alternate \`Section\` backgrounds, use \`Grid\` columns of 3 for features, use \`highlighted: true\` on one \`PricingCard\`
 
-## When to Use
+## When to Use (and When NOT to Use)
 
-Use ui_spec whenever the response benefits from visual formatting over plain text. Match the component choice to the user's intent:
+**Default to plain text and markdown.** Most responses should use regular text, markdown, and code blocks. Only use ui_spec when the user explicitly asks for something visual or interactive.
 
-- **Data display**: Tables, Charts, Metrics — "show me the data", "visualize this", "compare these numbers"
-- **Dashboards**: Card grids with Metrics, Charts, Tables — "show a dashboard", "overview of metrics"
-- **Forms**: Form, Input, Select, Button — "build a form", "create a signup page", "user input"
-- **Status / monitoring**: Cards, Badges, Alerts, Metrics — "show project status", "system health"
-- **Content / documentation**: Heading, Paragraph, List, Code — "explain this", "show the steps"
-- **Landing / marketing pages**: Navbar, Hero, Feature, PricingCard, Footer — "create a landing page", "product page"
-- **General composition**: Box, Flex, Grid — custom layouts that don't fit standard patterns
-- **Maps / geographic data**: Map — "show me on a map", "plot these locations", "directions from A to B"
-- **Dynamic forms from descriptions**: AutoForm — "create a form with name, email, and role fields" (faster than composing Input/Select/Form manually)
-- Prefer ui_spec over plain markdown tables when the data would benefit from visual formatting
+### DO use ui_spec when the user asks to:
+- **Build/create a UI**: "build a form", "create a dashboard", "make a signup page"
+- **Visualize data**: "chart this", "visualize these numbers", "show a graph"
+- **Design a page**: "create a landing page", "build a product page", "make a pricing page"
+- **Create interactive elements**: "build a calculator", "make a todo app", "interactive map"
+- **Show on a map**: "show me on a map", "plot these locations", "directions from A to B"
+
+### DO NOT use ui_spec when the user asks to:
+- **Explain something**: "explain how X works", "what is Y", "how does Z work" — use plain text
+- **Answer questions**: "why does this happen", "what's the difference between" — use plain text
+- **Review/analyze code**: "review this code", "what's wrong with this" — use plain text with code blocks
+- **Describe concepts**: "describe the architecture", "walk me through" — use plain text and markdown
+- **General conversation**: greetings, clarifications, opinions — use plain text
+
+### Gray area (use judgment):
+- **Data display**: If the user says "show me the data" with actual numeric data, a Table or Chart can help. But if they say "tell me about the data", use text.
+- **Status displays**: If the user says "show system status" as a visual, ui_spec is fine. If they say "what's the status", use text.
+- Prefer ui_spec over plain markdown tables only when the data has 3+ columns or would genuinely benefit from interactive formatting
 
 ## Tips
 
+- **IMPORTANT: Default to plain text.** Do NOT generate ui_spec for explanations, questions, code reviews, or general conversation. Only use ui_spec when the user explicitly asks for something visual or interactive.
 - **Do NOT default to landing page components** — only use Navbar/Hero/Footer/Feature/Testimonial/PricingCard/CTA when the user explicitly asks for a landing page, website, or marketing page
 - For dashboards: start with Card or Column as root, use Grid for metric rows
 - For forms: wrap fields in Form, use Row for side-by-side inputs

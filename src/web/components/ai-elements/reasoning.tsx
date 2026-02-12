@@ -65,7 +65,7 @@ export const Reasoning = memo(
 		return (
 			<ReasoningContext.Provider value={context}>
 				<Collapsible
-					className={cn('not-prose mb-2', className)}
+					className={cn('not-prose mb-2 min-w-0 overflow-hidden', className)}
 					defaultOpen={defaultOpen}
 					onOpenChange={handleOpenChange}
 					open={isOpen}
@@ -151,7 +151,7 @@ export const ReasoningContent = memo(
 				)}
 				{...props}
 			>
-				<div className="max-h-48 overflow-y-auto rounded-md border border-[var(--border)]/50 bg-[var(--muted)]/30 p-2.5 text-[11px]">
+				<div className="max-h-48 overflow-y-auto overflow-x-auto rounded-md border border-[var(--border)]/50 bg-[var(--muted)]/30 p-2.5 text-[11px] min-w-0 break-words">
 					{isStreaming && !trimmed ? (
 						<div className="space-y-2">
 							<Shimmer className="block h-2 w-2/3 rounded bg-[var(--muted)]">&nbsp;</Shimmer>

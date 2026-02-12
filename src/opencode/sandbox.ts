@@ -319,24 +319,71 @@ export async function createSandbox(
       ],
     });
 
-    // ── Batch 4: Start server + health check (runs in parallel with skills) ──
-    await sandbox.execute({
+    // ── Batch 4: Start server + health check ──
+    // Start the OpenCode server (fire-and-forget — nohup runs in background).
+    // sandbox.execute() returns immediately with status:"queued" which is fine here.
+    sandbox.execute({
       command: [
         'bash', '-c',
-        [
-          `cd ${workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
-          `for i in $(seq 1 45); do`,
-          `  if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then`,
-          `    if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then`,
-          `      exit 0`,
-          `    fi`,
-          `  fi`,
-          `  sleep 1`,
-          `done`,
-          `exit 1`,
-        ].join('\n'),
+        `cd ${workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
       ],
     });
+
+    // Wait for the server to be ready using sandboxExecute (which actually waits for completion).
+    // sandbox.execute() returns immediately with status:"queued" and does NOT wait.
+    const apiClient = ctx.sandbox.client;
+    if (apiClient) {
+      const healthExecution = await sandboxExecute(apiClient, {
+        sandboxId,
+        options: {
+          command: [
+            'bash', '-c',
+            [
+              `for i in $(seq 1 60); do`,
+              `  if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then`,
+              `    if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then`,
+              `      exit 0`,
+              `    fi`,
+              `  fi`,
+              `  sleep 1`,
+              `done`,
+              `exit 1`,
+            ].join('\n'),
+          ],
+          timeout: '2m',
+        },
+      });
+
+      const healthExitCode = typeof healthExecution?.exitCode === 'number' ? healthExecution.exitCode : null;
+      if (healthExitCode !== null && healthExitCode !== 0) {
+        ctx.logger.warn('OpenCode server health check failed', {
+          exitCode: healthExitCode,
+          status: healthExecution?.status,
+        });
+      } else {
+        ctx.logger.info('OpenCode server health check passed');
+      }
+    } else {
+      // Fallback: no apiClient, use polling from the calling server
+      ctx.logger.warn('No apiClient available for sandboxExecute, falling back to external health polling');
+      const sandboxInfo = await ctx.sandbox.get(sandboxId);
+      const tempUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+      for (let i = 0; i < 60; i++) {
+        try {
+          const resp = await fetch(`${tempUrl}/global/health`, { signal: AbortSignal.timeout(2000) });
+          if (resp.ok) {
+            const sessionResp = await fetch(`${tempUrl}/session`, { signal: AbortSignal.timeout(2000) });
+            if (sessionResp.ok) {
+              ctx.logger.info('OpenCode server health check passed (external polling)');
+              break;
+            }
+          }
+        } catch {
+          // Not ready yet
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
 
     // 7. Get sandbox info for URL
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
@@ -418,8 +465,8 @@ export async function forkSandbox(
       }
     }
 
-    // 4. Start OpenCode server (filesystem already has everything from snapshot)
-    await sandbox.execute({
+    // 4. Start OpenCode server (fire-and-forget — nohup runs in background)
+    sandbox.execute({
       command: [
         'bash', '-c',
         `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
@@ -427,13 +474,60 @@ export async function forkSandbox(
     });
 
     // 5. Wait for health check — verify both /global/health AND /session API
+    // Use sandboxExecute which actually waits, unlike sandbox.execute() which returns immediately.
     ctx.logger.info('Waiting for OpenCode server to be ready in fork sandbox...');
-    await sandbox.execute({
-      command: [
-        'bash', '-c',
-        `for i in $(seq 1 45); do if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then exit 0; fi; fi; sleep 1; done; exit 1`,
-      ],
-    });
+    const forkApiClient = ctx.sandbox.client;
+    if (forkApiClient) {
+      const healthExecution = await sandboxExecute(forkApiClient, {
+        sandboxId,
+        options: {
+          command: [
+            'bash', '-c',
+            [
+              `for i in $(seq 1 60); do`,
+              `  if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then`,
+              `    if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then`,
+              `      exit 0`,
+              `    fi`,
+              `  fi`,
+              `  sleep 1`,
+              `done`,
+              `exit 1`,
+            ].join('\n'),
+          ],
+          timeout: '2m',
+        },
+      });
+
+      const healthExitCode = typeof healthExecution?.exitCode === 'number' ? healthExecution.exitCode : null;
+      if (healthExitCode !== null && healthExitCode !== 0) {
+        ctx.logger.warn('Fork sandbox health check failed', {
+          exitCode: healthExitCode,
+          status: healthExecution?.status,
+        });
+      } else {
+        ctx.logger.info('Fork sandbox health check passed');
+      }
+    } else {
+      ctx.logger.warn('No apiClient available for fork sandboxExecute, falling back to external health polling');
+      const sandboxInfo = await ctx.sandbox.get(sandboxId);
+      const tempUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+      for (let i = 0; i < 60; i++) {
+        try {
+          const resp = await fetch(`${tempUrl}/global/health`, { signal: AbortSignal.timeout(2000) });
+          if (resp.ok) {
+            const sessionResp = await fetch(`${tempUrl}/session`, { signal: AbortSignal.timeout(2000) });
+            if (sessionResp.ok) {
+              ctx.logger.info('Fork sandbox health check passed (external polling)');
+              break;
+            }
+          }
+        } catch {
+          // Not ready yet
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
 
     // 6. Get sandbox info for URL
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
@@ -514,22 +608,68 @@ export async function createSandboxFromSnapshot(
       ],
     });
 
-    // 3. Start OpenCode server (filesystem already has everything from snapshot)
-    await sandbox.execute({
+    // 3. Start OpenCode server (fire-and-forget — nohup runs in background)
+    sandbox.execute({
       command: [
         'bash', '-c',
         `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
       ],
     });
 
-    // 4. Wait for health check
+    // 4. Wait for health check using sandboxExecute (actually waits, unlike sandbox.execute()).
     ctx.logger.info('Waiting for OpenCode server to be ready in snapshot sandbox...');
-    await sandbox.execute({
-      command: [
-        'bash', '-c',
-        `for i in $(seq 1 45); do if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then exit 0; fi; fi; sleep 1; done; exit 1`,
-      ],
-    });
+    const snapApiClient = ctx.sandbox.client;
+    if (snapApiClient) {
+      const healthExecution = await sandboxExecute(snapApiClient, {
+        sandboxId,
+        options: {
+          command: [
+            'bash', '-c',
+            [
+              `for i in $(seq 1 60); do`,
+              `  if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then`,
+              `    if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then`,
+              `      exit 0`,
+              `    fi`,
+              `  fi`,
+              `  sleep 1`,
+              `done`,
+              `exit 1`,
+            ].join('\n'),
+          ],
+          timeout: '2m',
+        },
+      });
+
+      const healthExitCode = typeof healthExecution?.exitCode === 'number' ? healthExecution.exitCode : null;
+      if (healthExitCode !== null && healthExitCode !== 0) {
+        ctx.logger.warn('Snapshot sandbox health check failed', {
+          exitCode: healthExitCode,
+          status: healthExecution?.status,
+        });
+      } else {
+        ctx.logger.info('Snapshot sandbox health check passed');
+      }
+    } else {
+      ctx.logger.warn('No apiClient available for snapshot sandboxExecute, falling back to external health polling');
+      const sandboxInfo = await ctx.sandbox.get(sandboxId);
+      const tempUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+      for (let i = 0; i < 60; i++) {
+        try {
+          const resp = await fetch(`${tempUrl}/global/health`, { signal: AbortSignal.timeout(2000) });
+          if (resp.ok) {
+            const sessionResp = await fetch(`${tempUrl}/session`, { signal: AbortSignal.timeout(2000) });
+            if (sessionResp.ok) {
+              ctx.logger.info('Snapshot sandbox health check passed (external polling)');
+              break;
+            }
+          }
+        } catch {
+          // Not ready yet
+        }
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    }
 
     // 5. Get sandbox info for URL
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
