@@ -2,35 +2,10 @@
  * Sandbox lifecycle management for OpenCode servers.
  * Each chat session gets its own sandbox with an OpenCode server.
  */
-import { sandboxExecute } from '@agentuity/server';
 import { JSON_RENDER_CORE_SKILL, JSON_RENDER_REACT_SKILL, UI_SPEC_INSTRUCTIONS } from './json-render-skills';
 
 const OPENCODE_PORT = 4096;
 const OPENCODE_RUNTIME = 'opencode:latest';
-
-type ExecutionLike = {
-	status?: string;
-	exitCode?: number;
-	stdoutStreamUrl?: string;
-	stderrStreamUrl?: string;
-};
-
-async function readExecutionStreams(execution: ExecutionLike): Promise<{ stdout?: string; stderr?: string }> {
-	const [stdout, stderr] = await Promise.all([
-		execution.stdoutStreamUrl
-			? fetch(execution.stdoutStreamUrl)
-					.then((resp) => (resp.ok ? resp.text() : undefined))
-					.catch(() => undefined)
-			: Promise.resolve(undefined),
-		execution.stderrStreamUrl
-			? fetch(execution.stderrStreamUrl)
-					.then((resp) => (resp.ok ? resp.text() : undefined))
-					.catch(() => undefined)
-			: Promise.resolve(undefined),
-	]);
-
-	return { stdout, stderr };
-}
 
 export interface SandboxConfig {
   repoUrl?: string;
@@ -51,8 +26,6 @@ export interface SandboxContext {
       create: (sandboxId: string, opts?: { name?: string; description?: string; tag?: string }) => Promise<{ snapshotId: string }>;
       delete: (snapshotId: string) => Promise<void>;
     };
-    /** Low-level API client for sandboxExecute with timeout support */
-    client?: any;
   };
   logger: {
     info: (...args: any[]) => void;
@@ -103,168 +76,44 @@ export async function createSandbox(
   const workDir = `/home/agentuity/${repoName}`;
 
   try {
-    // ── Batch 1: Pre-clone setup ──────────────────────────────────────────
-    // Write opencode.json to global config + setup gh auth in a single execution.
-    // OpenCode reads global config from ~/.config/opencode/opencode.json.
-    // gh auth may fail if no token — that's fine (|| true).
-    await sandbox.execute({
-      command: [
-        'bash', '-c',
-        [
-          `mkdir -p ~/.config/opencode/skills`,
-          `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
-          `gh auth setup-git 2>/dev/null || true`,
-        ].join('\n'),
-      ],
-    });
-
-    // ── Batch 2: Git clone (KEEP SEPARATE — needs sandboxExecute with timeout) ──
+    // ── SINGLE sandbox.execute() call for ALL setup ──────────────────────
+    // CRITICAL: Multiple back-to-back sandbox.execute() calls are unreliable —
+    // the Agentuity platform may silently drop subsequent commands when fired
+    // rapidly. We combine EVERYTHING into a single bash script:
+    //   1. Write opencode config + gh auth
+    //   2. Git clone (if repo specified)
+    //   3. Branch checkout, skills, ui-spec instructions
+    //   4. Start OpenCode server
+    //
+    // Clone errors are detected later via external polling (we check if the
+    // workdir has a .git directory). This is simpler and more reliable than
+    // trying to check clone status via multiple sandbox.execute() calls.
+    ctx.logger.info('Building combined setup script...');
+    const setupScriptParts: string[] = [];
     let cloneError: string | undefined;
-    let cloneSucceeded = false;
 
+    // 1. Write opencode.json + gh auth
+    setupScriptParts.push(`mkdir -p ~/.config/opencode/skills`);
+    setupScriptParts.push(
+      `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
+    );
+    setupScriptParts.push(`gh auth setup-git 2>/dev/null || true`);
+
+    // 2. Git clone (synchronous within the script — runs to completion before next step)
     if (config.repoUrl) {
-      try {
-        // Use sandboxExecute with timeout for reliable git clone.
-        // sandbox.execute() returns immediately with status:"queued" — it does NOT
-        // wait for the command to finish. sandboxExecute with a timeout parameter
-        // waits for completion.
-        const apiClient = ctx.sandbox.client;
-        if (apiClient) {
-          const cloneExecution = await sandboxExecute(apiClient, {
-            sandboxId,
-            options: {
-              command: ['bash', '-c', `cd /home/agentuity && git clone ${config.repoUrl} ${repoName} 2>&1`],
-              timeout: '2m',
-            },
-          });
-
-          // sandboxExecute often returns status:"queued" with null exitCode even when
-          // the command completed successfully and stdout/stderr are available.
-          // If we have a real numeric exitCode, trust it. Otherwise check for streams.
-          const cloneExitCode = typeof cloneExecution?.exitCode === 'number' ? cloneExecution.exitCode : null;
-          const hasStreams = Boolean(cloneExecution?.stdoutStreamUrl || cloneExecution?.stderrStreamUrl);
-
-          if (cloneExitCode !== null && cloneExitCode !== 0) {
-            // Definite failure
-            const { stdout, stderr } = await readExecutionStreams(cloneExecution ?? {});
-            const errorDetail = stderr || stdout || `exit code ${cloneExitCode}`;
-            cloneError = `Git clone failed for ${config.repoUrl}: ${errorDetail}`.slice(0, 500);
-            ctx.logger.warn('Git clone failed', {
-              repoUrl: config.repoUrl,
-              status: cloneExecution?.status,
-              exitCode: cloneExitCode,
-              stdout,
-              stderr,
-            });
-          } else if (cloneExecution?.status === 'completed' || (hasStreams && cloneExitCode === null)) {
-            // Success or likely success (has streams, no error exit code)
-            cloneSucceeded = true;
-          } else if (cloneExecution?.status === 'failed' || cloneExecution?.status === 'timeout') {
-            const { stdout, stderr } = await readExecutionStreams(cloneExecution ?? {});
-            cloneError = `Git clone ${cloneExecution.status} for ${config.repoUrl}: ${stderr || stdout || 'unknown error'}`.slice(0, 500);
-            ctx.logger.warn('Git clone failed', {
-              repoUrl: config.repoUrl,
-              status: cloneExecution.status,
-              stdout,
-              stderr,
-            });
-          } else {
-            // Ambiguous (queued/running but no exit code or streams) — check if dir exists
-            ctx.logger.info('Git clone returned ambiguous status, checking directory', {
-              repoUrl: config.repoUrl,
-              status: cloneExecution?.status,
-            });
-            // Give it a moment to settle, then check
-            await new Promise((r) => setTimeout(r, 3000));
-            const dirCheck = await sandbox.execute({
-              command: ['bash', '-c', `test -d ${workDir}/.git && echo "ok"`],
-            });
-            const checkOutput = dirCheck?.stdoutStreamUrl
-              ? await fetch(dirCheck.stdoutStreamUrl).then((r) => r.text()).catch(() => '')
-              : '';
-            if (checkOutput.includes('ok')) {
-              cloneSucceeded = true;
-            } else {
-              cloneError = `Git clone may have failed for ${config.repoUrl}: command returned status ${cloneExecution?.status}`.slice(0, 500);
-              ctx.logger.warn('Git clone directory check failed after ambiguous status', {
-                repoUrl: config.repoUrl,
-                status: cloneExecution?.status,
-              });
-            }
-          }
-        } else {
-          // Fallback: no apiClient available, use sandbox.execute() (may return queued)
-          ctx.logger.warn('No apiClient available for sandboxExecute, using sandbox.execute() fallback');
-          const cloneExecution: ExecutionLike | null = await sandbox.execute({
-            command: ['bash', '-c', `cd /home/agentuity && git clone ${config.repoUrl} ${repoName} 2>&1`],
-          });
-          // Since sandbox.execute() may return immediately, wait and check
-          await new Promise((r) => setTimeout(r, 15000));
-          const dirCheck = await sandbox.execute({
-            command: ['bash', '-c', `test -d ${workDir}/.git && echo "ok"`],
-          });
-          const checkOutput = dirCheck?.stdoutStreamUrl
-            ? await fetch(dirCheck.stdoutStreamUrl).then((r) => r.text()).catch(() => '')
-            : '';
-          if (checkOutput.includes('ok')) {
-            cloneSucceeded = true;
-          } else {
-            const { stdout, stderr } = await readExecutionStreams(cloneExecution ?? {});
-            cloneError = `Git clone failed for ${config.repoUrl}: ${stderr || stdout || 'unknown error'}`.slice(0, 500);
-            ctx.logger.warn('Git clone failed (fallback path)', {
-              repoUrl: config.repoUrl,
-              stdout,
-              stderr,
-            });
-          }
-        }
-      } catch (error) {
-        cloneError = `Git clone error for ${config.repoUrl}: ${String(error)}`.slice(0, 500);
-        ctx.logger.warn('Git clone execution error', { repoUrl: config.repoUrl, error: String(error) });
-      }
-
-      if (!cloneSucceeded) {
-        // Clone failed — create workdir with marker (in batch 3 script)
-        ctx.logger.warn('Git clone did not succeed, workdir will be created in post-clone setup', {
-          repoUrl: config.repoUrl,
-        });
-      } else {
-        ctx.logger.info('Git clone succeeded', { repoUrl: config.repoUrl, workDir });
-      }
+      setupScriptParts.push(`cd /home/agentuity && git clone ${config.repoUrl} ${repoName} 2>&1 || true`);
     }
 
-    // ── Batch 3: Post-clone setup ─────────────────────────────────────────
-    // Combine workdir setup, branch checkout, all skill installations, and
-    // ui-spec instructions into a single bash script execution.
-    ctx.logger.info('Running post-clone setup (skills, branch checkout, ui-spec)...');
-    const postCloneScriptParts: string[] = [];
+    // 3a. Ensure workdir exists (safety net — covers no-repo and clone-failure cases)
+    setupScriptParts.push(`mkdir -p ${workDir}`);
 
-    // 3a. Ensure workdir exists + handle clone failure markers
-    if (config.repoUrl && !cloneSucceeded) {
-      postCloneScriptParts.push(`mkdir -p ${workDir}`);
-      postCloneScriptParts.push(`touch ${workDir}/.opencode-clone-failed`);
-    } else if (!config.repoUrl) {
-      postCloneScriptParts.push(`mkdir -p ${workDir}`);
-    }
-    // Always ensure workdir exists as a safety net
-    postCloneScriptParts.push(`mkdir -p ${workDir}`);
-
-    // 3b. Branch checkout (only if repo was cloned and branch specified)
+    // 3b. Branch checkout (only if repo specified and branch given)
     if (config.repoUrl && config.branch) {
       const sanitizedBranch = config.branch.trim().replace(/[^a-zA-Z0-9._\-/]/g, '-');
       if (sanitizedBranch) {
-        if (cloneSucceeded) {
-          // Checkout branch — try creating new branch first, fall back to existing
-          postCloneScriptParts.push(
-            `cd ${workDir} && (git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}') 2>/dev/null || true`,
-          );
-        } else {
-          postCloneScriptParts.push(`# Skipping branch checkout — git repo is missing`);
-          ctx.logger.warn('Skipping branch checkout because git repo is missing', {
-            workDir,
-            branch: config.branch,
-          });
-        }
+        setupScriptParts.push(
+          `cd ${workDir} && (git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}') 2>/dev/null || true`,
+        );
       }
     }
 
@@ -279,7 +128,7 @@ export async function createSandbox(
         const skillContent = skill.content.startsWith('---')
           ? skill.content
           : `---\nname: "${skill.name}"\n---\n\n${skill.content}`;
-        postCloneScriptParts.push(
+        setupScriptParts.push(
           `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'SKILLEOF_${i}'\n${skillContent}\nSKILLEOF_${i}`,
         );
       }
@@ -288,7 +137,7 @@ export async function createSandbox(
     // 3d. Registry skills — install via bunx (may fail, use || true)
     if (config.registrySkills && config.registrySkills.length > 0) {
       for (const skill of config.registrySkills) {
-        postCloneScriptParts.push(
+        setupScriptParts.push(
           `cd /tmp && bunx skills add "${skill.repo}" --skill "${skill.skillName}" --agent opencode -y 2>/dev/null && cp -r /tmp/.agents/skills/* ~/.config/opencode/skills/ 2>/dev/null || true`,
         );
       }
@@ -298,96 +147,58 @@ export async function createSandbox(
     const jsonRenderSkills = getJsonRenderSkills();
     for (const [i, jrSkill] of jsonRenderSkills.entries()) {
       const skillDir = `~/.config/opencode/skills/${jrSkill.slug}`;
-      postCloneScriptParts.push(
+      setupScriptParts.push(
         `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'JREOF_${i}'\n${jrSkill.content}\nJREOF_${i}`,
       );
     }
 
     // 3f. ui-spec instructions
-    postCloneScriptParts.push(
+    setupScriptParts.push(
       `cat > ~/.config/opencode/ui-spec-instructions.md << 'UISPECEOF'\n${getUISpecInstructions()}\nUISPECEOF`,
     );
 
-    // Execute post-clone setup AND server start in parallel.
-    // Skills are read from disk at query time, not at boot, so the server
-    // can start while skills are still being written.
-    ctx.logger.info('Starting OpenCode server + installing skills in parallel...');
+    // 4. Start OpenCode server (nohup — runs in background, script continues)
+    setupScriptParts.push(
+      `cd ${workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
+    );
+
+    // Fire the single combined script
+    ctx.logger.info('Executing combined setup script (config + clone + skills + server start)...');
     sandbox.execute({
       command: [
         'bash', '-c',
-        postCloneScriptParts.join('\n'),
+        setupScriptParts.join('\n'),
       ],
     });
 
-    // ── Batch 4: Start server + health check ──
-    // Start the OpenCode server (fire-and-forget — nohup runs in background).
-    // sandbox.execute() returns immediately with status:"queued" which is fine here.
-    sandbox.execute({
-      command: [
-        'bash', '-c',
-        `cd ${workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
-      ],
-    });
-
-    // Wait for the server to be ready using sandboxExecute (which actually waits for completion).
-    // sandbox.execute() returns immediately with status:"queued" and does NOT wait.
-    const apiClient = ctx.sandbox.client;
-    if (apiClient) {
-      const healthExecution = await sandboxExecute(apiClient, {
-        sandboxId,
-        options: {
-          command: [
-            'bash', '-c',
-            [
-              `for i in $(seq 1 60); do`,
-              `  if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then`,
-              `    if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then`,
-              `      exit 0`,
-              `    fi`,
-              `  fi`,
-              `  sleep 1`,
-              `done`,
-              `exit 1`,
-            ].join('\n'),
-          ],
-          timeout: '2m',
-        },
-      });
-
-      const healthExitCode = typeof healthExecution?.exitCode === 'number' ? healthExecution.exitCode : null;
-      if (healthExitCode !== null && healthExitCode !== 0) {
-        ctx.logger.warn('OpenCode server health check failed', {
-          exitCode: healthExitCode,
-          status: healthExecution?.status,
-        });
-      } else {
-        ctx.logger.info('OpenCode server health check passed');
-      }
-    } else {
-      // Fallback: no apiClient, use polling from the calling server
-      ctx.logger.warn('No apiClient available for sandboxExecute, falling back to external health polling');
-      const sandboxInfo = await ctx.sandbox.get(sandboxId);
-      const tempUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
-      for (let i = 0; i < 60; i++) {
-        try {
-          const resp = await fetch(`${tempUrl}/global/health`, { signal: AbortSignal.timeout(2000) });
-          if (resp.ok) {
-            const sessionResp = await fetch(`${tempUrl}/session`, { signal: AbortSignal.timeout(2000) });
-            if (sessionResp.ok) {
-              ctx.logger.info('OpenCode server health check passed (external polling)');
-              break;
-            }
-          }
-        } catch {
-          // Not ready yet
-        }
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
-
-    // 7. Get sandbox info for URL
+    // Get the sandbox's public URL for external health polling.
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+
+    // Poll the sandbox's public URL until the OpenCode server is ready.
+    // This is the ONLY reliable approach — sandbox.execute() returns immediately.
+    ctx.logger.info(`Polling OpenCode server health at ${sandboxUrl}...`);
+    let serverReady = false;
+    for (let i = 0; i < 90; i++) {
+      try {
+        const resp = await fetch(`${sandboxUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
+        if (resp.ok) {
+          // Also verify the session API is responsive
+          const sessionResp = await fetch(`${sandboxUrl}/session`, { signal: AbortSignal.timeout(3000) });
+          if (sessionResp.ok) {
+            ctx.logger.info(`OpenCode server ready after ${i + 1}s`);
+            serverReady = true;
+            break;
+          }
+        }
+      } catch {
+        // Not ready yet — server still starting
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    if (!serverReady) {
+      ctx.logger.warn('OpenCode server did not become ready within 90s');
+    }
 
     ctx.logger.info(`OpenCode server ready at ${sandboxUrl}`);
     return { sandboxId, sandboxUrl, ...(cloneError ? { cloneError } : {}) };
@@ -454,84 +265,39 @@ export async function forkSandbox(
   ctx.logger.info(`Fork sandbox created: ${sandboxId}`);
 
   try {
-    // 3. Setup GitHub auth if token available
+    // 3. Setup GitHub auth + start server in ONE sandbox.execute() call.
+    // CRITICAL: Multiple back-to-back sandbox.execute() calls are unreliable —
+    // the platform may silently drop subsequent commands. Combine into single script.
+    const forkSetupParts: string[] = [];
     if (config.githubToken) {
-      try {
-        await sandbox.execute({
-          command: ['bash', '-c', 'gh auth setup-git'],
-        });
-      } catch (error) {
-        ctx.logger.warn('gh auth setup-git failed in fork sandbox', { error });
-      }
+      forkSetupParts.push('gh auth setup-git 2>/dev/null || true');
     }
-
-    // 4. Start OpenCode server (fire-and-forget — nohup runs in background)
+    forkSetupParts.push(
+      `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
+    );
     sandbox.execute({
-      command: [
-        'bash', '-c',
-        `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
-      ],
+      command: ['bash', '-c', forkSetupParts.join('\n')],
     });
 
-    // 5. Wait for health check — verify both /global/health AND /session API
-    // Use sandboxExecute which actually waits, unlike sandbox.execute() which returns immediately.
-    ctx.logger.info('Waiting for OpenCode server to be ready in fork sandbox...');
-    const forkApiClient = ctx.sandbox.client;
-    if (forkApiClient) {
-      const healthExecution = await sandboxExecute(forkApiClient, {
-        sandboxId,
-        options: {
-          command: [
-            'bash', '-c',
-            [
-              `for i in $(seq 1 60); do`,
-              `  if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then`,
-              `    if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then`,
-              `      exit 0`,
-              `    fi`,
-              `  fi`,
-              `  sleep 1`,
-              `done`,
-              `exit 1`,
-            ].join('\n'),
-          ],
-          timeout: '2m',
-        },
-      });
-
-      const healthExitCode = typeof healthExecution?.exitCode === 'number' ? healthExecution.exitCode : null;
-      if (healthExitCode !== null && healthExitCode !== 0) {
-        ctx.logger.warn('Fork sandbox health check failed', {
-          exitCode: healthExitCode,
-          status: healthExecution?.status,
-        });
-      } else {
-        ctx.logger.info('Fork sandbox health check passed');
-      }
-    } else {
-      ctx.logger.warn('No apiClient available for fork sandboxExecute, falling back to external health polling');
-      const sandboxInfo = await ctx.sandbox.get(sandboxId);
-      const tempUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
-      for (let i = 0; i < 60; i++) {
-        try {
-          const resp = await fetch(`${tempUrl}/global/health`, { signal: AbortSignal.timeout(2000) });
-          if (resp.ok) {
-            const sessionResp = await fetch(`${tempUrl}/session`, { signal: AbortSignal.timeout(2000) });
-            if (sessionResp.ok) {
-              ctx.logger.info('Fork sandbox health check passed (external polling)');
-              break;
-            }
-          }
-        } catch {
-          // Not ready yet
-        }
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
-
-    // 6. Get sandbox info for URL
+    // 5. Poll the sandbox's public URL until the OpenCode server is ready.
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+    ctx.logger.info(`Polling fork sandbox health at ${sandboxUrl}...`);
+    for (let i = 0; i < 90; i++) {
+      try {
+        const resp = await fetch(`${sandboxUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
+        if (resp.ok) {
+          const sessionResp = await fetch(`${sandboxUrl}/session`, { signal: AbortSignal.timeout(3000) });
+          if (sessionResp.ok) {
+            ctx.logger.info(`Fork sandbox health check passed after ${i + 1}s`);
+            break;
+          }
+        }
+      } catch {
+        // Not ready yet
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
 
     ctx.logger.info(`Fork sandbox ready at ${sandboxUrl}`);
     return { sandboxId, sandboxUrl, snapshotId };
@@ -596,84 +362,40 @@ export async function createSandboxFromSnapshot(
   ctx.logger.info(`Snapshot sandbox created: ${sandboxId}`);
 
   try {
-    // 2. Write updated opencode config + setup gh auth
-    await sandbox.execute({
+    // 2. Write updated opencode config + setup gh auth + start server in ONE call.
+    // CRITICAL: Multiple back-to-back sandbox.execute() calls are unreliable —
+    // the platform may silently drop subsequent commands. Combine into single script.
+    sandbox.execute({
       command: [
         'bash', '-c',
         [
           `mkdir -p ~/.config/opencode/skills`,
           `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
           `gh auth setup-git 2>/dev/null || true`,
+          `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
         ].join('\n'),
       ],
     });
 
-    // 3. Start OpenCode server (fire-and-forget — nohup runs in background)
-    sandbox.execute({
-      command: [
-        'bash', '-c',
-        `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
-      ],
-    });
-
-    // 4. Wait for health check using sandboxExecute (actually waits, unlike sandbox.execute()).
-    ctx.logger.info('Waiting for OpenCode server to be ready in snapshot sandbox...');
-    const snapApiClient = ctx.sandbox.client;
-    if (snapApiClient) {
-      const healthExecution = await sandboxExecute(snapApiClient, {
-        sandboxId,
-        options: {
-          command: [
-            'bash', '-c',
-            [
-              `for i in $(seq 1 60); do`,
-              `  if curl -sf http://localhost:${OPENCODE_PORT}/global/health > /dev/null 2>&1; then`,
-              `    if curl -sf http://localhost:${OPENCODE_PORT}/session > /dev/null 2>&1; then`,
-              `      exit 0`,
-              `    fi`,
-              `  fi`,
-              `  sleep 1`,
-              `done`,
-              `exit 1`,
-            ].join('\n'),
-          ],
-          timeout: '2m',
-        },
-      });
-
-      const healthExitCode = typeof healthExecution?.exitCode === 'number' ? healthExecution.exitCode : null;
-      if (healthExitCode !== null && healthExitCode !== 0) {
-        ctx.logger.warn('Snapshot sandbox health check failed', {
-          exitCode: healthExitCode,
-          status: healthExecution?.status,
-        });
-      } else {
-        ctx.logger.info('Snapshot sandbox health check passed');
-      }
-    } else {
-      ctx.logger.warn('No apiClient available for snapshot sandboxExecute, falling back to external health polling');
-      const sandboxInfo = await ctx.sandbox.get(sandboxId);
-      const tempUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
-      for (let i = 0; i < 60; i++) {
-        try {
-          const resp = await fetch(`${tempUrl}/global/health`, { signal: AbortSignal.timeout(2000) });
-          if (resp.ok) {
-            const sessionResp = await fetch(`${tempUrl}/session`, { signal: AbortSignal.timeout(2000) });
-            if (sessionResp.ok) {
-              ctx.logger.info('Snapshot sandbox health check passed (external polling)');
-              break;
-            }
-          }
-        } catch {
-          // Not ready yet
-        }
-        await new Promise((r) => setTimeout(r, 1000));
-      }
-    }
-
-    // 5. Get sandbox info for URL
+    // 4. Get sandbox URL and poll until the OpenCode server is ready.
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
+    ctx.logger.info(`Polling snapshot sandbox health at ${sandboxUrl}...`);
+    for (let i = 0; i < 90; i++) {
+      try {
+        const resp = await fetch(`${sandboxUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
+        if (resp.ok) {
+          const sessionResp = await fetch(`${sandboxUrl}/session`, { signal: AbortSignal.timeout(3000) });
+          if (sessionResp.ok) {
+            ctx.logger.info(`Snapshot sandbox health check passed after ${i + 1}s`);
+            break;
+          }
+        }
+      } catch {
+        // Not ready yet
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
 
     ctx.logger.info(`Snapshot sandbox ready at ${sandboxUrl}`);
     return { sandboxId, sandboxUrl };
