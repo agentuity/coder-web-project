@@ -24,7 +24,7 @@ import {
 import { decrypt } from '../lib/encryption';
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
-import { COMMAND_TO_AGENT } from '../lib/agent-commands';
+import { COMMAND_TO_AGENT, TEMPLATE_COMMANDS } from '../lib/agent-commands';
 
 const api = createRouter();
 
@@ -274,19 +274,31 @@ api.post('/', async (c) => {
 				// Send initial prompt async (fire-and-forget)
 				if (body.prompt && opencodeSessionId) {
 					try {
-						// Resolve agent command slug to OpenCode agent display name
 						const commandSlug = body.agent ? body.agent.replace(/^\//, '') : null;
-						const agentName = commandSlug
-							? (COMMAND_TO_AGENT[commandSlug] || commandSlug)
-							: undefined;
 
-						await client.session.promptAsync({
-							path: { id: opencodeSessionId },
-							body: {
-								parts: [{ type: 'text', text: body.prompt }],
-								...(agentName ? { agent: agentName } : {}),
-							},
-						});
+						// Template commands (cadence, memory-save, cloud, sandbox, etc.) MUST be
+						// sent as slash command text so OpenCode expands their templates.
+						// Non-template commands (agentuity-coder) can use the agent field.
+						if (commandSlug && TEMPLATE_COMMANDS.has(commandSlug)) {
+							// Send as slash command: "/<command> <prompt>" — OpenCode expands the template
+							await client.session.promptAsync({
+								path: { id: opencodeSessionId },
+								body: {
+									parts: [{ type: 'text', text: `/${commandSlug} ${body.prompt}` }],
+								},
+							});
+						} else {
+							const agentName = commandSlug
+								? (COMMAND_TO_AGENT[commandSlug] || commandSlug)
+								: undefined;
+							await client.session.promptAsync({
+								path: { id: opencodeSessionId },
+								body: {
+									parts: [{ type: 'text', text: body.prompt }],
+									...(agentName ? { agent: agentName } : {}),
+								},
+							});
+						}
 					} catch (err) {
 						logger.warn('Failed to send initial prompt', { error: err });
 					}

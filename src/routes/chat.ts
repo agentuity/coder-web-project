@@ -12,7 +12,7 @@ import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
 import { SpanStatusCode } from '@opentelemetry/api';
-import { COMMAND_TO_AGENT } from '../lib/agent-commands';
+import { COMMAND_TO_AGENT, TEMPLATE_COMMANDS } from '../lib/agent-commands';
 
 const SANDBOX_HOME = '/home/agentuity';
 const UPLOADS_DIR = `${SANDBOX_HOME}/uploads`;
@@ -185,26 +185,38 @@ api.post('/:id/messages', async (c) => {
 		span.setAttribute('hasAttachments', attachments.length > 0);
 		span.setAttribute('hasCommand', !!body.command);
 		try {
-			// Determine the agent name from the command (e.g., "/agentuity-coder" → "agentuity-coder")
-			const commandSlug = body.command ? body.command.replace(/^\//, '') : null;
-
-			// Resolve to OpenCode agent display name.
-			// If it's in our mapping, use that. Otherwise pass the slug directly
-			// (for built-in OpenCode commands like "review" that OpenCode resolves itself).
-			const agentName = commandSlug
-				? (COMMAND_TO_AGENT[commandSlug] || commandSlug)
-				: session.agent ? (COMMAND_TO_AGENT[session.agent] || session.agent) : undefined;
+			// Determine the command slug from explicit command or session's stored agent
+			const commandSlug = body.command
+				? body.command.replace(/^\//, '')
+				: session.agent || null;
 
 			const [providerID, modelID] = body.model ? body.model.split('/') : [];
 
-			await client.session.promptAsync({
-				path: { id: session.opencodeSessionId! },
-				body: {
-					parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
-					...(agentName ? { agent: agentName } : {}),
-					...(providerID && modelID ? { model: { providerID, modelID } } : {}),
-				},
-			});
+			// Template commands (cadence, memory-save, cloud, sandbox, etc.) MUST be
+			// sent as slash command text so OpenCode expands their templates.
+			// Non-template commands (agentuity-coder, review, etc.) use the agent field.
+			if (commandSlug && TEMPLATE_COMMANDS.has(commandSlug)) {
+				// Send as slash command: "/<command> <text>" — OpenCode expands the template
+				await client.session.promptAsync({
+					path: { id: session.opencodeSessionId! },
+					body: {
+						parts: [{ type: 'text' as const, text: `/${commandSlug} ${messageText}` }, ...fileParts],
+						...(providerID && modelID ? { model: { providerID, modelID } } : {}),
+					},
+				});
+			} else {
+				const agentName = commandSlug
+					? (COMMAND_TO_AGENT[commandSlug] || commandSlug)
+					: undefined;
+				await client.session.promptAsync({
+					path: { id: session.opencodeSessionId! },
+					body: {
+						parts: [{ type: 'text' as const, text: messageText }, ...fileParts],
+						...(agentName ? { agent: agentName } : {}),
+						...(providerID && modelID ? { model: { providerID, modelID } } : {}),
+					},
+				});
+			}
 
 			// Store the command slug on the session for reference
 			if (commandSlug && commandSlug !== session.agent) {
