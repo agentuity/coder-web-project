@@ -655,7 +655,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		const payload: QueuedMessage = {
 			text: fullMessage,
 			model: selectedModel,
-			command: selectedCommand || undefined,
+			command: selectedCommand,
 			attachments: nextAttachments,
 		};
 

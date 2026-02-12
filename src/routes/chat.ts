@@ -185,9 +185,10 @@ api.post('/:id/messages', async (c) => {
 		span.setAttribute('hasAttachments', attachments.length > 0);
 		span.setAttribute('hasCommand', !!body.command);
 		try {
-			// Determine the command slug from explicit command or session's stored agent
-			const commandSlug = body.command
-				? body.command.replace(/^\//, '')
+			// Determine the command slug from explicit command or session's stored agent.
+			// If command is explicitly '' (user chose "Chat"), don't fall back to stored agent.
+			const commandSlug = typeof body.command === 'string'
+				? (body.command ? body.command.replace(/^\//, '') : null)
 				: session.agent || null;
 
 			const [providerID, modelID] = body.model ? body.model.split('/') : [];
