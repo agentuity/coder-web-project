@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
 import { isValidElement } from 'react';
+import { Streamdown } from 'streamdown';
 import { Badge } from '../ui/badge';
 import {
 	Collapsible,
@@ -166,7 +167,11 @@ export const ToolOutput = ({
 			);
 		}
 		if (typeof output === 'string') {
-			return <pre className="overflow-x-auto p-3 font-mono text-xs">{output}</pre>;
+			return (
+				<div className="p-3 text-xs overflow-auto max-h-96">
+					<Streamdown>{output}</Streamdown>
+				</div>
+			);
 		}
 		return <div className="p-3">{output as ReactNode}</div>;
 	};

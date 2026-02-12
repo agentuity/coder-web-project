@@ -10,6 +10,8 @@ import { parseFileOutput } from '../../lib/file-output';
 import { CodeWithComments } from './CodeWithComments';
 import type { CodeComment } from '../../hooks/useCodeComments';
 import { Commit } from '../ai-elements/commit';
+import { Streamdown } from 'streamdown';
+import { createCodePlugin } from '@streamdown/code';
 import {
 	Tool,
 	ToolContent,
@@ -19,6 +21,10 @@ import {
 } from '../ai-elements/tool';
 import type { ToolState, ToolStatus } from '../ai-elements/tool';
 import { SourcesView, type SourceItem } from './SourcesView';
+
+const toolCallCodePlugin = createCodePlugin({
+	themes: ['github-dark', 'github-light'],
+});
 
 interface ToolCallCardProps {
 	part: ToolPart;
@@ -207,11 +213,15 @@ function AgentInvocationView({ input }: { input: { subagent_type: string; descri
 				<Badge variant="secondary" className="text-[10px]">{agentLabel}</Badge>
 				<span className="truncate">{input.description ?? 'Agent task'}</span>
 			</div>
-			{input.prompt && (
-				<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--foreground)] whitespace-pre-wrap">
-					{input.prompt}
+		{input.prompt && (
+			<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] p-4 text-xs text-[var(--foreground)] overflow-hidden">
+				<div className="max-w-none prose-sm">
+					<Streamdown plugins={{ code: toolCallCodePlugin }}>
+						{input.prompt}
+					</Streamdown>
 				</div>
-			)}
+			</div>
+		)}
 		</div>
 	);
 }
