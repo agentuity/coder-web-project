@@ -304,6 +304,57 @@ export const catalog = defineCatalog(schema, {
       description: 'Controlled vertical spacing',
     },
 
+    /* ── Phase 3: Rich integrations ─────────────────────────────── */
+
+    Map: {
+      props: z.object({
+        center: z.tuple([z.number(), z.number()]).optional(),
+        zoom: z.number().optional(),
+        markers: z.array(z.object({
+          longitude: z.number(),
+          latitude: z.number(),
+          label: z.string().optional(),
+          popup: z.string().optional(),
+        })).optional(),
+        route: z.array(z.tuple([z.number(), z.number()])).optional(),
+        height: z.string().optional(),
+        className: z.string().optional(),
+      }),
+      description: 'Interactive map with markers, popups, and routes (MapLibre, no API key needed)',
+    },
+    AutoForm: {
+      props: z.object({
+        schema: z.record(z.string(), z.object({
+          type: z.enum(['string', 'number', 'boolean', 'select']),
+          label: z.string().optional(),
+          description: z.string().optional(),
+          required: z.boolean().optional(),
+          placeholder: z.string().optional(),
+          options: z.array(z.object({
+            value: z.string(),
+            label: z.string(),
+          })).optional(),
+          min: z.number().optional(),
+          max: z.number().optional(),
+          minLength: z.number().optional(),
+          maxLength: z.number().optional(),
+          default: z.union([z.string(), z.number(), z.boolean()]).optional(),
+        })),
+        title: z.string().optional(),
+        submitLabel: z.string().optional(),
+        className: z.string().optional(),
+      }),
+      description: 'Auto-generated form from a JSON field schema — describe fields and types, form is built automatically',
+    },
+    ApiReference: {
+      props: z.object({
+        specUrl: z.string().optional(),
+        spec: z.record(z.string(), z.unknown()).optional(),
+        className: z.string().optional(),
+      }),
+      description: 'Interactive OpenAPI/Swagger API reference viewer with try-it-out testing',
+    },
+
     /* ── Primitive components ─────────────────────────────────────── */
 
     Box: {

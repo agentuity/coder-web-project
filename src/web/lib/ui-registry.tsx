@@ -1,7 +1,10 @@
-import type { ChangeEvent, FormEvent } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useRef, useState } from 'react';
 import { defineRegistry, useStateStore } from '@json-render/react';
 import { catalog } from './ui-catalog';
 import { cn } from './utils';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import { ApiReferenceReact } from '@scalar/api-reference-react';
 
 /* ── shadcn component imports ─────────────────────────────────── */
 import { Card as ShadcnCard, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
@@ -716,6 +719,214 @@ export const { registry } = defineRegistry(catalog, {
         xl: 'h-16',
       };
       return <div className={cn(spacerSizeMap[props.size ?? 'md'], props.className)} aria-hidden="true" />;
+    },
+
+    /* ── Phase 3: Rich integrations ──────────────────────────────── */
+
+    /* ── Map (MapLibre GL) ───────────────────────────────────────── */
+    Map: ({ props }) => {
+      const containerRef = useRef<HTMLDivElement>(null);
+      const mapRef = useRef<maplibregl.Map | null>(null);
+
+      useEffect(() => {
+        if (!containerRef.current || mapRef.current) return;
+
+        const center = props.center ?? [0, 20];
+        const zoom = props.zoom ?? 2;
+
+        const map = new maplibregl.Map({
+          container: containerRef.current,
+          style: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+          center: center as [number, number],
+          zoom,
+        });
+
+        map.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+        mapRef.current = map;
+
+        map.on('load', () => {
+          // Add markers
+          if (props.markers) {
+            for (const marker of props.markers) {
+              const el = document.createElement('div');
+              el.style.cssText = 'width:24px;height:24px;background:#3b82f6;border:2px solid #fff;border-radius:50%;cursor:pointer;box-shadow:0 2px 6px rgba(0,0,0,0.3);';
+
+              const m = new maplibregl.Marker({ element: el })
+                .setLngLat([marker.longitude, marker.latitude])
+                .addTo(map);
+
+              if (marker.popup) {
+                m.setPopup(new maplibregl.Popup({ offset: 16 }).setText(marker.popup));
+              }
+
+              if (marker.label) {
+                new maplibregl.Popup({
+                  offset: 16,
+                  closeButton: false,
+                  closeOnClick: false,
+                  className: 'maplibre-label-popup',
+                })
+                  .setLngLat([marker.longitude, marker.latitude])
+                  .setText(marker.label)
+                  .addTo(map);
+              }
+            }
+          }
+
+          // Draw route line
+          if (props.route && props.route.length >= 2) {
+            map.addSource('route', {
+              type: 'geojson',
+              data: {
+                type: 'Feature',
+                properties: {},
+                geometry: {
+                  type: 'LineString',
+                  coordinates: props.route as [number, number][],
+                },
+              },
+            });
+            map.addLayer({
+              id: 'route',
+              type: 'line',
+              source: 'route',
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: { 'line-color': '#3b82f6', 'line-width': 4 },
+            });
+          }
+        });
+
+        return () => {
+          map.remove();
+          mapRef.current = null;
+        };
+      }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+      return (
+        <div
+          ref={containerRef}
+          className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}
+          style={{ height: props.height ?? '300px', width: '100%' }}
+        />
+      );
+    },
+
+    /* ── AutoForm (dynamic form generator) ───────────────────────── */
+    AutoForm: ({ props, emit }) => {
+      const [values, setValues] = useState<Record<string, string | number | boolean>>(() => {
+        const defaults: Record<string, string | number | boolean> = {};
+        for (const [name, field] of Object.entries(props.schema)) {
+          if (field.default !== undefined) {
+            defaults[name] = field.default;
+          }
+        }
+        return defaults;
+      });
+
+      const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        emit?.('submit');
+      };
+
+      const updateField = (name: string, value: string | number | boolean) => {
+        setValues((prev) => ({ ...prev, [name]: value }));
+      };
+
+      return (
+        <form
+          className={cn('space-y-4 rounded-lg border border-[var(--border)] bg-[var(--background)] p-4', props.className)}
+          onSubmit={handleSubmit}
+        >
+          {props.title && <div className="text-sm font-semibold text-[var(--foreground)]">{props.title}</div>}
+          {Object.entries(props.schema).map(([name, field]) => {
+            const fieldId = `autoform-${name}`;
+            if (field.type === 'boolean') {
+              return (
+                <label key={name} className="flex items-center gap-2 text-sm text-[var(--foreground)]">
+                  <input
+                    id={fieldId}
+                    type="checkbox"
+                    checked={Boolean(values[name])}
+                    onChange={(e) => updateField(name, e.target.checked)}
+                    className="h-4 w-4 rounded border-[var(--border)]"
+                  />
+                  <span>{field.label ?? name}</span>
+                  {field.description && <span className="text-xs text-[var(--muted-foreground)]">({field.description})</span>}
+                </label>
+              );
+            }
+            if (field.type === 'select' && field.options) {
+              return (
+                <div key={name} className="flex flex-col gap-1">
+                  <label htmlFor={fieldId} className="text-xs text-[var(--muted-foreground)]">{field.label ?? name}</label>
+                  {field.description && <span className="text-xs text-[var(--muted-foreground)]">{field.description}</span>}
+                  <ShadcnSelect
+                    value={String(values[name] ?? '')}
+                    onValueChange={(v) => updateField(name, v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={field.placeholder ?? 'Select...'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {field.options.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </ShadcnSelect>
+                </div>
+              );
+            }
+            // string or number
+            return (
+              <div key={name} className="flex flex-col gap-1">
+                <label htmlFor={fieldId} className="text-xs text-[var(--muted-foreground)]">{field.label ?? name}</label>
+                {field.description && <span className="text-xs text-[var(--muted-foreground)]">{field.description}</span>}
+                <ShadcnInput
+                  id={fieldId}
+                  type={field.type === 'number' ? 'number' : 'text'}
+                  value={String(values[name] ?? '')}
+                  placeholder={field.placeholder}
+                  min={field.min}
+                  max={field.max}
+                  minLength={field.minLength}
+                  maxLength={field.maxLength}
+                  required={field.required}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    updateField(name, field.type === 'number' ? (raw === '' ? '' as unknown as number : Number(raw)) : raw);
+                  }}
+                />
+              </div>
+            );
+          })}
+          <ShadcnButton type="submit" variant="default" size="sm">
+            {props.submitLabel ?? 'Submit'}
+          </ShadcnButton>
+        </form>
+      );
+    },
+
+    /* ── ApiReference (Scalar) ───────────────────────────────────── */
+    ApiReference: ({ props }) => {
+      const configuration: Record<string, unknown> = {
+        darkMode: true,
+      };
+      if (props.specUrl) {
+        configuration.url = props.specUrl;
+      }
+      if (props.spec) {
+        configuration.content = props.spec;
+      }
+
+      return (
+        <div
+          className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}
+          style={{ height: '600px' }}
+        >
+          <ApiReferenceReact configuration={configuration as never} />
+        </div>
+      );
     },
 
     /* ── Primitive components ────────────────────────────────────── */

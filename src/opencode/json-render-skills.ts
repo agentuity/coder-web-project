@@ -355,7 +355,7 @@ Key rules:
 - Every element referenced in a \`children\` array MUST exist in the \`elements\` map
 - Use descriptive, unique keys (e.g. "header-card", "sales-chart", "submit-btn")
 - Layout components (Box, Flex, Row, Column, Stack, Card, Form, Section, Container, Grid, Hero, CTA) use \`children\` to nest other elements
-- Leaf components (Text, Heading, Paragraph, List, Metric, Chart, Button, Feature, Testimonial, PricingCard, etc.) typically have no children
+- Leaf components (Text, Heading, Paragraph, List, Metric, Chart, Button, Feature, Testimonial, PricingCard, Map, AutoForm, ApiReference, etc.) typically have no children
 
 ## Available Components
 
@@ -419,6 +419,14 @@ Key rules:
 | PricingCard | tier, price, description?, features [], ctaLabel?, highlighted? | Pricing tier card with feature list and CTA |
 | CTA | headline, description? | Call-to-action banner with headline, description, and button slot |
 | Accordion | items [{title, content}] | Collapsible content sections for FAQ or details |
+
+### Rich Integration Components
+
+| Component | Key Props | Description |
+|-----------|-----------|-------------|
+| Map | center? [lng,lat], zoom?, markers? [{longitude, latitude, label?, popup?}], route? [[lng,lat]...], height? | Interactive map with markers, popups, and routes (MapLibre, no API key needed) |
+| AutoForm | schema {fieldName: {type, label?, description?, required?, placeholder?, options?, min?, max?, default?}}, title?, submitLabel? | Auto-generated form from a JSON field schema — describe fields and types, form is built automatically |
+| ApiReference | specUrl?, spec? (inline JSON), className? | Interactive OpenAPI/Swagger API reference viewer with try-it-out testing |
 
 **Note:** All components accept an optional \`className\` prop for custom Tailwind CSS overrides.
 
@@ -625,6 +633,9 @@ Use ui_spec whenever the response benefits from visual formatting over plain tex
 - **Content / documentation**: Heading, Paragraph, List, Code — "explain this", "show the steps"
 - **Landing / marketing pages**: Navbar, Hero, Feature, PricingCard, Footer — "create a landing page", "product page"
 - **General composition**: Box, Flex, Grid — custom layouts that don't fit standard patterns
+- **Maps / geographic data**: Map — "show me on a map", "plot these locations", "directions from A to B"
+- **Dynamic forms from descriptions**: AutoForm — "create a form with name, email, and role fields" (faster than composing Input/Select/Form manually)
+- **API documentation**: ApiReference — "show the API docs", "display this OpenAPI spec", "interactive API reference"
 - Prefer ui_spec over plain markdown tables when the data would benefit from visual formatting
 
 ## Tips
@@ -637,6 +648,9 @@ Use ui_spec whenever the response benefits from visual formatting over plain tex
 - For text content: use Heading + Paragraph + List for readable document-style output
 - Use \`Box\` when you just need a styled wrapper with no layout opinion
 - Use \`Flex\` when Row/Column constraints aren't enough (e.g. \`justify: "between"\`, \`wrap: true\`)
+- For maps: use \`Map\` with \`center\` and \`markers\` for location data. Routes draw lines between coordinate pairs. No API key needed.
+- For forms described as field lists: prefer \`AutoForm\` over composing Form+Input+Select manually — just describe the schema as JSON. Field types: string, number, boolean, select.
+- For API docs: use \`ApiReference\` with either \`specUrl\` (URL to OpenAPI JSON/YAML) or \`spec\` (inline OpenAPI JSON object).
 - Keep element keys descriptive and unique within the spec
 
 Refer to the json-render-core and json-render-react skills for the full API reference including dynamic prop expressions, state management, actions, and event handling.`;
