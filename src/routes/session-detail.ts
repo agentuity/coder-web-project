@@ -16,6 +16,8 @@ import {
 	destroySandbox,
 } from '../opencode';
 import type { SandboxContext } from '../opencode';
+import { destroyWebSandbox } from '../opencode/web-sandbox';
+import { sessionWebSandboxes } from './chat';
 import {
 	isSandboxHealthy,
 	getCachedHealthTimestamp,
@@ -354,6 +356,17 @@ api.delete('/:id', async (c) => {
 		};
 		await destroySandbox(sandboxCtx, session.sandboxId);
 		removeOpencodeClient(session.sandboxId);
+	}
+
+	// Destroy associated web sandbox (if any)
+	const webSandbox = sessionWebSandboxes.get(session.id);
+	if (webSandbox) {
+		const sandboxCtx: SandboxContext = {
+			sandbox: c.var.sandbox,
+			logger: c.var.logger,
+		};
+		await destroyWebSandbox(sandboxCtx, webSandbox.sandboxId);
+		sessionWebSandboxes.delete(session.id);
 	}
 
 	// Delete from DB

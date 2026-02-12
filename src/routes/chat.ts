@@ -12,6 +12,7 @@ import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
 import { SpanStatusCode } from '@opentelemetry/api';
+import { createWebSandbox, writeFilesToWebSandbox } from '../opencode/web-sandbox';
 
 /** Map slash-command slugs to the OpenCode agent display names used by promptAsync. */
 const COMMAND_TO_AGENT: Record<string, string> = {
@@ -49,6 +50,9 @@ const ALLOWED_EXTENSIONS = new Set([
 	'csv',
 	'log',
 ]);
+
+/** Track web sandboxes per chat session for reuse and cleanup */
+export const sessionWebSandboxes = new Map<string, { sandboxId: string; url: string }>();
 
 /** Ensure a sandbox file path is absolute (rooted at /home/agentuity). */
 function toAbsoluteSandboxPath(p: string): string {
@@ -353,10 +357,17 @@ api.get(
 								continue;
 							}
 
-							await safeWrite({ data: JSON.stringify(event) });
-						} catch {
-							// Skip malformed events
+						await safeWrite({ data: JSON.stringify(event) });
+
+						// --- Dynamic UI code block detection ---
+						try {
+							await handleDynamicUICodeBlocks(event, session, safeWrite, c);
+						} catch (err) {
+							logger?.warn?.('Dynamic UI handler error', { error: String(err) });
 						}
+					} catch {
+						// Skip malformed events
+					}
 					}
 				}
 				if (!closed) {
@@ -376,6 +387,8 @@ api.get(
 		} finally {
 			closed = true;
 			if (keepaliveTimer) clearInterval(keepaliveTimer);
+			// Clean up processed block tracking — SSE disconnection means client reconnects fresh
+			processedBlocks.clear();
 			stream.close();
 		}
 	}),
@@ -804,5 +817,245 @@ api.put('/:id/files/content', async (c) => {
 		return c.json({ error: 'Failed to write file', details: String(error) }, 500);
 	}
 });
+
+// ---------------------------------------------------------------------------
+// Dynamic UI code block interception helpers
+// ---------------------------------------------------------------------------
+
+/** Track processed code blocks per message to avoid duplicate injection */
+const processedBlocks = new Map<string, Set<string>>();
+
+/**
+ * Detect and process Dynamic UI code fences in assistant text.
+ * Looks for ```ui_spec and ```web_preview fenced blocks.
+ */
+async function handleDynamicUICodeBlocks(
+	event: any,
+	session: { id: string; sandboxId: string | null; opencodeSessionId: string | null },
+	safeWrite: (msg: { data: string; event?: string }) => Promise<void>,
+	c: any,
+) {
+	if (event?.type !== 'message.part.updated') return;
+	const part = event?.properties?.part;
+	if (!part || part.type !== 'text' || !part.text) return;
+
+	const text: string = part.text;
+	const messageId = part.id || 'unknown';
+
+	// Get or create the set of already-processed block hashes for this message
+	if (!processedBlocks.has(messageId)) {
+		processedBlocks.set(messageId, new Set());
+	}
+	const seen = processedBlocks.get(messageId)!;
+
+	// Find all complete ```ui_spec ... ``` blocks
+	const uiSpecRegex = /```ui_spec\s*\n([\s\S]*?)```/g;
+	for (let match = uiSpecRegex.exec(text); match !== null; match = uiSpecRegex.exec(text)) {
+		const jsonStr = match[1]!.trim();
+		const blockHash = `ui_spec:${jsonStr.slice(0, 100)}`;
+		if (seen.has(blockHash)) continue;
+		seen.add(blockHash);
+
+		try {
+			const spec = JSON.parse(jsonStr);
+			if (spec && typeof spec === 'object') {
+				await safeWrite({
+					data: JSON.stringify({
+						type: 'message.part.updated',
+						properties: {
+							sessionID: session.opencodeSessionId,
+							part: {
+								id: `uispec_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+								type: 'ui_spec',
+								spec,
+							},
+						},
+					}),
+				});
+			}
+		} catch {
+			// Invalid JSON — skip
+		}
+	}
+
+	// Find all complete ```web_preview ... ``` blocks
+	const webPreviewRegex = /```web_preview\s*\n([\s\S]*?)```/g;
+	for (let match = webPreviewRegex.exec(text); match !== null; match = webPreviewRegex.exec(text)) {
+		const jsonStr = match[1]!.trim();
+		const blockHash = `web_preview:${jsonStr.slice(0, 100)}`;
+		if (seen.has(blockHash)) continue;
+		seen.add(blockHash);
+
+		try {
+			const request = JSON.parse(jsonStr);
+			if (request?.path) {
+				handleWebPreviewCreation(session, request, safeWrite, c).catch((err) => {
+					c.var?.logger?.error?.('Web preview creation failed', { error: String(err) });
+					safeWrite({
+						data: JSON.stringify({
+							type: 'message.part.updated',
+							properties: {
+								sessionID: session.opencodeSessionId,
+								part: {
+									id: `wperr_${Date.now()}`,
+									type: 'text',
+									text: `\n\n> ⚠️ Web preview failed: ${String(err).slice(0, 200)}`,
+								},
+							},
+						}),
+					}).catch(() => {});
+				});
+			}
+		} catch {
+			// Invalid JSON — skip
+		}
+	}
+}
+
+async function handleWebPreviewCreation(
+	session: { id: string; sandboxId: string | null; opencodeSessionId: string | null },
+	request: { path: string; title?: string },
+	safeWrite: (msg: { data: string }) => Promise<void>,
+	c: any,
+) {
+	const logger = c.var?.logger;
+	const apiClient = (c.var.sandbox as any).client;
+
+	if (!session.sandboxId || !apiClient) {
+		throw new Error('No sandbox available for this session');
+	}
+
+	// 1. Resolve relative paths against the OpenCode working directory
+	let resolvedPath = request.path;
+	if (!resolvedPath.startsWith('/')) {
+		// Detect working directory from OpenCode sandbox
+		const cwdExec = await sandboxExecute(apiClient, {
+			sandboxId: session.sandboxId,
+			options: {
+				command: ['bash', '-c', 'ls -d /home/agentuity/*/  2>/dev/null | head -1'],
+				timeout: '10s',
+			},
+		});
+		let workDir = '/home/agentuity/project';
+		if (cwdExec.status === 'completed' && cwdExec.stdoutStreamUrl) {
+			const detected = (await fetch(cwdExec.stdoutStreamUrl).then((r) => r.text())).trim().replace(/\/$/, '');
+			if (detected) workDir = detected;
+		}
+		resolvedPath = `${workDir}/${resolvedPath}`.replace(/\/+/g, '/');
+	}
+
+	// 2. List files from OpenCode sandbox
+	logger?.info?.('Reading files from OpenCode sandbox for web preview', { path: resolvedPath });
+
+	const listExec = await sandboxExecute(apiClient, {
+		sandboxId: session.sandboxId,
+		options: {
+			command: [
+				'bash',
+				'-c',
+				`find "${resolvedPath}" -maxdepth 5 -type f -not -path "*/node_modules/*" -not -path "*/.git/*" | head -50`,
+			],
+			timeout: '15s',
+		},
+	});
+
+	// sandboxExecute may return status:"queued" even when the command completed and
+	// stdout/stderr stream URLs are available. Trust the stream if it exists.
+	if (!listExec.stdoutStreamUrl) {
+		throw new Error(`Failed to list files at ${resolvedPath} (status: ${listExec.status})`);
+	}
+
+	const listOut = await fetch(listExec.stdoutStreamUrl).then((r) => r.text());
+	const filePaths = listOut
+		.split('\n')
+		.map((l) => l.trim())
+		.filter(Boolean);
+
+	if (filePaths.length === 0) {
+		throw new Error(`No files found at ${resolvedPath}`);
+	}
+
+	// 3. Read all files with delimiters in a single command
+	const readCmd = filePaths.map((fp) => `echo "===OCFILE:${fp}===" && cat "${fp}"`).join(' && ');
+
+	const readExec = await sandboxExecute(apiClient, {
+		sandboxId: session.sandboxId,
+		options: {
+			command: ['bash', '-c', readCmd],
+			timeout: '30s',
+		},
+	});
+
+	if (!readExec.stdoutStreamUrl) {
+		throw new Error(`Failed to read files from sandbox (status: ${readExec.status})`);
+	}
+
+	const readOut = await fetch(readExec.stdoutStreamUrl).then((r) => r.text());
+
+	// Parse delimited output into file objects
+	const files: Array<{ path: string; content: string }> = [];
+	const blocks = readOut.split('===OCFILE:');
+	for (const block of blocks) {
+		if (!block.trim()) continue;
+		const endIdx = block.indexOf('===');
+		if (endIdx === -1) continue;
+		const fullPath = block.slice(0, endIdx).trim();
+		const content = block.slice(endIdx + 3).replace(/^\n/, '');
+		const relativePath = fullPath.startsWith(resolvedPath)
+			? fullPath.slice(resolvedPath.length).replace(/^\//, '')
+			: fullPath.split('/').pop() || '';
+		if (relativePath) {
+			files.push({ path: relativePath, content });
+		}
+	}
+
+	logger?.info?.(`Read ${files.length} files for web preview`);
+
+	// 4. Create or reuse web sandbox
+	const existing = sessionWebSandboxes.get(session.id);
+	let sandboxId: string;
+	let sandboxUrl: string;
+
+	const sandboxCtx = { sandbox: c.var.sandbox, logger: logger || console };
+
+	if (existing) {
+		sandboxId = existing.sandboxId;
+		sandboxUrl = existing.url;
+		logger?.info?.('Reusing existing web sandbox', { sandboxId });
+	} else {
+		logger?.info?.('Creating new web sandbox for preview');
+		const result = await createWebSandbox(sandboxCtx as any);
+		sandboxId = result.sandboxId;
+		sandboxUrl = result.sandboxUrl;
+		sessionWebSandboxes.set(session.id, { sandboxId, url: sandboxUrl });
+	}
+
+	// 5. Write files to web sandbox (map into src/ directory)
+	const sandboxFiles = files.map((f) => {
+		const targetPath =
+			f.path.startsWith('src/') || f.path.startsWith('public/') ? f.path : `src/${f.path}`;
+		return { path: targetPath, content: f.content };
+	});
+
+	await writeFilesToWebSandbox(sandboxCtx as any, sandboxId, sandboxFiles);
+
+	// 6. Inject web_preview part
+	await safeWrite({
+		data: JSON.stringify({
+			type: 'message.part.updated',
+			properties: {
+				sessionID: session.opencodeSessionId,
+				part: {
+					id: `wp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+					type: 'web_preview',
+					url: sandboxUrl,
+					title: request.title || 'Web Preview',
+				},
+			},
+		}),
+	});
+
+	logger?.info?.('Web preview injected', { sandboxUrl });
+}
 
 export default api;

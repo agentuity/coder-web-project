@@ -300,7 +300,81 @@ export async function createSandbox(
       }
     }
 
-    // 4. Start OpenCode server
+    // 4. Write Dynamic UI instructions to the sandbox
+    //    These instructions tell the agent to output special code fences
+    //    that our SSE interceptor detects and processes into rich UI parts.
+    ctx.logger.info('Writing Dynamic UI instructions to sandbox...');
+    await sandbox.execute({
+      command: [
+        'bash', '-c',
+        `cat > ~/.config/opencode/dynamic-ui.md << 'INSTRUCTIONS_EOF'
+# Dynamic UI Capabilities
+
+You can render rich interactive content directly in chat by outputting special fenced code blocks. The system detects these blocks and renders them as interactive components.
+
+## Inline UI Components (preferred for data display)
+
+Output a fenced code block with language tag ui_spec containing a JSON component spec:
+
+\`\`\`ui_spec
+{
+  "type": "Card",
+  "props": { "title": "Dashboard" },
+  "children": [
+    { "type": "Metric", "props": { "label": "Revenue", "value": "$12,345", "change": "+12%" } }
+  ]
+}
+\`\`\`
+
+### Available Components
+Card (title, description?, padding?), Text (content, variant?), Button (label, variant?, action?),
+Table (columns [{key,label}], rows [{key:value}]), Metric (label, value, change?, trend?),
+Chart (type: bar/line/pie, data [{label,value}], xKey?, yKey?), Form (title?), Input (label, placeholder?, type?),
+Select (label, options [{value,label}]), Image (src, alt?, width?, height?),
+Badge (text, variant?), Alert (message, variant?, title?), Row (gap?, align?),
+Column (gap?, align?), Stack (gap?, direction?), Divider, Link (href, label, external?), Code (language?, content)
+
+### Spec Format
+Each node has "type" (component name), "props" (component props), and optional "children" array.
+Layout components (Row, Column, Stack, Card, Form) accept children.
+Card is the best top-level container.
+
+### When to use
+- Displaying data as tables, charts, or metrics
+- Simple dashboards with cards and stats
+- Forms for collecting user input
+- Status displays with badges and alerts
+- Any UI that does not need a full web server
+
+## Web Preview (full web apps)
+
+Output a fenced code block with language tag web_preview containing a JSON object:
+
+\`\`\`web_preview
+{"path": "web-preview/", "title": "My App"}
+\`\`\`
+
+The path field is the directory (relative to working directory) containing your web files.
+
+### Workflow
+1. Create a directory for web files (e.g., web-preview/)
+2. Write files: src/index.html (HTML shell with div#root and script src=/app.js) and src/app.tsx (React entry)
+3. Output the web_preview code fence with the directory path
+
+### When to use
+- Full web applications with routing
+- Pages needing custom npm dependencies beyond React/Hono
+- Complex interactive features (drag-and-drop, animations, canvas)
+- Landing pages, portfolios, or multi-page sites
+
+## Decision Guide
+Default to ui_spec when possible — it renders instantly with no sandbox overhead.
+Use web_preview only when you need a full web server, custom deps, or complex interactivity.
+INSTRUCTIONS_EOF`,
+      ],
+    });
+
+    // 5. Start OpenCode server
 
     await sandbox.execute({
       command: [
@@ -309,7 +383,7 @@ export async function createSandbox(
       ],
     });
 
-    // 5. Wait for health check
+    // 6. Wait for health check
     ctx.logger.info('Waiting for OpenCode server to be ready...');
     await sandbox.execute({
       command: [
@@ -318,7 +392,7 @@ export async function createSandbox(
       ],
     });
 
-    // 6. Get sandbox info for URL
+    // 7. Get sandbox info for URL
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
 
