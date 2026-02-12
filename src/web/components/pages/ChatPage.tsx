@@ -1220,46 +1220,86 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const conversationView = (
 		<Conversation className="flex-1 min-w-0">
 		<ConversationContent>
-			{session.status !== 'active' && (
-				<div
-					className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
-						session.status === 'error'
-							? 'border-red-500/30 bg-red-500/10 text-red-400'
-							: session.status === 'terminated'
-								? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400'
-								: 'border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)]'
-					}`}
-				>
-					<div className="flex items-center justify-between gap-3">
-						<span>
-							{session.status === 'creating' && (statusElapsedMs > 20000
-								? '🔄 Almost ready...'
-								: statusElapsedMs > 10000
-									? '🔄 Setting up AI agent...'
-									: '🔄 Creating sandbox environment...')}
-							{session.status === 'error' && '❌ Failed to create sandbox.'}
-							{session.status === 'terminated' && "This session's sandbox has been terminated. Chat history is read-only."}
-						</span>
-						{session.status === 'error' && (
-							<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
-								{isRetrying ? (
-									<>
-										<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-										Retrying...
-									</>
-								) : (
-									'Retry'
-								)}
-							</Button>
-						)}
-					</div>
-					{session.status === 'terminated' && (archiveError || isLoadingArchive) && (
-						<p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-							{isLoadingArchive ? 'Loading chat history...' : archiveError}
-						</p>
+		{session.status !== 'active' && session.status === 'creating' && (
+			<div className="flex flex-col items-center justify-center py-16 gap-6">
+				<div className="relative">
+					<div className="h-10 w-10 rounded-full border-2 border-[var(--border)]" />
+					<div className="absolute inset-0 h-10 w-10 rounded-full border-2 border-t-[var(--primary)] animate-spin" />
+				</div>
+				<div className="text-center space-y-2">
+					<p className="text-sm font-medium text-[var(--foreground)]">
+						{statusElapsedMs > 25000
+							? 'Almost ready...'
+							: statusElapsedMs > 15000
+								? 'Starting AI agent'
+								: statusElapsedMs > 8000
+									? 'Installing tools & skills'
+									: statusElapsedMs > 3000
+										? 'Setting up environment'
+										: 'Creating sandbox'}
+					</p>
+					<p className="text-xs text-[var(--muted-foreground)]">
+						{statusElapsedMs > 25000
+							? 'Verifying the agent is responsive'
+							: statusElapsedMs > 15000
+								? 'Launching OpenCode server'
+								: statusElapsedMs > 8000
+									? 'Configuring agent capabilities'
+									: statusElapsedMs > 3000
+										? 'Cloning repository and preparing workspace'
+										: 'Provisioning an isolated sandbox environment'}
+					</p>
+				</div>
+				<div className="flex items-center gap-1.5">
+					{[3000, 8000, 15000, 25000].map((threshold) => (
+						<div
+							key={threshold}
+							className={`h-1 w-8 rounded-full transition-colors duration-500 ${
+								statusElapsedMs > threshold
+									? 'bg-[var(--primary)]'
+									: 'bg-[var(--border)]'
+							}`}
+						/>
+					))}
+				</div>
+				<p className="text-[10px] text-[var(--muted-foreground)]">
+					{Math.floor(statusElapsedMs / 1000)}s
+				</p>
+			</div>
+		)}
+		{session.status !== 'active' && session.status !== 'creating' && (
+			<div
+				className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
+					session.status === 'error'
+						? 'border-red-500/30 bg-red-500/10 text-red-400'
+						: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400'
+				}`}
+			>
+				<div className="flex items-center justify-between gap-3">
+					<span>
+						{session.status === 'error' && '❌ Failed to create sandbox.'}
+						{session.status === 'terminated' && "This session's sandbox has been terminated. Chat history is read-only."}
+					</span>
+					{session.status === 'error' && (
+						<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
+							{isRetrying ? (
+								<>
+									<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+									Retrying...
+								</>
+							) : (
+								'Retry'
+							)}
+						</Button>
 					)}
 				</div>
-			)}
+				{session.status === 'terminated' && (archiveError || isLoadingArchive) && (
+					<p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+						{isLoadingArchive ? 'Loading chat history...' : archiveError}
+					</p>
+				)}
+			</div>
+		)}
 			{typeof (session.metadata as Record<string, unknown> | null)?.cloneError === 'string' && (
 				<div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
 					<div className="font-medium">⚠️ Repository clone failed</div>
