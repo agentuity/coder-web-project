@@ -1,10 +1,22 @@
 import type { ReactNode } from 'react';
 import { ActionProvider, Renderer, StateProvider, VisibilityProvider } from '@json-render/react';
 import { registry } from '../../lib/ui-registry';
+import { specToReact } from '../../lib/spec-to-react';
 
 interface UIPartViewProps {
   spec: any;
   loading?: boolean;
+}
+
+function downloadComponent(spec: any) {
+  const code = specToReact(spec, 'GeneratedComponent');
+  const blob = new Blob([code], { type: 'text/typescript' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'component.tsx';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -104,7 +116,19 @@ export function UIPartView({ spec, loading }: UIPartViewProps) {
   }
 
   return (
-    <div className="rounded-md border border-[var(--border)] p-3 my-2">
+    <div className="group/ui relative rounded-md border border-[var(--border)] p-3 my-2">
+      <button
+        type="button"
+        onClick={() => downloadComponent(spec)}
+        title="Download as React component"
+        className="absolute right-2 top-2 rounded p-1 text-[var(--muted-foreground)] opacity-0 transition-opacity hover:text-[var(--foreground)] hover:bg-[var(--muted)] group-hover/ui:opacity-100"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+      </button>
       {content}
     </div>
   );
