@@ -103,17 +103,17 @@ function mermaidFixTextContrast(container: HTMLElement) {
     if (!fillColor) continue;
     const hex = mermaidColorToHex(fillColor);
     if (!hex) {
-      textEl.setAttribute('fill', '#1a1a2e');
-      textEl.style.textShadow = '0 0 3px rgba(255,255,255,0.7)';
+      textEl.setAttribute('fill', '#000000');
+      textEl.style.textShadow = '0 1px 2px rgba(255,255,255,0.6)';
       continue;
     }
     const lum = mermaidGetLuminance(hex);
-    if (lum < 0.5) {
+    if (lum < 0.18) {
       textEl.setAttribute('fill', '#ffffff');
-      textEl.style.textShadow = '0 0 3px rgba(0,0,0,0.5)';
+      textEl.style.textShadow = '0 1px 2px rgba(0,0,0,0.8)';
     } else {
-      textEl.setAttribute('fill', '#1a1a2e');
-      textEl.style.textShadow = '0 0 3px rgba(255,255,255,0.7)';
+      textEl.setAttribute('fill', '#000000');
+      textEl.style.textShadow = '0 1px 2px rgba(255,255,255,0.6)';
     }
   }
 }
