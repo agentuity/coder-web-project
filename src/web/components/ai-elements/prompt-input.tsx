@@ -5,7 +5,7 @@ import {
 	XIcon,
 } from 'lucide-react';
 import type { ComponentProps, FormEvent, HTMLAttributes, ReactNode } from 'react';
-import { createContext, useContext } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import { Button } from '../ui/button';
 import { Textarea } from '../ui/textarea';
 import { cn } from '../../lib/utils';
@@ -63,29 +63,58 @@ export const PromptInputTextarea = ({
 	className,
 	placeholder = 'Send a message...',
 	onKeyDown,
+	onChange,
+	value,
 	...props
 }: PromptInputTextareaProps) => {
+	const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+	const adjustHeight = useCallback(() => {
+		const textarea = textareaRef.current;
+		if (!textarea) return;
+		textarea.style.height = 'auto';
+		textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+	}, []);
+
+	// Adjust on value changes (controlled component)
+	// biome-ignore lint/correctness/useExhaustiveDependencies: value triggers recalc even though adjustHeight reads from DOM
+	useEffect(() => {
+		adjustHeight();
+	}, [value, adjustHeight]);
+
 	const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (
 		event
 	) => {
 		if (event.key === 'Enter' && !event.shiftKey) {
 			event.preventDefault();
 			event.currentTarget.form?.requestSubmit();
+			// Reset height after submit
+			if (textareaRef.current) {
+				textareaRef.current.style.height = 'auto';
+			}
 			return;
 		}
 		onKeyDown?.(event);
 	};
 
+	const handleChange: React.ChangeEventHandler<HTMLTextAreaElement> = (event) => {
+		onChange?.(event);
+		adjustHeight();
+	};
+
 	return (
 		<Textarea
+			ref={textareaRef}
 			className={cn(
-				'min-h-[3rem] resize-none border-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none',
+				'min-h-[3rem] max-h-[200px] resize-none border-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none overflow-y-auto',
 				className
 			)}
 			name="message"
+			onChange={handleChange}
 			onKeyDown={handleKeyDown}
 			placeholder={placeholder}
 			rows={1}
+			value={value}
 			{...props}
 		/>
 	);

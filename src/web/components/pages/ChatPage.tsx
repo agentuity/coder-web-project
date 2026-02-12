@@ -960,7 +960,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		return sources;
 	}, []);
 
-	const renderReasoning = (part: ReasoningPart, message: ChatMessage) => {
+	const renderReasoning = useCallback((part: ReasoningPart, message: ChatMessage) => {
 		const duration = part.time.end
 			? Math.max(1, Math.ceil((part.time.end - part.time.start) / 1000))
 			: undefined;
@@ -976,7 +976,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<ReasoningContent>{part.text}</ReasoningContent>
 			</Reasoning>
 		);
-	};
+	}, [isStreaming, lastAssistantMessage]);
 
 	type ChainGroup = { type: 'chain'; filePath: string; parts: ToolPart[] };
 	type CurrentChain = {
@@ -1019,7 +1019,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		return hasEdit || hasWrite;
 	}, []);
 
-	const groupPartsIntoChains = (parts: Part[]): (Part | ChainGroup)[] => {
+	const groupPartsIntoChains = useCallback((parts: Part[]): (Part | ChainGroup)[] => {
 		const groups: (Part | ChainGroup)[] = [];
 		let currentChain: CurrentChain | null = null;
 
@@ -1066,11 +1066,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 		flushChain();
 		return groups;
-	};
+	}, [extractFilePath, isReadTool, isWriteOrEditTool]);
 
 
 
-	const renderPart = (part: Part, message: ChatMessage) => {
+	const renderPart = useCallback((part: Part, message: ChatMessage) => {
 		switch (part.type) {
 		case 'text':
 			return (
@@ -1137,7 +1137,85 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			default:
 				return null;
 		}
-	};
+	}, [isStreaming, lastAssistantMessage, renderReasoning, handleAddComment, getDiffAnnotations, getFileComments, getSourcesForToolPart]);
+
+	const renderedMessages = useMemo(() => {
+		if (displayMessages.length === 0) return null;
+		return displayMessages.map((message, msgIndex) => {
+			const parts = getDisplayParts(message.id);
+			const agent = 'agent' in message ? message.agent : undefined;
+			const errorInfo = 'error' in message ? message.error : undefined;
+			const isAfterRevertPoint = isGitRepo && revertState != null && (() => {
+				const revertMsgIndex = displayMessages.findIndex(m => m.id === revertState.messageID);
+				return msgIndex > revertMsgIndex;
+			})();
+
+			return (
+				<div key={message.id} className={isAfterRevertPoint ? 'opacity-30 pointer-events-none' : ''}>
+				<Message
+					from={message.role === 'user' ? 'user' : 'assistant'}
+				>
+					<MessageContent>
+						{agent && (
+							<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+								{agent}
+							</div>
+						)}
+					{groupPartsIntoChains(parts).map((part) => {
+						if (part.type === 'chain') {
+							return (
+								<ChainOfThought
+									key={`chain-${part.filePath}-${part.parts[0]?.id ?? 'start'}`}
+									filePath={part.filePath}
+									stepCount={part.parts.length}
+								>
+									{part.parts.map((chainPart) => renderPart(chainPart, message))}
+								</ChainOfThought>
+							);
+						}
+						return renderPart(part, message);
+					})}
+						{errorInfo && (
+							<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+								Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
+							</div>
+						)}
+					</MessageContent>
+					{message.role === 'assistant' && (
+						<MessageToolbar>
+							<ContextIndicator
+								tokens={message.tokens}
+								cost={message.cost}
+								modelID={message.modelID}
+								providerID={message.providerID}
+								label="Message"
+								compact
+							/>
+						<MessageActions>
+							{isGitRepo && (
+								<MessageAction
+									label="Restore"
+									onClick={() => handleRevert(message.id)}
+									title="Restore to this checkpoint"
+								>
+									<RotateCcw className="h-3.5 w-3.5" />
+								</MessageAction>
+							)}
+							<MessageAction
+								label="Copy"
+								onClick={() => copyMessage(message)}
+								title="Copy"
+							>
+								<Copy className="h-3.5 w-3.5" />
+							</MessageAction>
+						</MessageActions>
+						</MessageToolbar>
+					)}
+				</Message>
+				</div>
+			);
+		});
+	}, [displayMessages, getDisplayParts, isGitRepo, revertState, groupPartsIntoChains, renderPart, copyMessage, handleRevert]);
 
 	const conversationView = (
 		<Conversation className="flex-1 min-w-0">
@@ -1233,80 +1311,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					)}
 				</ConversationEmptyState>
 			) : (
-			displayMessages.map((message, msgIndex) => {
-				const parts = getDisplayParts(message.id);
-				const agent = 'agent' in message ? message.agent : undefined;
-				const errorInfo = 'error' in message ? message.error : undefined;
-			const isAfterRevertPoint = isGitRepo && revertState != null && (() => {
-				const revertMsgIndex = displayMessages.findIndex(m => m.id === revertState.messageID);
-				return msgIndex > revertMsgIndex;
-			})();
-
-				return (
-					<div key={message.id} className={isAfterRevertPoint ? 'opacity-30 pointer-events-none' : ''}>
-					<Message
-						from={message.role === 'user' ? 'user' : 'assistant'}
-					>
-						<MessageContent>
-							{agent && (
-								<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-									{agent}
-								</div>
-							)}
-						{groupPartsIntoChains(parts).map((part) => {
-							if (part.type === 'chain') {
-								return (
-									<ChainOfThought
-										key={`chain-${part.filePath}-${part.parts[0]?.id ?? 'start'}`}
-										filePath={part.filePath}
-										stepCount={part.parts.length}
-									>
-										{part.parts.map((chainPart) => renderPart(chainPart, message))}
-									</ChainOfThought>
-								);
-							}
-							return renderPart(part, message);
-						})}
-							{errorInfo && (
-								<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-									Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
-								</div>
-							)}
-						</MessageContent>
-						{message.role === 'assistant' && (
-							<MessageToolbar>
-								<ContextIndicator
-									tokens={message.tokens}
-									cost={message.cost}
-									modelID={message.modelID}
-									providerID={message.providerID}
-									label="Message"
-									compact
-								/>
-							<MessageActions>
-								{isGitRepo && (
-									<MessageAction
-										label="Restore"
-										onClick={() => handleRevert(message.id)}
-										title="Restore to this checkpoint"
-									>
-										<RotateCcw className="h-3.5 w-3.5" />
-									</MessageAction>
-								)}
-								<MessageAction
-									label="Copy"
-									onClick={() => copyMessage(message)}
-									title="Copy"
-								>
-									<Copy className="h-3.5 w-3.5" />
-								</MessageAction>
-							</MessageActions>
-							</MessageToolbar>
-						)}
-					</Message>
-					</div>
-				);
-			})
+				renderedMessages
 			)}
 
 				{pendingPermissions.map((perm) => (
