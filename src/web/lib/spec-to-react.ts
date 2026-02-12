@@ -1,6 +1,12 @@
 /**
  * Converts a normalized json-render spec into a standalone React component (.tsx file)
  * with Tailwind CSS classes. No json-render dependencies required.
+ *
+ * Supports two modes:
+ * - Static: specs without state/events/visibility generate purely static JSX (no useState)
+ * - Interactive: specs with state, on events, visible conditions, or $path expressions
+ *   generate a fully working component with useState, action dispatch, expression
+ *   resolution, and conditional rendering.
  */
 
 /* ── helpers ──────────────────────────────────────────────────── */
@@ -29,15 +35,69 @@ function jsonLiteral(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+/** Convert a label like "First Name" to "firstName" for state paths */
+function slugify(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_|_$/g, '');
+}
+
+/**
+ * Check if a prop value contains a $path expression (at any depth).
+ */
+function hasDynamicExpr(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.$path === 'string') return true;
+    if (Array.isArray(obj.$concat)) return true;
+    if (typeof obj.$template === 'string') return true;
+    return Object.values(obj).some(hasDynamicExpr);
+  }
+  if (Array.isArray(value)) return value.some(hasDynamicExpr);
+  return false;
+}
+
+/**
+ * Generate a code expression for resolving a dynamic value at runtime.
+ * Returns raw JSX expression code (without surrounding {}).
+ */
+function dynamicExpr(value: unknown): string {
+  if (value === null || value === undefined) return "''";
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    const obj = value as Record<string, unknown>;
+    if (typeof obj.$path === 'string') return `get(${JSON.stringify(obj.$path)})`;
+    if (Array.isArray(obj.$concat)) {
+      const parts = obj.$concat.map((item) => {
+        if (typeof item === 'string') return JSON.stringify(item);
+        return `String(${dynamicExpr(item)} ?? '')`;
+      });
+      return parts.join(' + ');
+    }
+    if (typeof obj.$template === 'string') {
+      return `resolve(${JSON.stringify(obj)})`;
+    }
+  }
+  return JSON.stringify(value);
+}
+
 /* ── spacing / alignment maps (mirrors ui-registry) ───────────── */
 
 const spacingMap: Record<string, string> = { sm: 'gap-2', md: 'gap-4', lg: 'gap-6' };
 const paddingMap: Record<string, string> = { sm: 'p-3', md: 'p-4', lg: 'p-6' };
 const alignMap: Record<string, string> = { start: 'items-start', center: 'items-center', end: 'items-end', stretch: 'items-stretch' };
 
+/* ── element metadata (on/visible from the spec element) ──────── */
+
+interface ElementMeta {
+  on?: Record<string, { action: string; actionParams?: Record<string, unknown> }>;
+  visible?: Record<string, unknown>;
+}
+
 /* ── component templates ──────────────────────────────────────── */
 
-type TemplateFn = (props: Record<string, any>, children: string) => string;
+type TemplateFn = (props: Record<string, any>, children: string, meta?: ElementMeta, stateful?: boolean) => string;
 
 const templates: Record<string, TemplateFn> = {
   /* ── Layout ──────────────────────────────────────────────────── */
@@ -134,28 +194,37 @@ const templates: Record<string, TemplateFn> = {
 
   /* ── Text & Typography ──────────────────────────────────────── */
 
-  Text: (p) => {
+  Text: (p, _children, _meta, stateful) => {
     const variants: Record<string, string> = { heading: 'text-lg font-semibold', subheading: 'text-base font-medium', body: 'text-sm', caption: 'text-xs text-muted-foreground' };
     const cls = [variants[p.variant ?? 'body'] ?? 'text-sm', p.className].filter(Boolean).join(' ');
+    if (stateful && hasDynamicExpr(p.content)) {
+      return `<p className="${cls}">{String(${dynamicExpr(p.content)} ?? '')}</p>`;
+    }
     return `<p className="${cls}">${esc(p.content)}</p>`;
   },
 
-  Heading: (p) => {
+  Heading: (p, _children, _meta, stateful) => {
     const level = p.level ?? '2';
     const sizeMap: Record<string, string> = { '1': 'text-4xl font-bold tracking-tight', '2': 'text-3xl font-bold tracking-tight', '3': 'text-2xl font-semibold', '4': 'text-xl font-semibold', '5': 'text-lg font-medium', '6': 'text-base font-medium' };
     const cls = [sizeMap[level] ?? 'text-3xl font-bold tracking-tight', p.className].filter(Boolean).join(' ');
     const tag = `h${level}`;
+    if (stateful && hasDynamicExpr(p.content)) {
+      return `<${tag} className="${cls}">{String(${dynamicExpr(p.content)} ?? '')}</${tag}>`;
+    }
     return `<${tag} className="${cls}">${esc(p.content)}</${tag}>`;
   },
 
-  Paragraph: (p) => {
+  Paragraph: (p, _children, _meta, stateful) => {
     const cls = ['text-sm leading-relaxed', p.className].filter(Boolean).join(' ');
+    if (stateful && hasDynamicExpr(p.content)) {
+      return `<p className="${cls}">{String(${dynamicExpr(p.content)} ?? '')}</p>`;
+    }
     return `<p className="${cls}">${esc(p.content)}</p>`;
   },
 
   /* ── Interactive ────────────────────────────────────────────── */
 
-  Button: (p) => {
+  Button: (p, _children, meta, stateful) => {
     const variantMap: Record<string, string> = {
       primary: 'bg-primary text-primary-foreground hover:bg-primary/90',
       secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
@@ -164,7 +233,14 @@ const templates: Record<string, TemplateFn> = {
     };
     const v = variantMap[p.variant ?? 'primary'] ?? variantMap.primary;
     const cls = ['inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium transition-colors', v, p.className].filter(Boolean).join(' ');
-    return `<button className="${cls}">${esc(p.label)}</button>`;
+    const press = stateful && meta?.on?.press;
+    const onClick = press
+      ? ` onClick={() => dispatch(${JSON.stringify(press.action)}, ${JSON.stringify(press.actionParams ?? {})})}`
+      : '';
+    const label = (stateful && hasDynamicExpr(p.label))
+      ? `{String(${dynamicExpr(p.label)} ?? '')}`
+      : esc(p.label);
+    return `<button className="${cls}"${onClick}>${label}</button>`;
   },
 
   Link: (p) => {
@@ -200,20 +276,23 @@ const templates: Record<string, TemplateFn> = {
     ].join('\n');
   },
 
-  Metric: (p) => {
+  Metric: (p, _children, _meta, stateful) => {
     const trendCls = p.trend === 'up' ? 'text-emerald-600' : p.trend === 'down' ? 'text-red-600' : 'text-muted-foreground';
     const trendIcon = p.trend === 'up' ? '▲ ' : p.trend === 'down' ? '▼ ' : '';
     const cls = ['rounded-lg border bg-card px-4 py-3 shadow-sm', p.className].filter(Boolean).join(' ');
+    const valueContent = (stateful && hasDynamicExpr(p.value))
+      ? `{String(${dynamicExpr(p.value)} ?? '')}`
+      : esc(p.value);
     return [
       `<div className="${cls}">`,
       `  <div className="text-xs text-muted-foreground">${esc(p.label)}</div>`,
-      `  <div className="mt-1 text-2xl font-semibold">${esc(p.value)}</div>`,
+      `  <div className="mt-1 text-2xl font-semibold">${valueContent}</div>`,
       p.change ? `  <div className="mt-1 text-xs font-medium ${trendCls}">${trendIcon}${esc(p.change)}</div>` : '',
       '</div>',
     ].filter(Boolean).join('\n');
   },
 
-  Badge: (p) => {
+  Badge: (p, _children, _meta, stateful) => {
     const variantMap: Record<string, string> = {
       default: 'bg-secondary text-secondary-foreground',
       success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600',
@@ -223,7 +302,10 @@ const templates: Record<string, TemplateFn> = {
     };
     const v = variantMap[p.variant ?? 'default'] ?? variantMap.default;
     const cls = ['inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold', v, p.className].filter(Boolean).join(' ');
-    return `<span className="${cls}">${esc(p.text)}</span>`;
+    const text = (stateful && hasDynamicExpr(p.text))
+      ? `{String(${dynamicExpr(p.text)} ?? '')}`
+      : esc(p.text);
+    return `<span className="${cls}">${text}</span>`;
   },
 
   Alert: (p) => {
@@ -470,8 +552,17 @@ const templates: Record<string, TemplateFn> = {
     ].filter(Boolean).join('\n');
   },
 
-  Input: (p) => {
+  Input: (p, _children, _meta, stateful) => {
     const cls = ['flex flex-col gap-1 text-sm', p.className].filter(Boolean).join(' ');
+    const fieldName = slugify(p.label ?? 'field');
+    if (stateful) {
+      return [
+        `<label className="${cls}">`,
+        `  <span className="text-xs text-muted-foreground">${esc(p.label)}</span>`,
+        `  <input type="${p.type ?? 'text'}" placeholder="${esc(p.placeholder ?? '')}" value={String(get('/form/${fieldName}') ?? '')} onChange={e => set('/form/${fieldName}', e.target.value)} className="rounded-md border border-input bg-background px-3 py-2 text-sm" />`,
+        '</label>',
+      ].join('\n');
+    }
     return [
       `<label className="${cls}">`,
       `  <span className="text-xs text-muted-foreground">${esc(p.label)}</span>`,
@@ -480,10 +571,21 @@ const templates: Record<string, TemplateFn> = {
     ].join('\n');
   },
 
-  Select: (p) => {
+  Select: (p, _children, _meta, stateful) => {
     const options = (p.options ?? []) as Array<{ value: string; label: string }>;
     const cls = ['flex flex-col gap-1 text-sm', p.className].filter(Boolean).join(' ');
     const optionsHtml = options.map((opt) => `    <option value="${esc(opt.value)}">${esc(opt.label)}</option>`).join('\n');
+    const fieldName = slugify(p.label ?? 'field');
+    if (stateful) {
+      return [
+        `<label className="${cls}">`,
+        `  <span className="text-xs text-muted-foreground">${esc(p.label)}</span>`,
+        `  <select value={String(get('/form/${fieldName}') ?? '')} onChange={e => set('/form/${fieldName}', e.target.value)} className="rounded-md border border-input bg-background px-3 py-2 text-sm">`,
+        optionsHtml,
+        '  </select>',
+        '</label>',
+      ].join('\n');
+    }
     return [
       `<label className="${cls}">`,
       `  <span className="text-xs text-muted-foreground">${esc(p.label)}</span>`,
@@ -529,21 +631,22 @@ const templates: Record<string, TemplateFn> = {
     ].join('\n');
   },
 
-  ApiReference: (p) => {
-    return [
-      '{/* ApiReference component — integrate @scalar/api-reference-react */}',
-      `<div className="rounded-lg border bg-muted p-4 text-center text-sm text-muted-foreground${p.className ? ` ${p.className}` : ''}" style={{ height: "600px" }}>`,
-      p.specUrl ? `  [API Reference: ${esc(p.specUrl)}]` : '  [API Reference: inline spec]',
-      '</div>',
-    ].join('\n');
-  },
 };
 
 /* ── spec walker ──────────────────────────────────────────────── */
 
+interface ElementDef {
+  type: string;
+  props?: Record<string, any>;
+  children?: string[];
+  on?: Record<string, { action: string; actionParams?: Record<string, unknown> }>;
+  visible?: Record<string, unknown>;
+}
+
 function renderElement(
   key: string,
-  elements: Record<string, { type: string; props?: Record<string, any>; children?: string[] }>,
+  elements: Record<string, ElementDef>,
+  stateful: boolean,
 ): string {
   const el = elements[key];
   if (!el) return `{/* Unknown element: ${key} */}`;
@@ -551,36 +654,57 @@ function renderElement(
   const props = el.props ?? {};
   const template = templates[el.type];
 
+  // Build element metadata for templates that need on/visible
+  const meta: ElementMeta = {};
+  if (el.on) meta.on = el.on;
+  if (el.visible) meta.visible = el.visible;
+
   // Render children first
   let childrenJsx = '';
   if (el.children && el.children.length > 0) {
     childrenJsx = el.children
-      .map((childKey) => renderElement(childKey, elements))
+      .map((childKey) => renderElement(childKey, elements, stateful))
       .join('\n');
   }
 
+  let jsx: string;
   if (template) {
-    return template(props, childrenJsx);
+    jsx = template(props, childrenJsx, meta, stateful);
+  } else {
+    // Fallback for unknown types
+    jsx = [
+      `{/* Unknown component: ${el.type} */}`,
+      `<div className="rounded-lg border bg-muted p-4 text-center text-sm text-muted-foreground">`,
+      `  [${el.type}]`,
+      '</div>',
+    ].join('\n');
   }
 
-  // Fallback for unknown types
-  return [
-    `{/* Unknown component: ${el.type} */}`,
-    `<div className="rounded-lg border bg-muted p-4 text-center text-sm text-muted-foreground">`,
-    `  [${el.type}]`,
-    '</div>',
-  ].join('\n');
+  // If stateful, handle onClick for non-Button elements with `on.press`
+  if (stateful && el.on?.press && el.type !== 'Button') {
+    const press = el.on.press;
+    const handler = `onClick={() => dispatch(${JSON.stringify(press.action)}, ${JSON.stringify(press.actionParams ?? {})})}`;
+    // Wrap in a clickable div
+    jsx = `<div ${handler} style={{ cursor: 'pointer' }}>\n${indent(jsx, 2)}\n</div>`;
+  }
+
+  // Wrap with visibility condition if present
+  if (stateful && el.visible) {
+    jsx = `{evalCondition(${JSON.stringify(el.visible)}) && (\n${indent(jsx, 2)}\n)}`;
+  }
+
+  return jsx;
 }
 
 /* ── normalizer (same as UIPartView) ──────────────────────────── */
 
-function normalizeSpec(spec: any): { root: string; elements: Record<string, any> } | null {
+function normalizeSpec(spec: any): { root: string; elements: Record<string, ElementDef>; state?: Record<string, unknown> } | null {
   if (typeof spec?.root === 'string' && spec?.elements) {
-    return spec;
+    return { root: spec.root, elements: spec.elements, state: spec.state };
   }
 
   if (spec?.root && typeof spec.root === 'object' && spec.root.type) {
-    const elements: Record<string, any> = {};
+    const elements: Record<string, ElementDef> = {};
     let counter = 0;
 
     function flattenElement(node: any): string {
@@ -596,20 +720,156 @@ function normalizeSpec(spec: any): { root: string; elements: Record<string, any>
         }
       }
 
-      elements[key] = {
+      const el: ElementDef = {
         type: node.type,
         props: node.props || {},
         ...(childKeys.length > 0 ? { children: childKeys } : {}),
       };
 
+      // Preserve on and visible from nested format
+      if (node.on) el.on = node.on;
+      if (node.visible) el.visible = node.visible;
+
+      elements[key] = el;
+
       return key;
     }
 
     const rootKey = flattenElement(spec.root);
-    return { root: rootKey, elements };
+    return { root: rootKey, elements, state: spec.state };
   }
 
   return null;
+}
+
+/* ── state detection ──────────────────────────────────────────── */
+
+/**
+ * Determine whether a spec requires interactive (stateful) code generation.
+ * Returns true if the spec has state, any element has `on` or `visible`,
+ * or any prop contains a $path/$concat/$template expression.
+ */
+function specNeedsState(spec: any, elements: Record<string, ElementDef>): boolean {
+  // Has explicit state
+  if (spec?.state && typeof spec.state === 'object' && Object.keys(spec.state).length > 0) {
+    return true;
+  }
+
+  // Check all elements for on, visible, or dynamic props
+  for (const el of Object.values(elements)) {
+    if (el.on) return true;
+    if (el.visible) return true;
+    if (el.props && hasDynamicExpr(el.props)) return true;
+    // Input/Select always need state binding in stateful mode,
+    // but we only go stateful if something else triggers it
+  }
+
+  return false;
+}
+
+/* ── runtime helpers code generation ──────────────────────────── */
+
+function generateRuntimeHelpers(initialState: Record<string, unknown>): string {
+  const stateJson = JSON.stringify(initialState, null, 2)
+    .split('\n')
+    .map((line, i) => (i === 0 ? line : '  ' + line))
+    .join('\n');
+
+  return `  // ── State management ────────────────────────────────────────
+  const [state, _setState] = useState<Record<string, unknown>>(${stateJson});
+
+  function get(path: string): unknown {
+    return path.split('/').filter(Boolean).reduce((obj: any, key: string) => obj?.[key], state);
+  }
+
+  function set(path: string, value: unknown) {
+    _setState(prev => {
+      const next = JSON.parse(JSON.stringify(prev));
+      const keys = path.split('/').filter(Boolean);
+      let obj: any = next;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (obj[keys[i]] === undefined) obj[keys[i]] = {};
+        obj = obj[keys[i]];
+      }
+      obj[keys[keys.length - 1]] = value;
+      return next;
+    });
+  }
+
+  // ── Expression resolver ──────────────────────────────────────
+  function resolve(params: any): any {
+    if (params === null || params === undefined) return params;
+    if (typeof params === 'object' && !Array.isArray(params)) {
+      if (typeof params.$path === 'string') return get(params.$path);
+      if (Array.isArray(params.$concat)) return params.$concat.map((i: any) => resolve(i)).join('');
+      if (typeof params.$template === 'string') {
+        return params.$template.replace(/\\$\\{([^}]+)\\}/g, (_: string, p: string) => String(get(p.trim()) ?? ''));
+      }
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(params)) out[k] = resolve(v);
+      return out;
+    }
+    if (Array.isArray(params)) return params.map(resolve);
+    return params;
+  }
+
+  // ── Visibility evaluator ─────────────────────────────────────
+  function evalCondition(cond: any): boolean {
+    if (!cond) return false;
+    if (typeof cond !== 'object') return !!cond;
+    if (typeof cond.path === 'string') return !!get(cond.path);
+    if (cond.eq) return resolve(cond.eq[0]) === resolve(cond.eq[1]);
+    if (cond.ne) return resolve(cond.ne[0]) !== resolve(cond.ne[1]);
+    if (cond.gt) return Number(resolve(cond.gt[0])) > Number(resolve(cond.gt[1]));
+    if (cond.gte) return Number(resolve(cond.gte[0])) >= Number(resolve(cond.gte[1]));
+    if (cond.lt) return Number(resolve(cond.lt[0])) < Number(resolve(cond.lt[1]));
+    if (cond.lte) return Number(resolve(cond.lte[0])) <= Number(resolve(cond.lte[1]));
+    if (cond.and) return cond.and.every(evalCondition);
+    if (cond.or) return cond.or.some(evalCondition);
+    if (cond.not) return !evalCondition(cond.not);
+    return false;
+  }
+
+  // ── Action dispatch ──────────────────────────────────────────
+  function dispatch(action: string, params: any) {
+    const r = resolve(params);
+    switch (action) {
+      case 'setState':
+        if (r?.path) set(r.path, r.value);
+        break;
+      case 'toggleState':
+        if (r?.path) set(r.path, !get(r.path));
+        break;
+      case 'appendItem':
+        if (r?.path) {
+          const cur = get(r.path);
+          set(r.path, [...(Array.isArray(cur) ? cur : []), r.item]);
+        }
+        break;
+      case 'removeItem':
+        if (r?.path && typeof r.index === 'number') {
+          const cur = get(r.path);
+          if (Array.isArray(cur)) set(r.path, cur.filter((_: any, i: number) => i !== r.index));
+        }
+        break;
+      case 'navigate':
+        if (r?.url) window.location.assign(r.url);
+        break;
+      case 'submit':
+        console.info('Form submit', r?.data);
+        break;
+      case 'sequence':
+        if (Array.isArray(r?.actions)) r.actions.forEach((s: any) => dispatch(s.action, s.actionParams));
+        break;
+      case 'conditional': {
+        const met = evalCondition(r?.condition);
+        const branch = met ? r?.then : r?.else;
+        if (branch?.action) dispatch(branch.action, branch.actionParams);
+        break;
+      }
+    }
+  }
+`;
 }
 
 /* ── public API ───────────────────────────────────────────────── */
@@ -631,13 +891,32 @@ export function specToReact(spec: any, componentName = 'GeneratedComponent'): st
     ].join('\n');
   }
 
-  const jsx = renderElement(normalized.root, normalized.elements);
+  const stateful = specNeedsState(spec, normalized.elements);
+  const jsx = renderElement(normalized.root, normalized.elements, stateful);
   const indentedJsx = indent(jsx, 4);
 
+  if (!stateful) {
+    // Static path — backwards compatible, no useState
+    return [
+      "import React from 'react';",
+      '',
+      `export function ${componentName}() {`,
+      '  return (',
+      indentedJsx,
+      '  );',
+      '}',
+    ].join('\n');
+  }
+
+  // Interactive path — includes state, handlers, expression resolution
+  const initialState = normalized.state ?? { form: {} };
+  const helpers = generateRuntimeHelpers(initialState as Record<string, unknown>);
+
   return [
-    "import React from 'react';",
+    "import React, { useState } from 'react';",
     '',
     `export function ${componentName}() {`,
+    helpers,
     '  return (',
     indentedJsx,
     '  );',
