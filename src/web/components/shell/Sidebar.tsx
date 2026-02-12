@@ -95,6 +95,7 @@ export function Sidebar({
 }: SidebarProps) {
   const { track } = useAnalytics();
   const [showTerminated, setShowTerminated] = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const isCollapsed = Boolean(collapsed) && !isMobileOpen;
   const displayName = userName || userEmail || 'User';
   const showEmail = Boolean(userName && userEmail);
@@ -392,7 +393,7 @@ export function Sidebar({
             {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
           </button>
           <button
-            onClick={onSignOut}
+            onClick={() => setShowSignOutConfirm(true)}
             className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-red-500 hover:bg-[var(--accent)]"
             title="Sign out"
             type="button"
@@ -410,6 +411,27 @@ export function Sidebar({
           </button>
         </div>
       </div>
+      {showSignOutConfirm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ backgroundColor: 'color-mix(in oklab, var(--foreground) 50%, transparent)' }}
+        >
+          <div className="w-full max-w-xs rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-[var(--foreground)]">Sign out?</h3>
+            <p className="text-xs text-[var(--muted-foreground)] mt-1">
+              Are you sure you want to sign out?
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" size="sm" onClick={() => setShowSignOutConfirm(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => { setShowSignOutConfirm(false); onSignOut(); }}>
+                Sign Out
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

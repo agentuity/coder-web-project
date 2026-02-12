@@ -160,6 +160,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
   useEffect(() => {
     setSession(initialSession);
+    if (initialSession.agent) {
+      setSelectedCommand(initialSession.agent);
+    }
   }, [initialSession]);
 
   useEffect(() => {
@@ -307,7 +310,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [inputText, setInputText] = useState('');
 	const [isSending, setIsSending] = useState(false);
 	const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
-  const [selectedCommand, setSelectedCommand] = useState('');
+  const [selectedCommand, setSelectedCommand] = useState(session.agent || '');
   const [hasManuallySelectedCommand, setHasManuallySelectedCommand] = useState(false);
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
 	const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
@@ -543,6 +546,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	}, [hasManuallySelectedCommand]);
 
 	useEffect(() => {
+		if (initialSession.agent) return;
 		fetch('/api/user/settings')
 			.then((r) => r.json())
 			.then((data: { defaultCommand?: string }) => {
@@ -551,7 +555,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				}
 			})
 			.catch(() => {});
-	}, []);
+	}, [initialSession.agent]);
 
 
 	const activeFilePath = activeTab?.filePath ?? null;
