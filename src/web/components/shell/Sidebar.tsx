@@ -1,6 +1,7 @@
 import { Plus, Sparkles, Plug, Settings, Star, RefreshCw, Trash2, ChevronRight, ChevronDown, ChevronLeft, LogOut, Moon, Sun, User } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useAnalytics } from '@agentuity/react';
+import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
@@ -22,13 +23,9 @@ interface SidebarProps {
   sessionsLoading?: boolean;
   activeSessionId?: string;
   onNewSession: () => void;
-  onSelectSession: (id: string) => void;
-  onNavigate: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
-  onGoHome?: () => void;
-  onFlagSession?: (id: string, flagged: boolean) => void;
-  onRetrySession?: (id: string) => void;
-  onDeleteSession?: (id: string) => void;
-  currentPage: string;
+  onFlagSession?: (id: string, flagged: boolean) => void | Promise<void>;
+  onRetrySession?: (id: string) => void | Promise<void>;
+  onDeleteSession?: (id: string) => void | Promise<void>;
   isMobileOpen?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -36,7 +33,15 @@ interface SidebarProps {
   userName?: string;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
-  onSignOut: () => void;
+  onSignOut: () => void | Promise<void>;
+}
+
+function getCurrentPage(pathname: string) {
+  if (pathname.startsWith('/skills')) return 'skills';
+  if (pathname.startsWith('/sources')) return 'sources';
+  if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/profile')) return 'profile';
+  return 'chat';
 }
 
 function SessionSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
@@ -77,13 +82,9 @@ export function Sidebar({
   sessionsLoading,
   activeSessionId,
   onNewSession,
-  onSelectSession,
-  onNavigate,
-  onGoHome,
   onFlagSession,
   onRetrySession,
   onDeleteSession,
-  currentPage,
   isMobileOpen,
   collapsed,
   onToggleCollapse,
@@ -94,6 +95,9 @@ export function Sidebar({
   onSignOut,
 }: SidebarProps) {
   const { track } = useAnalytics();
+  const navigate = useNavigate();
+  const location = useRouterState({ select: (state) => state.location });
+  const currentPage = getCurrentPage(location.pathname);
   const [showTerminated, setShowTerminated] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const isCollapsed = Boolean(collapsed) && !isMobileOpen;
@@ -115,12 +119,16 @@ export function Sidebar({
 
   const handleSessionSelect = (id: string) => {
     track('sidebar_session_selected');
-    onSelectSession(id);
+    navigate({ to: '/session/$sessionId', params: { sessionId: id } });
   };
 
   const handleNavigate = (destination: 'skills' | 'sources' | 'settings' | 'profile') => {
     track('sidebar_navigation', { destination });
-    onNavigate(destination);
+    navigate({ to: `/${destination}` });
+  };
+
+  const handleGoHome = () => {
+    navigate({ to: '/' });
   };
 
   const renderSessionRow = (session: Session) => (
@@ -213,17 +221,17 @@ export function Sidebar({
 
   return (
     <div
-		className={cn(
-			'flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-200',
-			isCollapsed ? 'w-14' : 'w-64',
-			isMobileOpen
-				? 'absolute inset-y-0 left-0 z-50 flex md:static md:flex'
-				: 'hidden md:flex',
-		)}
+      className={cn(
+        'flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-200',
+        isCollapsed ? 'w-14' : 'w-64',
+        isMobileOpen
+          ? 'absolute inset-y-0 left-0 z-50 flex md:static md:flex'
+          : 'hidden md:flex',
+      )}
     >
       <button
         type="button"
-        onClick={onGoHome}
+        onClick={handleGoHome}
         className={cn('flex items-center gap-2 px-4 py-3 hover:opacity-80 transition-opacity cursor-pointer', isCollapsed && 'justify-center px-2')}
         title="Go to home"
       >

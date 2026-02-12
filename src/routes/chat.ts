@@ -218,11 +218,14 @@ api.post('/:id/messages', async (c) => {
 				});
 			}
 
-			// Store the command slug on the session for reference
-			if (commandSlug && commandSlug !== session.agent) {
+			// Persist the agent on the session for real agents (not one-shot template commands).
+			// Cadence uses the Agentuity Coder team — persist as agentuity-coder.
+			const persistAgent = commandSlug === 'agentuity-cadence' ? 'agentuity-coder' :
+				(commandSlug && !TEMPLATE_COMMANDS.has(commandSlug)) ? commandSlug : null;
+			if (persistAgent && persistAgent !== session.agent) {
 				await db
 					.update(chatSessions)
-					.set({ agent: commandSlug, updatedAt: new Date() })
+					.set({ agent: persistAgent, updatedAt: new Date() })
 					.where(eq(chatSessions.id, session.id));
 			}
 

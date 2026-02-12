@@ -105,12 +105,20 @@ api.post('/', async (c) => {
 			createdBy: user.id,
 			status: 'creating',
 			title,
-			agent: body.agent ?? null,
-			model: body.model ?? null,
-			metadata: { repoUrl: body.repoUrl, branch: body.branch },
-		})
-		.onConflictDoNothing()
-		.returning();
+		agent: (() => {
+			if (!body.agent) return null;
+			const slug = body.agent.replace(/^\//, '');
+			// Cadence uses the Agentuity Coder team — persist as agentuity-coder
+			if (slug === 'agentuity-cadence') return '/agentuity-coder';
+			// Other template commands are one-shot and shouldn't persist
+			if (TEMPLATE_COMMANDS.has(slug)) return null;
+			return body.agent;
+		})(),
+		model: body.model ?? null,
+		metadata: { repoUrl: body.repoUrl, branch: body.branch },
+	})
+	.onConflictDoNothing()
+	.returning();
 
 	// If retry caused the insert to be a no-op (PK already existed), fetch the existing row
 	let session = insertedRows[0];

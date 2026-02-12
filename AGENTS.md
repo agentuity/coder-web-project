@@ -134,7 +134,9 @@ src/
 | `src/routes/github.ts` | Git status/log/commit/push/PR inside sandboxes |
 | `src/routes/github-global.ts` | GitHub API for repo/branch selection |
 | `src/web/frontend.tsx` | Provider stack + React root |
-| `src/web/App.tsx` | App routing, session state, page layout |
+| `src/web/router.tsx` | TanStack Router route tree + auth gate |
+| `src/web/context/AppContext.tsx` | Centralized app state (sessions, workspace, handlers) |
+| `src/web/App.tsx` | Thin layout wrapper (AppShell + NewSessionDialog) |
 | `src/web/components/pages/ChatPage.tsx` | Chat + IDE UI, voice, sharing |
 | `src/web/hooks/useSessionEvents.ts` | SSE client and event reducer |
 | `src/lib/thread-context.ts` | Thread state context (session summary) |
@@ -286,24 +288,43 @@ Defined in `src/web/frontend.tsx`:
 3. `AgentuityProvider`
 4. `AuthProvider`
 5. `AuthUIProvider`
-6. `NuqsAdapter`
-7. `App`
+6. `RouterProvider` (TanStack Router)
 
-### URL-Based Routing
+### Routing (TanStack Router)
 
-Routing is query-string driven in `src/web/hooks/useUrlState.ts`:
+Routing uses **TanStack Router** with code-based route definitions in `src/web/router.tsx`.
+App-wide state (sessions, workspace, theme, handlers) is provided by `src/web/context/AppContext.tsx`.
 
-- `s` — active session ID
-- `v` — view mode (`chat` | `ide`)
-- `p` — page (`chat` | `settings` | `skills` | `sources` | `profile`)
-- `tab` — sidebar tab (`files` | `git` | `env`)
+**Route structure:**
 
-Shared session route is path-based: `/shared/:streamId`.
+| Path | Component | Auth | Search Params |
+| --- | --- | --- | --- |
+| `/` | `WorkspacePage` | Yes | — |
+| `/session/$sessionId` | `ChatPage` | Yes | `v` (chat\|ide), `tab` (files\|git\|env) |
+| `/settings` | `SettingsPage` | Yes | — |
+| `/skills` | `SkillsPage` | Yes | — |
+| `/sources` | `SourcesPage` | Yes | — |
+| `/profile` | `ProfilePage` | Yes | `av` (account sub-view) |
+| `/profile/$view` | `ProfilePage` | Yes | — |
+| `/shared/$streamId` | `SharedSessionPage` | No | — |
+
+**Key files:**
+
+- `src/web/router.tsx` — Route tree, auth gate (RootLayout), route wrappers
+- `src/web/context/AppContext.tsx` — Centralized app state and navigation handlers
+- `src/web/App.tsx` — Thin layout wrapper (AppShell + NewSessionDialog)
+
+**Navigation patterns:**
+
+- Use `useNavigate()` from `@tanstack/react-router` for programmatic navigation
+- Use `useSearch({ from: '/session/$sessionId' })` for type-safe search params
+- Use `useParams({ from: '/shared/$streamId' })` for path params
+- Search params are Zod-validated (schemas in `router.tsx`)
 
 ### Adding Components
 
 - UI and pages live in `src/web/components/`
-- New pages should be imported and routed in `src/web/App.tsx`
+- New routes should be added to `src/web/router.tsx` (route tree)
 - Hooks live in `src/web/hooks/`
 - Frontend utilities live in `src/web/lib/`
 

@@ -830,6 +830,19 @@ function generateRuntimeHelpers(initialState: Record<string, unknown>): string {
     return false;
   }
 
+  function navigateToUrl(url: string) {
+    if (typeof window !== 'undefined' && url.startsWith('/') && !url.startsWith('/api') && !url.startsWith('//')) {
+      const nav = (window as any).__agentuityNavigate;
+      if (typeof nav === 'function') {
+        nav(url);
+        return;
+      }
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(url);
+    }
+  }
+
   // ── Action dispatch ──────────────────────────────────────────
   function dispatch(action: string, params: any) {
     const r = resolve(params);
@@ -853,7 +866,7 @@ function generateRuntimeHelpers(initialState: Record<string, unknown>): string {
         }
         break;
       case 'navigate':
-        if (r?.url) window.location.assign(r.url);
+        if (r?.url) navigateToUrl(String(r.url));
         break;
       case 'submit':
         console.info('Form submit', r?.data);

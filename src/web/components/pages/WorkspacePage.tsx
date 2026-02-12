@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { Code2, MessageSquare, Clock } from 'lucide-react';
 import { useTrackOnMount } from '@agentuity/react';
 import {
@@ -10,21 +11,13 @@ import {
 } from '../ai-elements/prompt-input';
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
+import { useAppContext } from '../../context/AppContext';
 
 interface Session {
 	id: string;
 	title: string | null;
 	status: string;
 	createdAt: string;
-}
-
-interface WorkspacePageProps {
-	workspaceId?: string;
-	sessions?: Session[];
-	onNewSession?: () => void;
-	onQuickSession?: (prompt: string, options?: { command?: string; model?: string }) => void;
-	onSelectSession?: (id: string) => void;
-	onNavigate?: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
 }
 
 function getStatusColor(status: string) {
@@ -47,7 +40,9 @@ function formatRelativeTime(dateStr: string): string {
 	return `${days}d ago`;
 }
 
-export function WorkspacePage({ sessions = [], onNewSession, onQuickSession, onSelectSession }: WorkspacePageProps) {
+export function WorkspacePage() {
+	const { sessions, handleQuickSession } = useAppContext();
+	const navigate = useNavigate();
 	useTrackOnMount({ eventName: 'page_viewed', properties: { page: 'workspace_home' } });
 	const recentSessions = sessions.slice(0, 5);
 	const [prompt, setPrompt] = useState('');
@@ -69,7 +64,7 @@ export function WorkspacePage({ sessions = [], onNewSession, onQuickSession, onS
 	const handleSubmit = (text: string) => {
 		const trimmed = text.trim();
 		if (!trimmed) return;
-		onQuickSession?.(trimmed, {
+		handleQuickSession(trimmed, {
 			command: selectedCommand || undefined,
 			model: selectedModel || undefined,
 		});
@@ -97,7 +92,7 @@ export function WorkspacePage({ sessions = [], onNewSession, onQuickSession, onS
 						/>
 						<PromptInputFooter>
 							<div className="flex items-center gap-2">
-								<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
+								<CommandPicker value={selectedCommand} onChange={setSelectedCommand} hideCommands />
 								<ModelSelector value={selectedModel} onChange={setSelectedModel} />
 							</div>
 							<PromptInputSubmit
@@ -119,7 +114,7 @@ export function WorkspacePage({ sessions = [], onNewSession, onQuickSession, onS
 								<button
 									type="button"
 									key={session.id}
-									onClick={() => onSelectSession?.(session.id)}
+									onClick={() => navigate({ to: '/session/$sessionId', params: { sessionId: session.id } })}
 									className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-[var(--accent)]"
 								>
 									<MessageSquare className="h-3.5 w-3.5 shrink-0 text-[var(--muted-foreground)]" />

@@ -402,6 +402,14 @@ export const catalog = defineCatalog(schema, {
       }),
       description: 'Sandboxed HTML viewer for rendering HTML content',
     },
+    Mermaid: {
+      props: z.object({
+        code: z.string(),
+        theme: z.enum(['light', 'dark']).optional(),
+        className: z.string().optional(),
+      }),
+      description: 'Render Mermaid diagrams (flowcharts, sequence, state, class, ER) as SVG',
+    },
   },
   actions: {
     navigate: {

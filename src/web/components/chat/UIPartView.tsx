@@ -1,5 +1,6 @@
-import { useMemo, useRef, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { ActionProvider, Renderer, StateProvider, VisibilityProvider, useStateStore } from '@json-render/react';
+import { useNavigate } from '@tanstack/react-router';
 import { registry } from '../../lib/ui-registry';
 import { specToReact } from '../../lib/spec-to-react';
 
@@ -118,6 +119,17 @@ function resolveExpressions(params: unknown, get: (path: string) => unknown): un
 
 function UIPartViewInner({ spec }: { spec: any }) {
   const { get, set } = useStateStore();
+  const navigate = useNavigate();
+
+  const navigateToUrl = useCallback((url: string) => {
+    if (typeof window !== 'undefined' && url.startsWith('/') && !url.startsWith('/api') && !url.startsWith('//')) {
+      navigate({ to: url });
+      return;
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(url);
+    }
+  }, [navigate]);
 
   // Build a dispatch function that all handlers can reference (including self-referencing meta-actions)
   const dispatchRef = useRef<(action: string, params: Record<string, unknown>) => void>(() => {});
@@ -155,8 +167,8 @@ function UIPartViewInner({ spec }: { spec: any }) {
       },
       navigate: (params: Record<string, unknown>) => {
         const r = resolveExpressions(params, get) as { url?: string };
-        if (typeof window !== 'undefined' && typeof r?.url === 'string') {
-          window.location.assign(r.url);
+        if (typeof r?.url === 'string') {
+          navigateToUrl(r.url);
         }
       },
       submit: (params: Record<string, unknown>) => {
@@ -231,7 +243,7 @@ function UIPartViewInner({ spec }: { spec: any }) {
     };
 
     return h;
-  }, [get, set]);
+	}, [get, navigateToUrl, set]);
 
   return (
     <ActionProvider handlers={handlers}>

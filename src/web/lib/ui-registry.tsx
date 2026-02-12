@@ -1080,5 +1080,63 @@ export const { registry } = defineRegistry(catalog, {
         </div>
       );
     },
+
+    /* ── Mermaid ────────────────────────────────────────────────── */
+    Mermaid: ({ props }) => {
+      const containerRef = useRef<HTMLDivElement | null>(null);
+      const [error, setError] = useState<string | null>(null);
+
+      useEffect(() => {
+        let cancelled = false;
+        setError(null);
+
+        (async () => {
+          try {
+            const { renderMermaid, THEMES } = await import('beautiful-mermaid');
+            if (cancelled) return;
+
+            // Pick theme based on prop or detect from CSS
+            const isDark = props.theme === 'dark' ||
+              (!props.theme && typeof window !== 'undefined' &&
+                window.getComputedStyle(document.documentElement).colorScheme === 'dark');
+            const theme = isDark ? THEMES['zinc-dark'] : THEMES['zinc-light'];
+
+            const svg = await renderMermaid(props.code, { ...theme, transparent: true });
+            if (cancelled || !containerRef.current) return;
+            containerRef.current.innerHTML = svg;
+
+            // Make SVG responsive
+            const svgEl = containerRef.current.querySelector('svg');
+            if (svgEl) {
+              svgEl.style.width = '100%';
+              svgEl.style.height = 'auto';
+              svgEl.style.maxHeight = '600px';
+            }
+          } catch (err) {
+            if (!cancelled) {
+              setError(err instanceof Error ? err.message : 'Failed to render diagram');
+            }
+          }
+        })();
+
+        return () => { cancelled = true; };
+      }, [props.code, props.theme]);
+
+      if (error) {
+        return (
+          <div className={cn('rounded-lg border border-red-500/30 bg-red-500/5 p-4', props.className)}>
+            <p className="text-xs text-red-500 mb-2">Failed to render Mermaid diagram</p>
+            <pre className="text-xs text-[var(--muted-foreground)] whitespace-pre-wrap">{props.code}</pre>
+          </div>
+        );
+      }
+
+      return (
+        <div
+          ref={containerRef}
+          className={cn('rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 overflow-auto', props.className)}
+        />
+      );
+    },
   },
 });

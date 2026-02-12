@@ -78,7 +78,9 @@ import { useNarratorMode } from '../../hooks/useNarratorMode';
 import { useAudioPlayback } from '../../hooks/useAudioPlayback';
 import { VoiceControls } from '../ui/VoiceControls';
 import { cn } from '../../lib/utils';
-import { useUrlState } from '../../hooks/useUrlState';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import type { z } from 'zod';
+import { sessionSearchSchema } from '../../router';
 import { useAnalytics } from '@agentuity/react';
 
 interface ChatPageProps {
@@ -121,6 +123,8 @@ type AttachmentItem = {
 	size: number;
 	content: string;
 };
+
+type SessionSearch = z.infer<typeof sessionSearchSchema>;
 
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
@@ -307,7 +311,13 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [inputText, setInputText] = useState('');
 	const [isSending, setIsSending] = useState(false);
 	const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
-  const [selectedCommand, setSelectedCommand] = useState(session.agent || '');
+  // Only initialize from session.agent if it's a real agent (not a template command).
+  // Template commands (memory-save, cadence, etc.) are one-shot and shouldn't persist.
+  const [selectedCommand, setSelectedCommand] = useState(() => {
+    const agent = session.agent || '';
+    const templateCommands = new Set(['agentuity-cadence', 'agentuity-memory-save', 'agentuity-memory-share', 'agentuity-cloud', 'agentuity-sandbox']);
+    return templateCommands.has(agent) ? '' : agent;
+  });
   const [hasManuallySelectedCommand, setHasManuallySelectedCommand] = useState(false);
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
 	const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
@@ -321,9 +331,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
 	const [shareUrl, setShareUrl] = useState<string | null>(null);
 	const [shareCopied, setShareCopied] = useState(false);
-	const [urlState, setUrlState] = useUrlState();
-	const viewMode = urlState.v;
-	const sidebarTab = urlState.tab;
+	const { v: viewMode, tab: sidebarTab } = useSearch({ from: '/session/$sessionId' });
+	const navigate = useNavigate({ from: '/session/$sessionId' });
 	const [sshCopied, setSshCopied] = useState(false);
 	const [sandboxCopied, setSandboxCopied] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -336,9 +345,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	}, [track]);
 
 	const handleViewModeChange = useCallback((mode: 'chat' | 'ide') => {
-		setUrlState({ v: mode });
+		navigate({ search: (prev: SessionSearch) => ({ ...prev, v: mode }) });
 		track('view_mode_changed', { mode });
-	}, [setUrlState, track]);
+	}, [navigate, track]);
 
 	const { enqueue: enqueueAudio, clearQueue: clearAudioQueue, isSpeaking } = useAudioPlayback();
 
@@ -1830,11 +1839,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 											? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
 											: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
 									)}
-									onClick={() => setUrlState({ tab: 'files' })}
-									type="button"
-								>
-									Files
-								</button>
+															onClick={() => navigate({ search: (prev: SessionSearch) => ({ ...prev, tab: 'files' }) })}
+															type="button"
+														>
+															Files
+														</button>
 								<button
 									className={cn(
 										"flex-1 px-3 py-2 text-xs font-medium transition-colors",
@@ -1842,9 +1851,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 											? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
 											: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
 									)}
-									onClick={() => setUrlState({ tab: 'git' })}
-									type="button"
-								>
+															onClick={() => navigate({ search: (prev: SessionSearch) => ({ ...prev, tab: 'git' }) })}
+															type="button"
+														>
 									<span>Git</span>
 									{gitChangedCount > 0 && (
 										<span className="ml-1 rounded px-1 text-[10px] bg-[var(--muted)] text-[var(--primary)]">

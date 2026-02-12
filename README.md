@@ -228,7 +228,7 @@ Example: `/?s=abc123&v=ide&tab=git` opens session abc123 in IDE mode with the gi
 - **AI**: OpenCode SDK with sandboxed execution
 - **Markdown**: Streamdown (streaming animation)
 - **Diffs**: @pierre/diffs (FileDiff + PierreFile)
-- **URL State**: nuqs (type-safe URL search params)
+- **Routing**: @tanstack/react-router (type-safe routing with Zod-validated search params)
 - **Deploy**: Agentuity Platform
 
 ## License

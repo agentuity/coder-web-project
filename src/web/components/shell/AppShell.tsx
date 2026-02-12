@@ -1,73 +1,34 @@
-import type { ReactNode } from 'react';
-import { useCallback, useState } from 'react';
+import { Outlet } from '@tanstack/react-router';
 import { Menu } from 'lucide-react';
-import { Sidebar } from './Sidebar';
+import { useCallback, useState } from 'react';
+import { useAppContext } from '../../context/AppContext';
+import { ErrorBoundary } from '../ErrorBoundary';
 import { Button } from '../ui/button';
+import { Sidebar } from './Sidebar';
 import { authClient } from '../../lib/auth-client';
 
-interface Session {
-  id: string;
-  title: string | null;
-  status: string;
-  agent: string | null;
-  createdAt: string;
-  flagged: boolean | null;
-}
+export function AppShell() {
+  const {
+    userEmail,
+    userName,
+    sessions,
+    sessionsLoading,
+    activeSessionId,
+    theme,
+    handleToggleTheme,
+    openNewSessionDialog,
+    handleFlagSession,
+    handleRetrySession,
+    handleDeleteSession,
+  } = useAppContext();
 
-interface AppShellProps {
-  userEmail?: string;
-  userName?: string;
-  sessions: Session[];
-  sessionsLoading?: boolean;
-  activeSessionId?: string;
-  currentPage: string;
-  theme: 'light' | 'dark';
-  onToggleTheme: () => void;
-  onNewSession: () => void;
-  onSelectSession: (id: string) => void;
-	onNavigate: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
-  onGoHome?: () => void;
-  onFlagSession?: (id: string, flagged: boolean) => void;
-  onRetrySession?: (id: string) => void;
-  onDeleteSession?: (id: string) => void;
-  children: ReactNode;
-}
-
-export function AppShell({
-  userEmail,
-  userName,
-  sessions,
-  sessionsLoading,
-  activeSessionId,
-  currentPage,
-  theme,
-  onToggleTheme,
-  onNewSession,
-  onSelectSession,
-  onNavigate,
-  onGoHome,
-  onFlagSession,
-  onRetrySession,
-  onDeleteSession,
-  children,
-}: AppShellProps) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  const handleSelectSession = useCallback((id: string) => {
-    onSelectSession(id);
-    setIsSidebarOpen(false);
-  }, [onSelectSession]);
-
-	const handleNavigate = useCallback((page: 'skills' | 'sources' | 'settings' | 'profile') => {
-		onNavigate(page);
-		setIsSidebarOpen(false);
-	}, [onNavigate]);
-
   const handleNewSession = useCallback(() => {
-    onNewSession();
+    openNewSessionDialog();
     setIsSidebarOpen(false);
-  }, [onNewSession]);
+  }, [openNewSessionDialog]);
 
   const handleToggleSidebar = useCallback(() => {
     setIsSidebarOpen((prev) => !prev);
@@ -75,35 +36,31 @@ export function AppShell({
 
   return (
     <div className="flex h-[100dvh] bg-[var(--background)]">
-		{isSidebarOpen && (
-			<button
-				type="button"
-				className="fixed inset-0 z-40 bg-black/40 md:hidden"
-				onClick={() => setIsSidebarOpen(false)}
-				aria-label="Close sidebar"
-			/>
-		)}
+      {isSidebarOpen && (
+        <button
+          type="button"
+          className="fixed inset-0 z-40 bg-black/40 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+          aria-label="Close sidebar"
+        />
+      )}
 
       <Sidebar
         sessions={sessions}
         sessionsLoading={sessionsLoading}
         activeSessionId={activeSessionId}
         onNewSession={handleNewSession}
-        onSelectSession={handleSelectSession}
-        onNavigate={handleNavigate}
-        onGoHome={onGoHome}
-        onFlagSession={onFlagSession}
-        onRetrySession={onRetrySession}
-        onDeleteSession={onDeleteSession}
-        currentPage={currentPage}
+        onFlagSession={handleFlagSession}
+        onRetrySession={handleRetrySession}
+        onDeleteSession={handleDeleteSession}
         isMobileOpen={isSidebarOpen}
         collapsed={sidebarCollapsed}
         onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
         userEmail={userEmail}
         userName={userName}
         theme={theme}
-        onToggleTheme={onToggleTheme}
-        onSignOut={() => authClient.signOut()}
+        onToggleTheme={handleToggleTheme}
+        onSignOut={() => { authClient.signOut(); }}
       />
 
       <main className="flex flex-1 flex-col min-w-0 overflow-hidden">
@@ -119,7 +76,9 @@ export function AppShell({
           </Button>
         </div>
         <div className="flex-1 min-h-0 overflow-hidden">
-          {children}
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </div>
       </main>
     </div>
