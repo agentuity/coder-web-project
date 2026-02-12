@@ -24,6 +24,7 @@ import {
 import { decrypt } from '../lib/encryption';
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
+import { COMMAND_TO_AGENT } from '../lib/agent-commands';
 
 const api = createRouter();
 
@@ -273,11 +274,18 @@ api.post('/', async (c) => {
 				// Send initial prompt async (fire-and-forget)
 				if (body.prompt && opencodeSessionId) {
 					try {
-						// If an agent command was specified, prepend it so OpenCode routes correctly
-						const promptText = body.agent ? `${body.agent} ${body.prompt}` : body.prompt;
+						// Resolve agent command slug to OpenCode agent display name
+						const commandSlug = body.agent ? body.agent.replace(/^\//, '') : null;
+						const agentName = commandSlug
+							? (COMMAND_TO_AGENT[commandSlug] || commandSlug)
+							: undefined;
+
 						await client.session.promptAsync({
 							path: { id: opencodeSessionId },
-							body: { parts: [{ type: 'text', text: promptText }] },
+							body: {
+								parts: [{ type: 'text', text: body.prompt }],
+								...(agentName ? { agent: agentName } : {}),
+							},
 						});
 					} catch (err) {
 						logger.warn('Failed to send initial prompt', { error: err });

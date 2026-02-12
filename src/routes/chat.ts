@@ -12,16 +12,7 @@ import { getOpencodeClient } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
 import { SpanStatusCode } from '@opentelemetry/api';
-
-/** Map slash-command slugs to the OpenCode agent display names used by promptAsync. */
-const COMMAND_TO_AGENT: Record<string, string> = {
-	'agentuity-coder': 'Agentuity Coder Lead',
-	'agentuity-cadence': 'Agentuity Coder Lead',
-	'agentuity-memory-save': 'Agentuity Coder Memory',
-	'agentuity-memory-share': 'Agentuity Coder Lead',
-	'agentuity-cloud': 'Agentuity Coder Lead',
-	'agentuity-sandbox': 'Agentuity Coder Lead',
-};
+import { COMMAND_TO_AGENT } from '../lib/agent-commands';
 
 const SANDBOX_HOME = '/home/agentuity';
 const UPLOADS_DIR = `${SANDBOX_HOME}/uploads`;

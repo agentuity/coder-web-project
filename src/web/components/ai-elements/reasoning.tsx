@@ -151,7 +151,7 @@ export const ReasoningContent = memo(
 				)}
 				{...props}
 			>
-				<div className="max-h-48 overflow-y-auto overflow-x-auto rounded-md border border-[var(--border)]/50 bg-[var(--muted)]/30 p-2.5 text-[11px] min-w-0 break-words">
+				<div className="max-h-48 overflow-y-auto overflow-x-hidden rounded-md border border-[var(--border)]/50 bg-[var(--muted)]/30 p-2.5 text-[11px] min-w-0 break-words whitespace-pre-wrap [word-break:break-word] [&_*]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:overflow-hidden [&_code]:break-all [&_.streamdown]:overflow-hidden [&_.streamdown]:break-words">
 					{isStreaming && !trimmed ? (
 						<div className="space-y-2">
 							<Shimmer className="block h-2 w-2/3 rounded bg-[var(--muted)]">&nbsp;</Shimmer>
