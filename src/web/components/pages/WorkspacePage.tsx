@@ -1,6 +1,15 @@
-import { useState, useRef, useEffect } from 'react';
-import { Code2, MessageSquare, ArrowUp, Clock } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Code2, MessageSquare, Clock } from 'lucide-react';
 import { useTrackOnMount } from '@agentuity/react';
+import {
+	PromptInput,
+	PromptInputFooter,
+	PromptInputProvider,
+	PromptInputSubmit,
+	PromptInputTextarea,
+} from '../ai-elements/prompt-input';
+import { CommandPicker } from '../chat/AgentSelector';
+import { ModelSelector } from '../chat/ModelSelector';
 
 interface Session {
 	id: string;
@@ -13,7 +22,7 @@ interface WorkspacePageProps {
 	workspaceId?: string;
 	sessions?: Session[];
 	onNewSession?: () => void;
-	onQuickSession?: (prompt: string) => void;
+	onQuickSession?: (prompt: string, options?: { command?: string; model?: string }) => void;
 	onSelectSession?: (id: string) => void;
 	onNavigate?: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
 }
@@ -42,34 +51,29 @@ export function WorkspacePage({ sessions = [], onNewSession, onQuickSession, onS
 	useTrackOnMount({ eventName: 'page_viewed', properties: { page: 'workspace_home' } });
 	const recentSessions = sessions.slice(0, 5);
 	const [prompt, setPrompt] = useState('');
-	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	const [selectedCommand, setSelectedCommand] = useState('');
+	const [selectedModel, setSelectedModel] = useState('anthropic/claude-sonnet-4-5');
 
-	// Auto-resize textarea on input
-	const autoResize = () => {
-		const el = textareaRef.current;
-		if (!el) return;
-		el.style.height = 'auto';
-		el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-	};
-
-	// Focus textarea on mount
+	// Load user's default agent preference
 	useEffect(() => {
-		textareaRef.current?.focus();
+		fetch('/api/user/settings')
+			.then((r) => r.json())
+			.then((data: { defaultCommand?: string }) => {
+				if (data.defaultCommand) {
+					setSelectedCommand(data.defaultCommand);
+				}
+			})
+			.catch(() => {});
 	}, []);
 
-	const handleSubmit = (e: React.FormEvent) => {
-		e.preventDefault();
-		const trimmed = prompt.trim();
+	const handleSubmit = (text: string) => {
+		const trimmed = text.trim();
 		if (!trimmed) return;
-		onQuickSession?.(trimmed);
+		onQuickSession?.(trimmed, {
+			command: selectedCommand || undefined,
+			model: selectedModel || undefined,
+		});
 		setPrompt('');
-	};
-
-	const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-		if (e.key === 'Enter' && !e.shiftKey) {
-			e.preventDefault();
-			handleSubmit(e);
-		}
 	};
 
 	return (
@@ -84,28 +88,25 @@ export function WorkspacePage({ sessions = [], onNewSession, onQuickSession, onS
 				</div>
 
 				{/* Prompt input */}
-				<form onSubmit={handleSubmit} className="relative">
-					<div className="rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-sm focus-within:border-[var(--primary)] focus-within:ring-1 focus-within:ring-[var(--primary)] transition-all">
-						<textarea
-							ref={textareaRef}
+				<PromptInputProvider>
+					<PromptInput onSubmit={({ text }) => handleSubmit(text)}>
+						<PromptInputTextarea
 							value={prompt}
-							onChange={(e) => { setPrompt(e.target.value); autoResize(); }}
-							onKeyDown={handleKeyDown}
+							onChange={(e) => setPrompt(e.target.value)}
 							placeholder="Describe what you want to build, fix, or explore..."
-							rows={3}
-							className="w-full resize-none bg-transparent px-4 pt-4 pb-12 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none"
 						/>
-						<div className="absolute bottom-3 right-3 flex items-center gap-2">
-							<button
-								type="submit"
+						<PromptInputFooter>
+							<div className="flex items-center gap-2">
+								<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
+								<ModelSelector value={selectedModel} onChange={setSelectedModel} />
+							</div>
+							<PromptInputSubmit
 								disabled={!prompt.trim()}
-								className="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] transition-opacity disabled:opacity-30 hover:opacity-90"
-							>
-								<ArrowUp className="h-4 w-4" />
-							</button>
-						</div>
-					</div>
-				</form>
+								status="ready"
+							/>
+						</PromptInputFooter>
+					</PromptInput>
+				</PromptInputProvider>
 
 				{/* Recent Sessions */}
 				{recentSessions.length > 0 && (

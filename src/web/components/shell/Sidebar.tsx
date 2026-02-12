@@ -399,19 +399,14 @@ export function Sidebar({
           >
             <LogOut className="h-3.5 w-3.5" />
           </button>
-        </div>
-        <div className="p-2">
           <button
             onClick={onToggleCollapse}
-            className={cn(
-              'flex w-full items-center p-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
-              isCollapsed ? 'justify-center' : 'justify-end'
-            )}
+            className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
             type="button"
             title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
           </button>
         </div>
       </div>

@@ -188,7 +188,7 @@ function AppContent() {
     return () => clearInterval(interval);
   }, [workspaceId]);
 
-	const handleNewSession = useCallback(async (data: { repoUrl?: string; branch?: string; prompt?: string; snapshotId?: string }) => {
+	const handleNewSession = useCallback(async (data: { repoUrl?: string; branch?: string; prompt?: string; snapshotId?: string; model?: string }) => {
 		if (!workspaceId) return;
 		// Ref-based guard prevents double submission (state updates are async)
 		if (isCreatingRef.current) return;
@@ -291,8 +291,9 @@ function AppContent() {
 		track('workspace_switched', { workspaceId: id });
 	}, [track]);
 
-	const handleQuickSession = useCallback((prompt: string) => {
-		handleNewSession({ prompt });
+	const handleQuickSession = useCallback((prompt: string, options?: { command?: string; model?: string }) => {
+		const fullPrompt = options?.command ? `${options.command} ${prompt}` : prompt;
+		handleNewSession({ prompt: fullPrompt, model: options?.model });
 	}, [handleNewSession]);
 
 	const handleForkedSession = useCallback((session: Session) => {
