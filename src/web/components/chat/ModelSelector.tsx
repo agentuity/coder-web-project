@@ -26,8 +26,8 @@ const MODEL_GROUPS = [
     color: 'bg-[#7dd3fc]',
     models: [
       {
-        value: 'openai/codex-5-2',
-        label: 'Codex 5.2',
+        value: 'openai/gpt-5.2-codex',
+        label: 'GPT 5.2 Codex',
         capabilities: ['code', 'tools'],
       },
     ],
