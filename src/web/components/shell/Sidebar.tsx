@@ -104,11 +104,16 @@ export function Sidebar({
   const displayName = userName || userEmail || 'User';
   const showEmail = Boolean(userName && userEmail);
 
-  const { activeSessions, terminatedSessions } = useMemo(() => {
+  const { activeSessions, terminatedFavorites, terminatedRecent, terminatedTotalCount } = useMemo(() => {
     const isTerminated = (session: Session) => session.status === 'terminated' || session.status === 'error';
+    const terminated = sessions.filter(isTerminated);
+    const favorites = terminated.filter((s) => s.flagged);
+    const nonFavorites = terminated.filter((s) => !s.flagged);
     return {
       activeSessions: sessions.filter((session) => !isTerminated(session)),
-      terminatedSessions: sessions.filter(isTerminated),
+      terminatedFavorites: favorites,
+      terminatedRecent: nonFavorites.slice(0, 30),
+      terminatedTotalCount: terminated.length,
     };
   }, [sessions]);
 
@@ -292,7 +297,7 @@ export function Sidebar({
                       </div>
                     </div>
                   )}
-                  {terminatedSessions.length > 0 && (
+                  {terminatedTotalCount > 0 && (
                     <div>
                       <button
                         type="button"
@@ -306,12 +311,20 @@ export function Sidebar({
                         )}
                         Terminated
                         <Badge variant="secondary" className="ml-auto text-[9px]">
-                          {terminatedSessions.length}
+                          {terminatedTotalCount}
                         </Badge>
                       </button>
                       {showTerminated && (
                         <div className="mt-1 space-y-1">
-                          {terminatedSessions.map(renderSessionRow)}
+                          {terminatedFavorites.length > 0 && (
+                            <>
+                              {terminatedFavorites.map(renderSessionRow)}
+                              {terminatedRecent.length > 0 && (
+                                <div className="mx-3 border-t border-[var(--border)]" />
+                              )}
+                            </>
+                          )}
+                          {terminatedRecent.map(renderSessionRow)}
                         </div>
                       )}
                     </div>
