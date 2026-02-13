@@ -1,6 +1,6 @@
 import { Outlet } from '@tanstack/react-router';
 import { Menu } from 'lucide-react';
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import { ErrorBoundary } from '../ErrorBoundary';
 import { Button } from '../ui/button';
@@ -20,19 +20,22 @@ export function AppShell() {
     handleFlagSession,
     handleRetrySession,
     handleDeleteSession,
+    isSidebarOpen,
+    sidebarCollapsed,
+    toggleSidebarOpen,
+    toggleSidebarCollapse,
+    closeSidebar,
+    openShortcutsHelp,
   } = useAppContext();
-
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const handleNewSession = useCallback(() => {
     openNewSessionDialog();
-    setIsSidebarOpen(false);
-  }, [openNewSessionDialog]);
+    closeSidebar();
+  }, [openNewSessionDialog, closeSidebar]);
 
   const handleToggleSidebar = useCallback(() => {
-    setIsSidebarOpen((prev) => !prev);
-  }, []);
+    toggleSidebarOpen();
+  }, [toggleSidebarOpen]);
 
   return (
     <div className="flex h-[100dvh] bg-[var(--background)]">
@@ -40,7 +43,7 @@ export function AppShell() {
         <button
           type="button"
           className="fixed inset-0 z-40 bg-black/40 md:hidden"
-          onClick={() => setIsSidebarOpen(false)}
+          onClick={closeSidebar}
           aria-label="Close sidebar"
         />
       )}
@@ -55,11 +58,12 @@ export function AppShell() {
         onDeleteSession={handleDeleteSession}
         isMobileOpen={isSidebarOpen}
         collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((prev) => !prev)}
+        onToggleCollapse={toggleSidebarCollapse}
         userEmail={userEmail}
         userName={userName}
         theme={theme}
         onToggleTheme={handleToggleTheme}
+        onShowShortcuts={openShortcutsHelp}
         onSignOut={() => { authClient.signOut(); }}
       />
 

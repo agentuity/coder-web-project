@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 
 export type FileTabKind = 'file' | 'diff' | 'write' | 'read';
 
@@ -49,18 +49,23 @@ export function useFileTabs() {
 	const [tabs, setTabs] = useState<FileTab[]>([]);
 	const [activeId, setActiveId] = useState<string | null>(null);
 
+	// In-memory cache: stores file content when tabs are closed so reopening is instant
+	const contentCache = useRef(new Map<string, string>());
+
 	const openTab = useCallback((tab: FileTab) => {
 		setTabs((prev) => upsertTab(prev, tab));
 		setActiveId(tab.id);
 	}, []);
 
 	const openFile = useCallback((filePath: string, content?: string) => {
+		// Check cache if no content provided — avoids re-fetch from sandbox
+		const resolved = content ?? contentCache.current.get(filePath);
 		openTab({
 			id: `file:${filePath}`,
 			kind: 'file',
 			filePath,
 			title: getFileName(filePath),
-			content,
+			content: resolved,
 		});
 	}, [openTab]);
 
@@ -98,6 +103,11 @@ export function useFileTabs() {
 
 	const closeTab = useCallback((id: string) => {
 		setTabs((prev) => {
+			// Cache content of the tab being closed so reopening is instant
+			const closingTab = prev.find((tab) => tab.id === id);
+			if (closingTab?.content !== undefined) {
+				contentCache.current.set(closingTab.filePath, closingTab.content);
+			}
 			const nextState = closeTabState(prev, activeId, id);
 			if (nextState.activeId !== activeId) {
 				setActiveId(nextState.activeId);
@@ -107,13 +117,27 @@ export function useFileTabs() {
 	}, [activeId]);
 
 	const updateTab = useCallback((id: string, updates: Partial<FileTab>) => {
-		setTabs((prev) => updateTabState(prev, id, updates));
+		setTabs((prev) => {
+			const updated = updateTabState(prev, id, updates);
+			// Keep cache in sync when content is explicitly set (e.g., on save or fetch)
+			if (updates.content !== undefined) {
+				const tab = updated.find((t) => t.id === id);
+				if (tab) {
+					contentCache.current.set(tab.filePath, updates.content);
+				}
+			}
+			return updated;
+		});
 	}, []);
 
 	const activeTab = useMemo(
 		() => tabs.find((tab) => tab.id === activeId) ?? null,
 		[tabs, activeId],
 	);
+
+	const clearCache = useCallback(() => {
+		contentCache.current.clear();
+	}, []);
 
 	return {
 		tabs,
@@ -126,5 +150,6 @@ export function useFileTabs() {
 		openDiff,
 		closeTab,
 		updateTab,
+		clearCache,
 	};
 }

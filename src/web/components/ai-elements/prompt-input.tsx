@@ -105,6 +105,7 @@ export const PromptInputTextarea = ({
 	return (
 		<Textarea
 			ref={textareaRef}
+			data-prompt-input="true"
 			className={cn(
 				'min-h-[3rem] max-h-[200px] resize-none border-0 text-sm shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 focus:outline-none overflow-y-auto',
 				className

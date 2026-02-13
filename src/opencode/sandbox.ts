@@ -18,9 +18,13 @@ function generatePassword(): string {
  * Build a watchdog shell command that starts OpenCode in a restart loop.
  * If the process crashes or exits, the watchdog waits 2s and restarts it.
  * This prevents overnight hangs where the sandbox stays alive but OpenCode dies.
+ *
+ * Note: workDir is embedded directly in the single-quoted bash -c string.
+ * The inner bash interprets the double quotes around the path for space safety.
+ * workDir must not contain single quotes (would break the outer quoting).
  */
 function buildWatchdogCommand(workDir: string): string {
-  return `nohup bash -c 'while true; do cd "'"'"'${workDir}'"'"'" && opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 >> /tmp/opencode.log 2>&1; echo "[watchdog] OpenCode exited (code=$?) at $(date), restarting in 2s..." >> /tmp/opencode.log; sleep 2; done' > /dev/null 2>&1 &`;
+  return `nohup bash -c 'while true; do cd "${workDir}" && opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 >> /tmp/opencode.log 2>&1; echo "[watchdog] OpenCode exited (code=$?) at $(date), restarting in 2s..." >> /tmp/opencode.log; sleep 2; done' > /dev/null 2>&1 &`;
 }
 
 /** Build Basic Auth header value for OpenCode server. */

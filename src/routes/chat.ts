@@ -522,9 +522,10 @@ api.post('/:id/questions/:reqId', async (c) => {
 	const reqId = c.req.param('reqId')!;
 
 	try {
-		// Direct REST call since the SDK does not have a typed question reply method
+		// Direct REST call since the SDK does not have a typed question reply method.
+		// OpenCode endpoint: POST /question/:requestID/reply
 		const resp = await fetch(
-			`${session.sandboxUrl}/session/${session.opencodeSessionId}/questions/${reqId}`,
+			`${session.sandboxUrl}/question/${reqId}/reply`,
 			{
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json', ...getAuthHeaders(session) },

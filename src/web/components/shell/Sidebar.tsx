@@ -1,4 +1,4 @@
-import { Plus, Sparkles, Plug, Settings, Star, RefreshCw, Trash2, ChevronRight, ChevronDown, ChevronLeft, LogOut, Moon, Sun, User } from 'lucide-react';
+import { Plus, Sparkles, Plug, Settings, Star, RefreshCw, Trash2, ChevronRight, ChevronDown, ChevronLeft, LogOut, Moon, Sun, User, Keyboard } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useAnalytics } from '@agentuity/react';
 import { useNavigate, useRouterState } from '@tanstack/react-router';
@@ -33,6 +33,7 @@ interface SidebarProps {
   userName?: string;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
+  onShowShortcuts?: () => void;
   onSignOut: () => void | Promise<void>;
 }
 
@@ -92,6 +93,7 @@ export function Sidebar({
   userName,
   theme,
   onToggleTheme,
+  onShowShortcuts,
   onSignOut,
 }: SidebarProps) {
   const { track } = useAnalytics();
@@ -241,7 +243,7 @@ export function Sidebar({
         title="Go to home"
       >
         <AgentuityLogo size={20} className="text-cyan-400" />
-        {!isCollapsed && <span id="logo" className="text-xl font-semibold tracking-tight">Coder</span>}
+        {!isCollapsed && <span className="logo text-xl font-semibold tracking-tight">Coder</span>}
       </button>
       <div className={cn('p-3', isCollapsed && 'px-2')}>
         {isCollapsed ? (
@@ -413,6 +415,17 @@ export function Sidebar({
           >
             {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
           </button>
+          {onShowShortcuts && (
+            <button
+              onClick={onShowShortcuts}
+              className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
+              title="Keyboard Shortcuts"
+              type="button"
+              aria-label="Keyboard Shortcuts"
+            >
+              <Keyboard className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button
             onClick={() => setShowSignOutConfirm(true)}
             className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-red-500 hover:bg-[var(--accent)]"

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useAppContext } from '../../context/AppContext';
 import { File as PierreFile } from '@pierre/diffs/react';
 import type { LineAnnotation, SelectedLineRange } from '@pierre/diffs';
 import { getLangFromPath } from '../../lib/shiki';
@@ -31,6 +32,7 @@ export function CodeWithComments({
 	comments = [],
 	maxHeightClass = 'max-h-64',
 }: CodeWithCommentsProps) {
+	const { theme } = useAppContext();
 	const lang = getLangFromPath(filePath) as any;
 	const [selectedRange, setSelectedRange] = useState<SelectedLineRange | null>(null);
 	const [commentText, setCommentText] = useState('');
@@ -84,7 +86,7 @@ export function CodeWithComments({
 					)}
 					options={{
 						theme: { dark: 'github-dark', light: 'github-light' },
-						themeType: 'system',
+						themeType: theme,
 						disableFileHeader: true,
 						overflow: 'scroll',
 						enableLineSelection: !!onAddComment,

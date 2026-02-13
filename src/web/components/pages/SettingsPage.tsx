@@ -6,6 +6,7 @@ import { Card } from '../ui/card';
 import { GitHubSettings } from '../settings/GitHubSettings';
 import { VoiceSettings } from '../settings/VoiceSettings';
 import { DefaultAgentSetting } from '../settings/DefaultAgentSetting';
+import { KeybindingsSettings } from '../settings/KeybindingsSettings';
 
 interface Workspace {
 	id: string;
@@ -349,6 +350,15 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 					Connect a GitHub personal access token for repository access in coding sessions.
 				</p>
 				<GitHubSettings />
+			</Card>
+
+			{/* Keyboard Shortcuts */}
+			<Card className="p-4 mt-8 mb-6">
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-2">Keyboard Shortcuts</h3>
+				<p className="text-xs text-[var(--muted-foreground)] mb-4">
+					Customize keyboard shortcuts. Click a binding to change it.
+				</p>
+				<KeybindingsSettings />
 			</Card>
 
 			{/* Danger Zone */}

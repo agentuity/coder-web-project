@@ -40,6 +40,20 @@ interface AppContextValue {
   currentPage: string;
   showNewDialog: boolean;
   isCreating: boolean;
+  commandPaletteOpen: boolean;
+  setCommandPaletteOpen: (open: boolean) => void;
+  openCommandPalette: () => void;
+  closeCommandPalette: () => void;
+  toggleCommandPalette: () => void;
+  shortcutsHelpOpen: boolean;
+  openShortcutsHelp: () => void;
+  closeShortcutsHelp: () => void;
+  isSidebarOpen: boolean;
+  sidebarCollapsed: boolean;
+  toggleSidebar: () => void;
+  toggleSidebarCollapse: () => void;
+  toggleSidebarOpen: () => void;
+  closeSidebar: () => void;
   openNewSessionDialog: () => void;
   closeNewSessionDialog: () => void;
   handleNewSession: (data: NewSessionPayload) => Promise<void>;
@@ -79,6 +93,10 @@ export function AppProvider({ children, userEmail, userName }: { children: React
 
   const [showNewDialog, setShowNewDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const isCreatingRef = useRef(false);
   const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -135,20 +153,6 @@ export function AppProvider({ children, userEmail, userName }: { children: React
       return newTheme;
     });
   }, [track]);
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
-        e.preventDefault();
-        setShowNewDialog(true);
-      }
-      if (e.key === 'Escape' && showNewDialog) {
-        setShowNewDialog(false);
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [showNewDialog]);
 
   useEffect(() => {
     if (!userName && !userEmail) return;
@@ -331,6 +335,21 @@ export function AppProvider({ children, userEmail, userName }: { children: React
 
   const openNewSessionDialog = useCallback(() => setShowNewDialog(true), []);
   const closeNewSessionDialog = useCallback(() => setShowNewDialog(false), []);
+  const openCommandPalette = useCallback(() => setCommandPaletteOpen(true), []);
+  const closeCommandPalette = useCallback(() => setCommandPaletteOpen(false), []);
+  const toggleCommandPalette = useCallback(() => setCommandPaletteOpen((prev) => !prev), []);
+  const openShortcutsHelp = useCallback(() => setShortcutsHelpOpen(true), []);
+  const closeShortcutsHelp = useCallback(() => setShortcutsHelpOpen(false), []);
+  const toggleSidebarCollapse = useCallback(() => setSidebarCollapsed((prev) => !prev), []);
+  const toggleSidebarOpen = useCallback(() => setIsSidebarOpen((prev) => !prev), []);
+  const closeSidebar = useCallback(() => setIsSidebarOpen(false), []);
+  const toggleSidebar = useCallback(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 768) {
+      setIsSidebarOpen((prev) => !prev);
+      return;
+    }
+    setSidebarCollapsed((prev) => !prev);
+  }, []);
 
   const value = useMemo<AppContextValue>(() => ({
     userEmail,
@@ -344,6 +363,20 @@ export function AppProvider({ children, userEmail, userName }: { children: React
     currentPage,
     showNewDialog,
     isCreating,
+    commandPaletteOpen,
+    setCommandPaletteOpen,
+    openCommandPalette,
+    closeCommandPalette,
+    toggleCommandPalette,
+    shortcutsHelpOpen,
+    openShortcutsHelp,
+    closeShortcutsHelp,
+    isSidebarOpen,
+    sidebarCollapsed,
+    toggleSidebar,
+    toggleSidebarCollapse,
+    toggleSidebarOpen,
+    closeSidebar,
     openNewSessionDialog,
     closeNewSessionDialog,
     handleNewSession,
@@ -366,6 +399,19 @@ export function AppProvider({ children, userEmail, userName }: { children: React
     currentPage,
     showNewDialog,
     isCreating,
+    commandPaletteOpen,
+    openCommandPalette,
+    closeCommandPalette,
+    toggleCommandPalette,
+    shortcutsHelpOpen,
+    openShortcutsHelp,
+    closeShortcutsHelp,
+    isSidebarOpen,
+    sidebarCollapsed,
+    toggleSidebar,
+    toggleSidebarCollapse,
+    toggleSidebarOpen,
+    closeSidebar,
     openNewSessionDialog,
     closeNewSessionDialog,
     handleNewSession,

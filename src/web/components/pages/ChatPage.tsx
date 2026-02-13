@@ -26,6 +26,7 @@ import { Badge } from '../ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
 import { FileExplorer } from '../chat/FileExplorer';
+import type { FileTreeNode } from '../ai-elements/file-tree';
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
 import { GitPanel, useGitStatus } from '../chat/GitPanel';
@@ -74,6 +75,7 @@ import { Loader } from '../ai-elements/loader';
 import { useToast } from '../ui/toast';
 import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
+import { useEditorSettings } from '../../hooks/useEditorSettings';
 import { useNarratorMode } from '../../hooks/useNarratorMode';
 import { useAudioPlayback } from '../../hooks/useAudioPlayback';
 import { VoiceControls } from '../ui/VoiceControls';
@@ -83,6 +85,8 @@ import { useNavigate, useSearch } from '@tanstack/react-router';
 import type { z } from 'zod';
 import { sessionSearchSchema } from '../../router';
 import { useAnalytics } from '@agentuity/react';
+import { useHotkeys } from 'react-hotkeys-hook';
+import { useKeybindings } from '../../hooks/useKeybindings';
 
 interface ChatPageProps {
   sessionId: string;
@@ -93,6 +97,7 @@ interface ChatPageProps {
     model: string | null;
     sandboxId: string | null;
     sandboxUrl: string | null;
+    createdAt: string;
     metadata?: Record<string, unknown> | null;
   };
   onForkedSession?: (session: {
@@ -156,8 +161,16 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
   const [session, setSession] = useState(initialSession);
   const { toast } = useToast();
   const { track } = useAnalytics();
-  const [statusStartedAt, setStatusStartedAt] = useState(() => Date.now());
-  const [statusElapsedMs, setStatusElapsedMs] = useState(0);
+  const [statusStartedAt, setStatusStartedAt] = useState(() => {
+    // Use the session's creation timestamp so revisiting a creating session
+    // shows the actual elapsed time instead of restarting from zero.
+    const created = Date.parse(initialSession.createdAt);
+    return Number.isFinite(created) ? created : Date.now();
+  });
+  const [statusElapsedMs, setStatusElapsedMs] = useState(() => {
+    const created = Date.parse(initialSession.createdAt);
+    return Number.isFinite(created) ? Math.max(0, Date.now() - created) : 0;
+  });
   const [archivedMessages, setArchivedMessages] = useState<ChatMessage[]>([]);
   const [archivedParts, setArchivedParts] = useState<Map<string, Part[]>>(new Map());
   const [archiveError, setArchiveError] = useState<string | null>(null);
@@ -173,9 +186,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       setStatusElapsedMs(0);
       return;
     }
-    setStatusStartedAt(Date.now());
-    setStatusElapsedMs(0);
-  }, [session.status, sessionId]);
+    // Use session createdAt so navigating away and back doesn't reset the timer.
+    const created = Date.parse(session.createdAt ?? '');
+    const start = Number.isFinite(created) ? created : Date.now();
+    setStatusStartedAt(start);
+    setStatusElapsedMs(Math.max(0, Date.now() - start));
+  }, [session.status, sessionId, session.createdAt]);
 
   useEffect(() => {
     if (session.status === 'active') return;
@@ -366,6 +382,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		track('view_mode_changed', { mode });
 	}, [navigate, track]);
 
+	const focusChatInput = useCallback(() => {
+		const textarea = document.querySelector<HTMLTextAreaElement>('textarea[data-prompt-input="true"]');
+		if (!textarea) return false;
+		textarea.focus();
+		textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+		return true;
+	}, []);
+
 	const { enqueue: enqueueAudio, clearQueue: clearAudioQueue, isSpeaking } = useAudioPlayback();
 
 	const handleSendRef = useRef<(text: string) => Promise<void>>(undefined);
@@ -535,6 +559,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		},
 		[attachments.length, toast, track],
 	);
+	const { getKeys } = useKeybindings();
 	const {
 		tabs,
 		activeId,
@@ -545,6 +570,73 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		closeTab,
 		updateTab,
 	} = useFileTabs();
+
+	useHotkeys(
+		getKeys('focus-chat'),
+		(event) => {
+			event.preventDefault();
+			if (focusChatInput()) return;
+			if (viewMode !== 'chat') {
+				handleViewModeChange('chat');
+				setTimeout(() => {
+					focusChatInput();
+				}, 50);
+			}
+		},
+		{ enableOnFormTags: ['INPUT', 'TEXTAREA', 'SELECT'], enableOnContentEditable: true },
+		[getKeys('focus-chat'), viewMode]
+	);
+
+	useHotkeys(
+		getKeys('toggle-view'),
+		(event) => {
+			event.preventDefault();
+			handleViewModeChange(viewMode === 'ide' ? 'chat' : 'ide');
+		},
+		{ enableOnFormTags: ['INPUT', 'TEXTAREA', 'SELECT'], enableOnContentEditable: true },
+		[getKeys('toggle-view'), viewMode]
+	);
+
+	useHotkeys(
+		getKeys('close-tab'),
+		(event) => {
+			if (viewMode !== 'ide' || !activeId) return;
+			event.preventDefault();
+			closeTab(activeId);
+		},
+		{ enableOnFormTags: false, enableOnContentEditable: false },
+		[getKeys('close-tab'), viewMode, activeId]
+	);
+
+	useHotkeys(
+		getKeys('toggle-sidebar-tab'),
+		(event) => {
+			if (viewMode !== 'ide') return;
+			event.preventDefault();
+			const nextTab = sidebarTab === 'files' ? 'git' : 'files';
+			navigate({ search: (prev: SessionSearch) => ({ ...prev, tab: nextTab }) });
+		},
+		{ enableOnFormTags: false, enableOnContentEditable: false },
+		[getKeys('toggle-sidebar-tab'), viewMode, sidebarTab]
+	);
+
+	useEffect(() => {
+		const handler = () => {
+			if (viewMode !== 'ide' || !activeId) return;
+			closeTab(activeId);
+		};
+		window.addEventListener('app-close-active-tab', handler);
+		return () => window.removeEventListener('app-close-active-tab', handler);
+	}, [activeId, closeTab, viewMode]);
+
+	// File tree cache — persists across IDE tab switches (mount/unmount of FileExplorer)
+	const [cachedTreeNodes, setCachedTreeNodes] = useState<FileTreeNode[]>([]);
+	const [cachedTreeEntryCount, setCachedTreeEntryCount] = useState(0);
+	const handleTreeLoaded = useCallback((treeNodes: FileTreeNode[], treeEntryCount: number) => {
+		setCachedTreeNodes(treeNodes);
+		setCachedTreeEntryCount(treeEntryCount);
+	}, []);
+
 	const {
 		commentCount,
 		addComment,
@@ -553,6 +645,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		getDiffAnnotations,
 		getFileComments,
 	} = useCodeComments();
+	const { settings: editorSettings, updateSettings: updateEditorSettings } = useEditorSettings();
 	const handleAddComment = useCallback((...args: Parameters<typeof addComment>) => {
 		addComment(...args);
 		track('code_comment_added');
@@ -1757,7 +1850,6 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<PopoverTrigger asChild>
 						<Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
 							<Terminal className="h-3.5 w-3.5" />
-							<span className="hidden md:inline">SSH</span>
 						</Button>
 					</PopoverTrigger>
 					<PopoverContent
@@ -1983,6 +2075,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						onOpenFile={openFile}
 						onOpenDiff={(path) => openDiff(path, '', '')}
 						activeFilePath={activeFilePath}
+						editorSettings={editorSettings}
+						onUpdateEditorSettings={updateEditorSettings}
+						cachedNodes={cachedTreeNodes}
+						cachedEntryCount={cachedTreeEntryCount}
+						onTreeLoaded={handleTreeLoaded}
 					/>
 						)}
 						</div>
@@ -1999,6 +2096,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						onAddComment={handleAddComment}
 						getDiffAnnotations={getDiffAnnotations}
 						getFileComments={getFileComments}
+						editorSettings={editorSettings}
 					/>
 						}
 					/>

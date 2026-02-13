@@ -1,18 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAppContext } from '../../context/AppContext';
 import { File as PierreFile, FileDiff as PierreDiff } from '@pierre/diffs/react';
 import {
 	parseDiffFromFile,
 	type DiffLineAnnotation,
-	type LineAnnotation,
 	type SelectedLineRange,
 } from '@pierre/diffs';
-import { AlertCircle, Loader2, PencilLine, Save } from 'lucide-react';
+import { AlertCircle, Loader2, Save } from 'lucide-react';
 import { FileTabs } from './FileTabs';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { getLangFromPath } from '../../lib/shiki';
+import type { EditorSettings } from '../../hooks/useEditorSettings';
 import type { FileTab } from '../../hooks/useFileTabs';
 import type { CodeComment } from '../../hooks/useCodeComments';
+
+const CodeEditor = lazy(() => import('./CodeEditor'));
+
+// Prefetch: start loading CodeEditor module immediately when this module is evaluated.
+// By the time the user clicks a file, the module is already loaded or loading.
+void import('./CodeEditor');
 
 interface CodePanelProps {
 	sessionId: string;
@@ -24,6 +31,7 @@ interface CodePanelProps {
 	onAddComment: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
 	getDiffAnnotations: (file: string) => DiffLineAnnotation<{ id: string; comment: string }> [];
 	getFileComments: (file: string) => CodeComment[];
+	editorSettings: EditorSettings;
 }
 
 function getNormalizedRange(range: SelectedLineRange) {
@@ -41,8 +49,20 @@ export function CodePanel({
 	onAddComment,
 	getDiffAnnotations,
 	getFileComments,
+	editorSettings,
 }: CodePanelProps) {
+	const { theme } = useAppContext();
 	const activeTab = tabs.find((tab) => tab.id === activeId) ?? null;
+
+	// Extract primitive values from activeTab to use as stable useEffect dependencies.
+	// Using the full activeTab object reference causes infinite render loops because
+	// onUpdateTab() creates a new tab object via spread, changing the reference,
+	// which re-fires effects that depend on it.
+	const activeTabId = activeTab?.id;
+	const activeTabContent = activeTab?.content;
+	const activeTabKind = activeTab?.kind;
+	const activeTabFilePath = activeTab?.filePath;
+
 	const canEdit = Boolean(
 		activeTab
 		&& activeTab.kind !== 'diff'
@@ -51,7 +71,6 @@ export function CodePanel({
 	);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [isEditing, setIsEditing] = useState(false);
 	const [editContent, setEditContent] = useState('');
 	const [isModified, setIsModified] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
@@ -61,31 +80,42 @@ export function CodePanel({
 
 	const resetKey = activeTab?.id ?? 'none';
 
+	// Track last synced isModified value via ref to avoid including activeTabIsModified
+	// in the dependency array, which would create a render cycle:
+	// editContent changes → effect fires → onUpdateTab({isModified}) → activeTabIsModified changes → effect re-fires
+	const lastSyncedModified = useRef<boolean | undefined>(undefined);
+	// When switching tabs, the reset effect and isModified effect both fire in the same
+	// render cycle. But editContent still holds the OLD tab's value (setState is queued).
+	// The isModified effect would compute: oldEditContent !== newTabContent → TRUE → flash!
+	// This ref tells the isModified effect to skip when a reset just happened.
+	const justReset = useRef(false);
+
 	useEffect(() => {
 		if (!resetKey) return;
+		lastSyncedModified.current = undefined;
+		justReset.current = true;
 		setSelectedRange(null);
 		setCommentText('');
 		setError(null);
 		setSaveError(null);
-		setIsEditing(false);
-		setEditContent(activeTab?.content ?? '');
+		setEditContent(activeTabContent ?? '');
 		setIsModified(false);
-	}, [activeTab?.content, resetKey]);
+	}, [activeTabContent, resetKey]);
 
 	useEffect(() => {
-		if (!activeTab || activeTab.kind === 'diff') return;
-		if (activeTab.content !== undefined) return;
+		if (!activeTabId || activeTabKind === 'diff') return;
+		if (activeTabContent !== undefined) return;
 		let cancelled = false;
 		setLoading(true);
 		setError(null);
-		fetch(`/api/sessions/${sessionId}/files/content?path=${encodeURIComponent(activeTab.filePath)}`)
+		fetch(`/api/sessions/${sessionId}/files/content?path=${encodeURIComponent(activeTabFilePath!)}`)
 			.then((res) => {
 				if (!res.ok) throw new Error(`HTTP ${res.status}`);
 				return res.json();
 			})
 			.then((data) => {
 				if (cancelled) return;
-				onUpdateTab(activeTab.id, { content: data.content || '' });
+				onUpdateTab(activeTabId, { content: data.content || '' });
 			})
 			.catch(() => {
 				if (!cancelled) setError('Failed to load file content');
@@ -96,42 +126,23 @@ export function CodePanel({
 		return () => {
 			cancelled = true;
 		};
-	}, [activeTab, onUpdateTab, sessionId]);
+	}, [activeTabId, activeTabKind, activeTabContent, activeTabFilePath, onUpdateTab, sessionId]);
 
 	useEffect(() => {
-		if (!activeTab || activeTab.kind === 'diff') return;
-		if (isEditing) return;
-		setEditContent(activeTab.content ?? '');
-		setIsModified(false);
-		if (activeTab.isModified) {
-			onUpdateTab(activeTab.id, { isModified: false });
+		if (!activeTabId || activeTabKind === 'diff') return;
+		// Skip this cycle if the reset effect just fired — editContent is stale
+		// (still holds the previous tab's content until React applies the queued setState).
+		if (justReset.current) {
+			justReset.current = false;
+			return;
 		}
-	}, [activeTab, isEditing, onUpdateTab]);
-
-	useEffect(() => {
-		if (!activeTab || activeTab.kind === 'diff') return;
-		const nextModified = editContent !== (activeTab.content ?? '');
+		const nextModified = editContent !== (activeTabContent ?? '');
 		setIsModified(nextModified);
-		if (activeTab.isModified !== nextModified) {
-			onUpdateTab(activeTab.id, { isModified: nextModified });
+		if (lastSyncedModified.current !== nextModified) {
+			lastSyncedModified.current = nextModified;
+			onUpdateTab(activeTabId, { isModified: nextModified });
 		}
-	}, [activeTab, editContent, onUpdateTab]);
-
-	const fileAnnotations = useMemo(() => {
-		if (!activeTab || activeTab.kind === 'diff') return [] as LineAnnotation<{ id: string; comment: string }>[];
-		const annotations: LineAnnotation<{ id: string; comment: string }>[] = [];
-		for (const comment of getFileComments(activeTab.filePath)) {
-			if (comment.origin !== 'file') continue;
-			const normalized = getNormalizedRange(comment.selection);
-			for (let line = normalized.start; line <= normalized.end; line += 1) {
-				annotations.push({
-					lineNumber: line,
-					metadata: { id: comment.id, comment: comment.comment },
-				});
-			}
-		}
-		return annotations;
-	}, [activeTab, getFileComments]);
+	}, [activeTabId, activeTabContent, activeTabKind, editContent, onUpdateTab]);
 
 	const diffData = useMemo(() => {
 		if (!activeTab || activeTab.kind !== 'diff' || activeTab.oldContent === undefined || activeTab.newContent === undefined) return null;
@@ -147,6 +158,21 @@ export function CodePanel({
 		&& activeTab.kind === 'diff'
 		&& activeTab.oldContent === ''
 		&& (activeTab.newContent ?? '') !== '',
+	);
+
+	const isEmptyDiff = Boolean(
+		activeTab
+		&& activeTab.kind === 'diff'
+		&& (activeTab.oldContent ?? '') === ''
+		&& (activeTab.newContent ?? '') === '',
+	);
+
+	const isIdenticalDiff = Boolean(
+		activeTab
+		&& activeTab.kind === 'diff'
+		&& !isNewFileDiff
+		&& !isEmptyDiff
+		&& activeTab.oldContent === activeTab.newContent,
 	);
 
 	const handleAddComment = () => {
@@ -179,18 +205,6 @@ export function CodePanel({
 		}
 	}, [activeTab, editContent, isModified, onUpdateTab, sessionId]);
 
-	useEffect(() => {
-		if (!isEditing || !activeTab || activeTab.kind === 'diff') return;
-		const handler = (event: KeyboardEvent) => {
-			const isSave = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's';
-			if (!isSave) return;
-			event.preventDefault();
-			void handleSave();
-		};
-		window.addEventListener('keydown', handler);
-		return () => window.removeEventListener('keydown', handler);
-	}, [activeTab, handleSave, isEditing]);
-
 	return (
 		<div className="flex h-full min-h-0 flex-col overflow-hidden">
 			<div className="shrink-0">
@@ -213,12 +227,28 @@ export function CodePanel({
 							<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
 								<span className="font-mono truncate" title={activeTab.filePath}>{activeTab.filePath}</span>
 								<Badge variant="secondary" className="text-[10px]">
-									{isNewFileDiff ? 'New File' : 'Diff'}
+									{isNewFileDiff ? 'New File' : isEmptyDiff ? 'New File' : isIdenticalDiff ? 'No Changes' : 'Diff'}
 								</Badge>
 							</div>
 						</div>
 						<div className="flex-1 min-h-0 overflow-y-auto">
-							{isNewFileDiff ? (
+							{isEmptyDiff ? (
+								<div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+									<div className="text-2xl">📄</div>
+									<div className="text-sm font-medium text-[var(--foreground)]">New file</div>
+									<div className="text-xs text-[var(--muted-foreground)]">
+										This file was just created. There&apos;s no previous version to compare against.
+									</div>
+								</div>
+							) : isIdenticalDiff ? (
+								<div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+									<div className="text-2xl">✓</div>
+									<div className="text-sm font-medium text-[var(--foreground)]">No changes</div>
+									<div className="text-xs text-[var(--muted-foreground)]">
+										This file is identical to the previous version.
+									</div>
+								</div>
+							) : isNewFileDiff ? (
 								<div className="px-3 py-2">
 									<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
 										<PierreFile
@@ -236,7 +266,7 @@ export function CodePanel({
 											)}
 											options={{
 												theme: { dark: 'github-dark', light: 'github-light' },
-												themeType: 'system',
+												themeType: theme,
 												disableFileHeader: true,
 												enableLineSelection: true,
 												onLineSelected: (range) => setSelectedRange(range),
@@ -258,7 +288,7 @@ export function CodePanel({
 											)}
 											options={{
 												theme: { dark: 'github-dark', light: 'github-light' },
-												themeType: 'system',
+												themeType: theme,
 												disableFileHeader: true,
 												diffStyle: 'unified',
 												diffIndicators: 'bars',
@@ -269,8 +299,10 @@ export function CodePanel({
 									</div>
 								</div>
 							) : (
-								<div className="px-3 py-4 text-xs text-[var(--muted-foreground)]">
-									Unable to render diff
+								<div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
+									<div className="text-xs text-[var(--muted-foreground)]">
+										Unable to render diff
+									</div>
 								</div>
 							)}
 						</div>
@@ -292,17 +324,7 @@ export function CodePanel({
 								)}
 							</div>
 							<div className="flex items-center gap-2">
-								<Button
-									variant="ghost"
-									size="sm"
-									onClick={() => setIsEditing((prev) => !prev)}
-									disabled={!canEdit}
-									className="h-7 text-xs"
-									title={isEditing ? 'View mode' : 'Edit file'}
-								>
-									<PencilLine className="h-3 w-3 mr-1" />
-									{isEditing ? 'View' : 'Edit'}
-								</Button>
+							{isModified && (
 								<Button
 									variant="secondary"
 									size="sm"
@@ -318,9 +340,10 @@ export function CodePanel({
 									)}
 									Save
 								</Button>
+								)}
 							</div>
 						</div>
-						<div className="flex-1 min-h-0 overflow-y-auto">
+						<div className="flex-1 min-h-0 overflow-hidden">
 							{loading && (
 								<div className="flex items-center justify-center py-8">
 									<Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
@@ -338,48 +361,33 @@ export function CodePanel({
 									{saveError}
 								</div>
 							)}
-							{!loading && !error && isEditing && (
-								<div className="px-3 py-2">
-									<textarea
-										value={editContent}
-										onChange={(event) => setEditContent(event.target.value)}
-										className="w-full min-h-[400px] resize-none rounded-md border border-[var(--border)] bg-[var(--background)] px-3 py-2 font-mono text-[11px] leading-[1.6] text-[var(--foreground)]"
-										spellCheck={false}
-									/>
-								</div>
-							)}
-							{!loading && !error && !isEditing && activeTab.content !== undefined && (
-								<div className="px-3 py-2">
-									<div className="rounded-md border border-[var(--border)] overflow-hidden [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
-										<PierreFile
-											file={{
-												name: activeTab.filePath,
-												contents: activeTab.content ?? '',
-												lang: getLangFromPath(activeTab.filePath) as any,
-											}}
-											selectedLines={selectedRange}
-											lineAnnotations={fileAnnotations}
-											renderAnnotation={(annotation) => (
-												<div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
-													{annotation.metadata?.comment ?? 'Comment'}
-												</div>
-											)}
-											options={{
-												theme: { dark: 'github-dark', light: 'github-light' },
-												themeType: 'system',
-												disableFileHeader: true,
-												enableLineSelection: true,
-												onLineSelected: (range) => setSelectedRange(range),
-											}}
-										/>
+							{!loading && !error && activeTab.content !== undefined && (
+								<Suspense fallback={
+									<div className="flex items-center justify-center h-full">
+										<Loader2 className="h-4 w-4 animate-spin text-[var(--muted-foreground)]" />
 									</div>
-								</div>
+								}>
+								<CodeEditor
+									value={editContent}
+									filePath={activeTab.filePath}
+									readOnly={!canEdit}
+									onChange={(val) => setEditContent(val)}
+									onSave={handleSave}
+									onLineComment={(lineNumber) => {
+										setSelectedRange({ start: lineNumber, end: lineNumber, side: 'additions' });
+									}}
+									theme={editorSettings.theme}
+									vimMode={editorSettings.vimMode}
+									tabSize={editorSettings.tabSize}
+									fontSize={editorSettings.fontSize}
+								/>
+								</Suspense>
 							)}
 						</div>
 					</div>
 				)}
 			</div>
-			{activeTab && selectedRange && (
+			{activeTab && activeTab.kind === 'diff' && selectedRange && (
 				<div className="shrink-0 border-t border-[var(--border)] bg-[var(--muted)] px-3 py-2">
 					<div className="flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
 						<span>
@@ -397,6 +405,36 @@ export function CodePanel({
 							value={commentText}
 							onChange={(event) => setCommentText(event.target.value)}
 							placeholder="Add a comment for these lines"
+							className="flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
+						/>
+						<Button size="sm" variant="default" className="h-7 text-xs" onClick={handleAddComment}>
+							Add
+						</Button>
+					</div>
+				</div>
+			)}
+			{activeTab && activeTab.kind !== 'diff' && selectedRange && (
+				<div className="shrink-0 border-t border-[var(--border)] bg-[var(--muted)] px-3 py-2">
+					<div className="flex items-center justify-between text-[10px] text-[var(--muted-foreground)]">
+						<span>
+							Line {getNormalizedRange(selectedRange).start}
+							{getNormalizedRange(selectedRange).end !== getNormalizedRange(selectedRange).start
+								? `-${getNormalizedRange(selectedRange).end}`
+								: ''}
+						</span>
+						<Button size="sm" variant="ghost" className="h-6 text-[10px]" onClick={() => setSelectedRange(null)}>
+							Clear
+						</Button>
+					</div>
+					<div className="mt-2 flex gap-2">
+						<input
+							ref={(el) => el?.focus()}
+							value={commentText}
+							onChange={(event) => setCommentText(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === 'Enter') handleAddComment();
+							}}
+							placeholder="Add a comment for this line"
 							className="flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
 						/>
 						<Button size="sm" variant="default" className="h-7 text-xs" onClick={handleAddComment}>

@@ -218,6 +218,49 @@ The app uses URL search params for deep linking:
 
 Example: `/?s=abc123&v=ide&tab=git` opens session abc123 in IDE mode with the git panel.
 
+### Keyboard Shortcuts
+
+Open the shortcuts reference anytime with **Ctrl+Shift+/** (or **⌘ ⇧ /** on Mac), or via the sidebar.
+
+#### General
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+K / ⌘K | Open command palette |
+| Ctrl+Shift+P / ⌘⇧P | Open command palette (alt) |
+| Ctrl+Shift+/ / ⌘⇧/ | Show keyboard shortcuts reference |
+
+#### Navigation
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+Shift+N / ⌘⇧N | New session |
+| Ctrl+Shift+, / ⌘⇧, | Open settings |
+| Ctrl+1-9 / ⌘1-9 | Jump to session by index |
+
+#### Chat
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+/ / ⌘/ | Focus chat input |
+
+#### View
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+B / ⌘B | Toggle sidebar |
+| Ctrl+Shift+E / ⌘⇧E | Toggle code/chat view |
+| Ctrl+Shift+L / ⌘⇧L | Toggle light/dark theme |
+
+#### Editor (IDE mode)
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+Shift+W / ⌘⇧W | Close active editor tab |
+| Ctrl+Shift+F / ⌘⇧F | Toggle files/git panel |
+
+The command palette (Ctrl+K) also provides searchable access to all actions and sessions.
+
 ## Tech Stack
 
 - **Runtime**: Bun

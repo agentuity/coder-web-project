@@ -40,10 +40,11 @@ async function execInSandbox(
 	command: string,
 	workDir: string = PROJECT_DIR,
 ): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+	// Use GIT_CEILING_DIRECTORIES to prevent git from walking up to parent dirs
 	const execution = await sandboxExecute(apiClient, {
 		sandboxId,
 		options: {
-			command: ['bash', '-c', `cd ${workDir} && ${command}`],
+			command: ['bash', '-c', `cd '${workDir}' && GIT_CEILING_DIRECTORIES='${SANDBOX_HOME}' ${command}`],
 			timeout: '30s',
 		},
 	});
@@ -104,7 +105,10 @@ function getProjectDir(session: typeof chatSessions.$inferSelect) {
 	if (!repoUrl) return PROJECT_DIR;
 	const repoName = repoUrl.split('/').pop()?.replace('.git', '');
 	if (!repoName) return PROJECT_DIR;
-	return `/home/agentuity/${repoName}`;
+	// Sanitize: only allow alphanumeric, hyphens, underscores, dots
+	const safeName = repoName.replace(/[^a-zA-Z0-9._-]/g, '');
+	if (!safeName) return PROJECT_DIR;
+	return `/home/agentuity/${safeName}`;
 }
 
 function normalizeGitFile(input: string) {

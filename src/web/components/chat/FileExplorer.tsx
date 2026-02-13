@@ -3,6 +3,8 @@ import { Loader2, RefreshCw, AlertCircle, FolderTree, ChevronDown, GitCommit } f
 import { Button } from '../ui/button';
 import { FileTree, type FileTreeNode } from '../ai-elements/file-tree';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../ui/collapsible';
+import { EditorSettings } from '../ide/EditorSettings';
+import type { EditorSettings as EditorSettingsType } from '../../hooks/useEditorSettings';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,12 +37,19 @@ interface FileExplorerProps {
 	onOpenFile: (path: string) => void;
 	onOpenDiff?: (path: string) => void;
 	activeFilePath?: string | null;
+	editorSettings?: EditorSettingsType;
+	onUpdateEditorSettings?: (updates: Partial<EditorSettingsType>) => void;
+	// Tree caching props — parent can persist tree state across mount/unmount cycles
+	cachedNodes?: FileTreeNode[];
+	cachedEntryCount?: number;
+	onTreeLoaded?: (nodes: FileTreeNode[], entryCount: number) => void;
 }
 
-export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath }: FileExplorerProps) {
-	const [nodes, setNodes] = useState<FileTreeNode[]>([]);
-	const [entryCount, setEntryCount] = useState(0);
-	const [loading, setLoading] = useState(true);
+export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath, editorSettings, onUpdateEditorSettings, cachedNodes, cachedEntryCount, onTreeLoaded }: FileExplorerProps) {
+	const [nodes, setNodes] = useState<FileTreeNode[]>(cachedNodes ?? []);
+	const [entryCount, setEntryCount] = useState(cachedEntryCount ?? 0);
+	// If cached nodes exist, skip loading spinner — show them instantly (stale-while-revalidate)
+	const [loading, setLoading] = useState(!cachedNodes?.length);
 	const [error, setError] = useState<string | null>(null);
 	const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
 	const [gitLoading, setGitLoading] = useState(false);
@@ -117,7 +126,9 @@ export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath
 			const data = await res.json();
 			const entries = data.entries || [];
 			setEntryCount(entries.length);
-			setNodes(buildTree(entries, data.path || '/'));
+			const tree = buildTree(entries, data.path || '/');
+			setNodes(tree);
+			onTreeLoaded?.(tree, entries.length);
 		} catch {
 			setError('Failed to load files');
 			setNodes([]);
@@ -125,7 +136,7 @@ export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath
 		} finally {
 			setLoading(false);
 		}
-	}, [sessionId, buildTree]);
+	}, [sessionId, buildTree, onTreeLoaded]);
 
 	const fetchGitStatus = useCallback(async () => {
 		setGitLoading(true);
@@ -255,6 +266,13 @@ export function FileExplorer({ sessionId, onOpenFile, onOpenDiff, activeFilePath
 					<FileTree nodes={nodes} selectedPath={activeFilePath ?? undefined} onSelect={onOpenFile} />
 				)}
 			</div>
+
+			{/* Editor Settings at bottom */}
+			{editorSettings && onUpdateEditorSettings && (
+				<div className="shrink-0 border-t border-[var(--border)] px-3 py-2">
+					<EditorSettings settings={editorSettings} onUpdate={onUpdateEditorSettings} />
+				</div>
+			)}
 		</div>
 	);
 }
