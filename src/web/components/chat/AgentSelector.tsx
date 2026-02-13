@@ -12,7 +12,6 @@ const CHAT_OPTION: PickerItem = { value: '', label: 'Chat', description: 'Direct
 const AGENTS: PickerItem[] = [
   { value: '/agentuity-coder', label: 'Agentuity Coder', description: 'Full agent team' },
   { value: '/agentuity-cadence', label: 'Cadence', description: 'Autonomous loop' },
-  { value: '/review', label: 'Review', description: 'Review code' },
 ];
 
 const COMMANDS: PickerItem[] = [
