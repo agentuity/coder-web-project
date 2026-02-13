@@ -3,9 +3,21 @@
  * Each chat session gets its own sandbox with an OpenCode server.
  */
 import { JSON_RENDER_CORE_SKILL, JSON_RENDER_REACT_SKILL, UI_SPEC_INSTRUCTIONS } from './json-render-skills';
+import { randomBytes } from 'node:crypto';
 
 const OPENCODE_PORT = 4096;
 const OPENCODE_RUNTIME = 'opencode:latest';
+const OPENCODE_USERNAME = 'opencode';
+
+/** Generate a short random password for OpenCode server auth. */
+function generatePassword(): string {
+  return randomBytes(8).toString('hex'); // 16 chars
+}
+
+/** Build Basic Auth header value for OpenCode server. */
+export function buildBasicAuthHeader(password: string): string {
+  return `Basic ${Buffer.from(`${OPENCODE_USERNAME}:${password}`).toString('base64')}`;
+}
 
 export interface SandboxConfig {
   repoUrl?: string;
@@ -41,8 +53,10 @@ export interface SandboxContext {
 export async function createSandbox(
   ctx: SandboxContext,
   config: SandboxConfig,
-): Promise<{ sandboxId: string; sandboxUrl: string; cloneError?: string }> {
+): Promise<{ sandboxId: string; sandboxUrl: string; password: string; cloneError?: string }> {
   ctx.logger.info('Creating sandbox with OpenCode server...');
+
+  const password = generatePassword();
 
   // 1. Create the sandbox with org-level secrets for provider API keys.
   //    Uses Agentuity ${secret:KEY} interpolation to inject org secrets.
@@ -54,6 +68,8 @@ export async function createSandbox(
     env: {
       ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
       OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      OPENCODE_SERVER_PASSWORD: password,
+      OPENCODE_SERVER_USERNAME: OPENCODE_USERNAME,
       ...(config.githubToken
         ? { GH_TOKEN: config.githubToken, GITHUB_TOKEN: config.githubToken }
         : {}),
@@ -177,14 +193,21 @@ export async function createSandbox(
 
     // Poll the sandbox's public URL until the OpenCode server is ready.
     // This is the ONLY reliable approach — sandbox.execute() returns immediately.
+    const authHeader = buildBasicAuthHeader(password);
     ctx.logger.info(`Polling OpenCode server health at ${sandboxUrl}...`);
     let serverReady = false;
     for (let i = 0; i < 90; i++) {
       try {
-        const resp = await fetch(`${sandboxUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
+        const resp = await fetch(`${sandboxUrl}/global/health`, {
+          signal: AbortSignal.timeout(3000),
+          headers: { Authorization: authHeader },
+        });
         if (resp.ok) {
           // Also verify the session API is responsive
-          const sessionResp = await fetch(`${sandboxUrl}/session`, { signal: AbortSignal.timeout(3000) });
+          const sessionResp = await fetch(`${sandboxUrl}/session`, {
+            signal: AbortSignal.timeout(3000),
+            headers: { Authorization: authHeader },
+          });
           if (sessionResp.ok) {
             ctx.logger.info(`OpenCode server ready after ${i + 1}s`);
             serverReady = true;
@@ -201,7 +224,7 @@ export async function createSandbox(
     }
 
     ctx.logger.info(`OpenCode server ready at ${sandboxUrl}`);
-    return { sandboxId, sandboxUrl, ...(cloneError ? { cloneError } : {}) };
+    return { sandboxId, sandboxUrl, password, ...(cloneError ? { cloneError } : {}) };
   } catch (error) {
     ctx.logger.error('Failed to setup sandbox, destroying...', { error });
     try {
@@ -232,8 +255,9 @@ export interface ForkSandboxConfig {
 export async function forkSandbox(
   ctx: SandboxContext,
   config: ForkSandboxConfig,
-): Promise<{ sandboxId: string; sandboxUrl: string; snapshotId: string }> {
+): Promise<{ sandboxId: string; sandboxUrl: string; password: string; snapshotId: string }> {
   ctx.logger.info(`Forking sandbox ${config.sourceSandboxId}...`);
+  const password = generatePassword();
 
   // 1. Snapshot the source sandbox
   ctx.logger.info('Creating snapshot of source sandbox...');
@@ -254,6 +278,8 @@ export async function forkSandbox(
     env: {
       ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
       OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      OPENCODE_SERVER_PASSWORD: password,
+      OPENCODE_SERVER_USERNAME: OPENCODE_USERNAME,
       ...(config.githubToken
         ? { GH_TOKEN: config.githubToken, GITHUB_TOKEN: config.githubToken }
         : {}),
@@ -280,14 +306,21 @@ export async function forkSandbox(
     });
 
     // 5. Poll the sandbox's public URL until the OpenCode server is ready.
+    const authHeader = buildBasicAuthHeader(password);
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
     ctx.logger.info(`Polling fork sandbox health at ${sandboxUrl}...`);
     for (let i = 0; i < 90; i++) {
       try {
-        const resp = await fetch(`${sandboxUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
+        const resp = await fetch(`${sandboxUrl}/global/health`, {
+          signal: AbortSignal.timeout(3000),
+          headers: { Authorization: authHeader },
+        });
         if (resp.ok) {
-          const sessionResp = await fetch(`${sandboxUrl}/session`, { signal: AbortSignal.timeout(3000) });
+          const sessionResp = await fetch(`${sandboxUrl}/session`, {
+            signal: AbortSignal.timeout(3000),
+            headers: { Authorization: authHeader },
+          });
           if (sessionResp.ok) {
             ctx.logger.info(`Fork sandbox health check passed after ${i + 1}s`);
             break;
@@ -300,7 +333,7 @@ export async function forkSandbox(
     }
 
     ctx.logger.info(`Fork sandbox ready at ${sandboxUrl}`);
-    return { sandboxId, sandboxUrl, snapshotId };
+    return { sandboxId, sandboxUrl, password, snapshotId };
   } catch (error) {
     ctx.logger.error('Failed to setup fork sandbox, destroying...', { error });
     try {
@@ -339,8 +372,10 @@ export interface SnapshotSandboxConfig {
 export async function createSandboxFromSnapshot(
   ctx: SandboxContext,
   config: SnapshotSandboxConfig,
-): Promise<{ sandboxId: string; sandboxUrl: string }> {
+): Promise<{ sandboxId: string; sandboxUrl: string; password: string }> {
   ctx.logger.info(`Creating sandbox from snapshot ${config.snapshotId}...`);
+
+  const password = generatePassword();
 
   // 1. Create sandbox from snapshot
   const sandbox = await ctx.sandbox.create({
@@ -351,6 +386,8 @@ export async function createSandboxFromSnapshot(
     env: {
       ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
       OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      OPENCODE_SERVER_PASSWORD: password,
+      OPENCODE_SERVER_USERNAME: OPENCODE_USERNAME,
       ...(config.githubToken
         ? { GH_TOKEN: config.githubToken, GITHUB_TOKEN: config.githubToken }
         : {}),
@@ -378,14 +415,21 @@ export async function createSandboxFromSnapshot(
     });
 
     // 4. Get sandbox URL and poll until the OpenCode server is ready.
+    const authHeader = buildBasicAuthHeader(password);
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
     ctx.logger.info(`Polling snapshot sandbox health at ${sandboxUrl}...`);
     for (let i = 0; i < 90; i++) {
       try {
-        const resp = await fetch(`${sandboxUrl}/global/health`, { signal: AbortSignal.timeout(3000) });
+        const resp = await fetch(`${sandboxUrl}/global/health`, {
+          signal: AbortSignal.timeout(3000),
+          headers: { Authorization: authHeader },
+        });
         if (resp.ok) {
-          const sessionResp = await fetch(`${sandboxUrl}/session`, { signal: AbortSignal.timeout(3000) });
+          const sessionResp = await fetch(`${sandboxUrl}/session`, {
+            signal: AbortSignal.timeout(3000),
+            headers: { Authorization: authHeader },
+          });
           if (sessionResp.ok) {
             ctx.logger.info(`Snapshot sandbox health check passed after ${i + 1}s`);
             break;
@@ -398,7 +442,7 @@ export async function createSandboxFromSnapshot(
     }
 
     ctx.logger.info(`Snapshot sandbox ready at ${sandboxUrl}`);
-    return { sandboxId, sandboxUrl };
+    return { sandboxId, sandboxUrl, password };
   } catch (error) {
     ctx.logger.error('Failed to setup snapshot sandbox, destroying...', { error });
     try {

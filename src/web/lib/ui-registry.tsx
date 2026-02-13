@@ -1276,7 +1276,7 @@ export const { registry } = defineRegistry(catalog, {
       }
 
       return (
-        <div className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}>
+        <div className={cn('w-full rounded-lg border border-[var(--border)] overflow-hidden', props.className)}>
           <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--muted)] border-b border-[var(--border)]">
             <div className="flex items-center gap-2">
               <select

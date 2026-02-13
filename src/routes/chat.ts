@@ -8,11 +8,31 @@ import { createRouter, sse } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions } from '../db/schema';
 import { eq } from '@agentuity/drizzle';
-import { getOpencodeClient } from '../opencode';
+import { getOpencodeClient, buildBasicAuthHeader } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
+import { decrypt } from '../lib/encryption';
 import { SpanStatusCode } from '@opentelemetry/api';
 import { COMMAND_TO_AGENT, TEMPLATE_COMMANDS } from '../lib/agent-commands';
+
+/** Extract and decrypt the OpenCode server password from session metadata. */
+function getSessionPassword(session: { metadata?: unknown }): string | undefined {
+	const meta = (session.metadata ?? {}) as Record<string, unknown>;
+	if (typeof meta.opencodePassword === 'string') {
+		try {
+			return decrypt(meta.opencodePassword);
+		} catch {
+			// Decryption failed
+		}
+	}
+	return undefined;
+}
+
+/** Build Authorization header object for raw fetch to sandbox, if password is set. */
+function getAuthHeaders(session: { metadata?: unknown }): Record<string, string> {
+	const pw = getSessionPassword(session);
+	return pw ? { Authorization: buildBasicAuthHeader(pw) } : {};
+}
 
 const SANDBOX_HOME = '/home/agentuity';
 const UPLOADS_DIR = `${SANDBOX_HOME}/uploads`;
@@ -90,7 +110,7 @@ api.get('/:id/messages', async (c) => {
 	c.var.session.metadata.action = 'get-messages';
 	c.var.session.metadata.sessionDbId = session.id;
 
-	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 	try {
 		const result = await client.session.messages({
 			path: { id: session.opencodeSessionId },
@@ -133,7 +153,7 @@ api.post('/:id/messages', async (c) => {
 		return c.json({ error: 'Attachments are not supported for commands.' }, 400);
 	}
 
-	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 	const apiClient = (c.var.sandbox as any).client;
 	const fileParts: Array<{ type: 'file'; mime: string; filename?: string; url: string }> = [];
 
@@ -322,7 +342,9 @@ api.get(
 
 		// Use raw fetch to sandbox event stream for reliable SSE proxying
 		try {
-			const eventResponse = await fetch(`${session.sandboxUrl}/event`);
+			const eventResponse = await fetch(`${session.sandboxUrl}/event`, {
+				headers: getAuthHeaders(session),
+			});
 			if (!eventResponse.ok || !eventResponse.body) {
 				await sendSessionError('No event stream', { status: eventResponse.status });
 				return;
@@ -404,7 +426,7 @@ api.post('/:id/abort', async (c) => {
 	c.var.session.metadata.action = 'abort-session';
 	c.var.session.metadata.sessionDbId = session.id;
 
-	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 	try {
 		await client.session.abort({ path: { id: session.opencodeSessionId } });
 		return c.json({ success: true });
@@ -429,7 +451,7 @@ api.get('/:id/diff', async (c) => {
 	c.var.session.metadata.action = 'get-diff';
 	c.var.session.metadata.sessionDbId = session.id;
 
-	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 	try {
 		const result = await client.session.diff({ path: { id: session.opencodeSessionId } });
 		return c.json((result as any)?.data || result);
@@ -455,7 +477,7 @@ api.post('/:id/permissions/:reqId', async (c) => {
 	c.var.session.metadata.sessionDbId = session.id;
 
 	const body = await c.req.json<{ reply: 'once' | 'always' | 'reject' }>();
-	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 
 	try {
 		await client.postSessionIdPermissionsPermissionId({
@@ -498,7 +520,7 @@ api.post('/:id/questions/:reqId', async (c) => {
 			`${session.sandboxUrl}/session/${session.opencodeSessionId}/questions/${reqId}`,
 			{
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
+				headers: { 'Content-Type': 'application/json', ...getAuthHeaders(session) },
 				body: JSON.stringify({ answers: body.answers }),
 			},
 		);
@@ -536,7 +558,7 @@ api.post('/:id/revert', async (c) => {
 		return c.json({ error: 'messageID is required' }, 400);
 	}
 
-	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 	try {
 		const result = await client.session.revert({
 			path: { id: session.opencodeSessionId },
@@ -567,7 +589,7 @@ api.post('/:id/unrevert', async (c) => {
 	c.var.session.metadata.action = 'unrevert';
 	c.var.session.metadata.sessionDbId = session.id;
 
-	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 	try {
 		const result = await client.session.unrevert({
 			path: { id: session.opencodeSessionId },

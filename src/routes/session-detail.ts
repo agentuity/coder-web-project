@@ -14,6 +14,7 @@ import {
 	getOpencodeClient,
 	removeOpencodeClient,
 	destroySandbox,
+	buildBasicAuthHeader,
 } from '../opencode';
 import type { SandboxContext } from '../opencode';
 import {
@@ -24,9 +25,22 @@ import {
 	shouldMarkTerminated,
 	SANDBOX_STATUS_TTL_MS,
 } from '../lib/sandbox-health';
-import { decrypt } from '../lib/encryption';
+import { decrypt, encrypt } from '../lib/encryption';
 import { parseMetadata } from '../lib/parse-metadata';
 import { SpanStatusCode } from '@opentelemetry/api';
+
+/** Extract and decrypt the OpenCode server password from session metadata. */
+function getSessionPassword(session: { metadata?: unknown }): string | undefined {
+	const meta = (session.metadata ?? {}) as Record<string, unknown>;
+	if (typeof meta.opencodePassword === 'string') {
+		try {
+			return decrypt(meta.opencodePassword);
+		} catch {
+			// Decryption failed — password may be corrupted or from a different key
+		}
+	}
+	return undefined;
+}
 
 const api = createRouter();
 
@@ -45,7 +59,8 @@ api.get('/:id', async (c) => {
 		const lastChecked = getCachedHealthTimestamp(session.id) ?? 0;
 		if (now - lastChecked >= SANDBOX_STATUS_TTL_MS) {
 			setCachedHealthTimestamp(session.id, now);
-			const healthy = await isSandboxHealthy(session.sandboxUrl);
+			const pw = getSessionPassword(session);
+			const healthy = await isSandboxHealthy(session.sandboxUrl, pw ? buildBasicAuthHeader(pw) : undefined);
 			recordHealthResult(session.id, healthy);
 			if (!healthy && shouldMarkTerminated(session.id)) {
 				const [updated] = await db
@@ -67,7 +82,7 @@ api.get('/:id', async (c) => {
 		effectiveSession.opencodeSessionId
 	) {
 		try {
-			const client = getOpencodeClient(effectiveSession.sandboxId, effectiveSession.sandboxUrl);
+			const client = getOpencodeClient(effectiveSession.sandboxId, effectiveSession.sandboxUrl, getSessionPassword(effectiveSession));
 			const result = await client.session.messages({ path: { id: effectiveSession.opencodeSessionId } });
 			messages = (result as any)?.data || [];
 		} catch {
@@ -115,7 +130,7 @@ api.post('/:id/retry', async (c) => {
 		return c.json({ error: 'Session has no sandbox — cannot retry' }, 400);
 	}
 
-	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+	const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 	let opencodeSessionId: string | null = null;
 
 	for (let attempt = 1; attempt <= 5; attempt++) {
@@ -280,7 +295,8 @@ api.post('/:id/fork', async (c) => {
 				snapshotId = forkResult.snapshotId;
 
 				// 3. Use OpenCode's fork API to create a new session with full message history
-				const client = getOpencodeClient(forkResult.sandboxId, forkResult.sandboxUrl);
+				const forkPassword = forkResult.password;
+				const client = getOpencodeClient(forkResult.sandboxId, forkResult.sandboxUrl, forkPassword);
 				const opencodeSessionId = await tracer.startActiveSpan('session.fork.opencode', async (oc) => {
 					let id: string | null = null;
 					for (let attempt = 1; attempt <= 5; attempt++) {
@@ -304,6 +320,7 @@ api.post('/:id/fork', async (c) => {
 
 				const newStatus = opencodeSessionId ? 'active' : 'creating';
 
+				const encryptedForkPassword = encrypt(forkPassword);
 				await db
 					.update(chatSessions)
 					.set({
@@ -312,6 +329,7 @@ api.post('/:id/fork', async (c) => {
 						opencodeSessionId,
 						status: newStatus,
 						updatedAt: new Date(),
+						metadata: { ...metadata, repoUrl, branch, opencodePassword: encryptedForkPassword },
 					})
 					.where(eq(chatSessions.id, session!.id));
 
@@ -429,6 +447,15 @@ api.delete('/:id', async (c) => {
 	return c.json({ success: true });
 });
 
+// GET /api/sessions/:id/password — decrypt and return the OpenCode server password
+api.get('/:id/password', async (c) => {
+	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+
+	const password = getSessionPassword(session);
+	return c.json({ password: password ?? null });
+});
+
 // POST /api/sessions/:id/share — create a public share URL via durable stream
 api.post('/:id/share', async (c) => {
 	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
@@ -441,7 +468,7 @@ api.post('/:id/share', async (c) => {
 	let messages: unknown[] = [];
 	if (session.sandboxId && session.sandboxUrl && session.opencodeSessionId) {
 		try {
-			const client = getOpencodeClient(session.sandboxId, session.sandboxUrl);
+			const client = getOpencodeClient(session.sandboxId, session.sandboxUrl, getSessionPassword(session));
 			const result = await client.session.messages({ path: { id: session.opencodeSessionId } });
 			messages = (result as any)?.data || [];
 		} catch {

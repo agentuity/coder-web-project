@@ -338,6 +338,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [sshCopied, setSshCopied] = useState(false);
 	const [sandboxCopied, setSandboxCopied] = useState(false);
 	const [attachCopied, setAttachCopied] = useState(false);
+	const [passwordCopied, setPasswordCopied] = useState(false);
+	const [opencodePassword, setOpencodePassword] = useState<string | null>(null);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -571,7 +573,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const isBusy = sessionStatus.type === 'busy';
 	const displayMessages = session.status === 'terminated' ? archivedMessages : messages;
 	const sshCommand = session.sandboxId ? `agentuity cloud ssh ${session.sandboxId}` : '';
-	const attachCommand = session.sandboxUrl ? `opencode attach ${session.sandboxUrl}` : '';
+	const attachCommand = session.sandboxUrl
+		? `opencode attach ${session.sandboxUrl}${opencodePassword ? ` --password ${opencodePassword}` : ''}`
+		: '';
 	const getDisplayParts = useCallback(
 		(messageID: string) => {
 			if (session.status === 'terminated') {
@@ -811,6 +815,17 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			toast({ type: 'error', message: 'Failed to copy attach command' });
 		}
 	}, [attachCommand, toast]);
+
+	const handleCopyPassword = useCallback(async () => {
+		if (!opencodePassword) return;
+		try {
+			await navigator.clipboard.writeText(opencodePassword);
+			setPasswordCopied(true);
+			setTimeout(() => setPasswordCopied(false), 2000);
+		} catch {
+			toast({ type: 'error', message: 'Failed to copy password' });
+		}
+	}, [opencodePassword, toast]);
 
   // Abort
   const handleAbort = async () => {
@@ -1714,7 +1729,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			<div className="ml-auto flex items-center gap-2">
 				{/* SSH info popover */}
 				{session.sandboxId && (
-					<Popover>
+					<Popover onOpenChange={(open) => {
+						if (open && !opencodePassword) {
+							fetch(`/api/sessions/${sessionId}/password`)
+								.then((r) => r.ok ? r.json() : null)
+								.then((data) => { if (data?.password) setOpencodePassword(data.password); })
+								.catch(() => {});
+						}
+					}}>
 					<PopoverTrigger asChild>
 						<Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
 							<Terminal className="h-3.5 w-3.5" />
@@ -1777,6 +1799,28 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									</button>
 								</div>
 							</div>
+						{opencodePassword && (
+							<div>
+								<p className="text-xs text-[var(--muted-foreground)] mb-1">OpenCode Password</p>
+								<div className="flex items-center gap-2">
+									<code className="text-xs bg-[var(--muted)] px-2 py-1 rounded flex-1 block truncate font-mono">
+										{'•'.repeat(opencodePassword.length)}
+									</code>
+									<button
+										type="button"
+										onClick={handleCopyPassword}
+										className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+										title="Copy password"
+									>
+										{passwordCopied ? (
+											<Check className="h-3.5 w-3.5 text-green-500" />
+										) : (
+											<Copy className="h-3.5 w-3.5" />
+										)}
+									</button>
+								</div>
+							</div>
+						)}
 							{attachCommand && (
 							<div>
 								<p className="text-xs text-[var(--muted-foreground)] mb-1">OpenCode Attach</p>

@@ -57,11 +57,14 @@ export function shouldMarkTerminated(sessionId: string): boolean {
 	return (entry?.failCount ?? 0) >= TERMINATION_THRESHOLD;
 }
 
-export async function isSandboxHealthy(sandboxUrl: string): Promise<boolean> {
+export async function isSandboxHealthy(sandboxUrl: string, authHeader?: string): Promise<boolean> {
 	const controller = new AbortController();
 	const timeout = setTimeout(() => controller.abort(), 2000);
 	try {
-		const resp = await fetch(`${sandboxUrl}/global/health`, { signal: controller.signal });
+		const resp = await fetch(`${sandboxUrl}/global/health`, {
+			signal: controller.signal,
+			...(authHeader ? { headers: { Authorization: authHeader } } : {}),
+		});
 		return resp.ok;
 	} catch {
 		return false;

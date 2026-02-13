@@ -11,6 +11,7 @@ import {
 	generateOpenCodeConfig,
 	serializeOpenCodeConfig,
 	getOpencodeClient,
+	buildBasicAuthHeader,
 } from '../opencode';
 import type { SandboxContext } from '../opencode';
 import {
@@ -21,7 +22,7 @@ import {
 	shouldMarkTerminated,
 	SANDBOX_STATUS_TTL_MS,
 } from '../lib/sandbox-health';
-import { decrypt } from '../lib/encryption';
+import { decrypt, encrypt } from '../lib/encryption';
 import { randomUUID } from 'node:crypto';
 import { SpanStatusCode } from '@opentelemetry/api';
 import { COMMAND_TO_AGENT, TEMPLATE_COMMANDS } from '../lib/agent-commands';
@@ -175,6 +176,7 @@ api.post('/', async (c) => {
 
 				let sandboxId: string;
 				let sandboxUrl: string;
+				let sandboxPassword: string;
 				let cloneError: string | undefined;
 
 				if (snapshotRecord) {
@@ -189,6 +191,7 @@ api.post('/', async (c) => {
 					});
 					sandboxId = result.sandboxId;
 					sandboxUrl = result.sandboxUrl;
+					sandboxPassword = result.password;
 				} else {
 					// ── Normal creation (clone repo) ──
 					const result = await createSandbox(sandboxCtx, {
@@ -201,6 +204,7 @@ api.post('/', async (c) => {
 					});
 					sandboxId = result.sandboxId;
 					sandboxUrl = result.sandboxUrl;
+					sandboxPassword = result.password;
 					cloneError = result.cloneError;
 				}
 
@@ -211,7 +215,7 @@ api.post('/', async (c) => {
 					});
 				}
 
-				const client = getOpencodeClient(sandboxId, sandboxUrl);
+				const client = getOpencodeClient(sandboxId, sandboxUrl, sandboxPassword);
 				let opencodeSessionId: string | null = null;
 
 				for (let attempt = 1; attempt <= 5; attempt++) {
@@ -242,6 +246,7 @@ api.post('/', async (c) => {
 
 				const newStatus = opencodeSessionId ? 'active' : 'creating';
 
+				const encryptedPassword = encrypt(sandboxPassword);
 				await db
 					.update(chatSessions)
 					.set({
@@ -250,15 +255,12 @@ api.post('/', async (c) => {
 						opencodeSessionId,
 						status: newStatus,
 						updatedAt: new Date(),
-						...(cloneError
-							? {
-									metadata: {
-										repoUrl: body.repoUrl,
-										branch: body.branch,
-										cloneError,
-									},
-								}
-							: {}),
+						metadata: {
+							repoUrl: body.repoUrl,
+							branch: body.branch,
+							opencodePassword: encryptedPassword,
+							...(cloneError ? { cloneError } : {}),
+						},
 					})
 					.where(eq(chatSessions.id, session!.id));
 
@@ -368,7 +370,17 @@ api.get('/', async (c) => {
 			if (now - lastChecked < SANDBOX_STATUS_TTL_MS) return session;
 
 			setCachedHealthTimestamp(session.id, now);
-			const healthy = await isSandboxHealthy(session.sandboxUrl);
+			// Extract password for authenticated health check
+			const meta = (session.metadata ?? {}) as Record<string, unknown>;
+			let healthAuthHeader: string | undefined;
+			if (typeof meta.opencodePassword === 'string') {
+				try {
+					healthAuthHeader = buildBasicAuthHeader(decrypt(meta.opencodePassword));
+				} catch {
+					// Decryption failed
+				}
+			}
+			const healthy = await isSandboxHealthy(session.sandboxUrl, healthAuthHeader);
 			recordHealthResult(session.id, healthy);
 
 			if (healthy) return session;
