@@ -5,6 +5,7 @@ import {
 	Clock,
 	Code2,
 	Copy,
+	Download,
 	GitBranch,
 	GitFork,
 	Camera,
@@ -363,6 +364,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [attachCopied, setAttachCopied] = useState(false);
 	const [passwordCopied, setPasswordCopied] = useState(false);
 	const [opencodePassword, setOpencodePassword] = useState<string | null>(null);
+	const [isDownloading, setIsDownloading] = useState(false);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -931,6 +933,32 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			toast({ type: 'error', message: 'Failed to copy password' });
 		}
 	}, [opencodePassword, toast]);
+
+	const handleDownloadSandbox = useCallback(async () => {
+		if (isDownloading || !sessionId) return;
+		setIsDownloading(true);
+		try {
+			const res = await apiFetch(`/api/sessions/${sessionId}/download`);
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				throw new Error(data.error || 'Download failed');
+			}
+			const blob = await res.blob();
+			const url = URL.createObjectURL(blob);
+			const a = document.createElement('a');
+			a.href = url;
+			a.download = `sandbox-${session.sandboxId || sessionId}.tar.gz`;
+			document.body.appendChild(a);
+			a.click();
+			document.body.removeChild(a);
+			URL.revokeObjectURL(url);
+			track('sandbox_downloaded');
+		} catch (error) {
+			toast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to download sandbox files' });
+		} finally {
+			setIsDownloading(false);
+		}
+	}, [isDownloading, sessionId, session.sandboxId, toast, track]);
 
   // Abort
   const handleAbort = async () => {
@@ -1951,6 +1979,26 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									</button>
 								</div>
 							</div>
+						)}
+						{session.status !== 'terminated' && (
+							<button
+								type="button"
+								onClick={handleDownloadSandbox}
+								disabled={isDownloading}
+								className="flex w-full items-center justify-center gap-2 rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--foreground)] transition-colors hover:bg-[var(--accent)] disabled:opacity-50"
+							>
+								{isDownloading ? (
+									<>
+										<Loader2 className="h-3.5 w-3.5 animate-spin" />
+										Downloading...
+									</>
+								) : (
+									<>
+										<Download className="h-3.5 w-3.5" />
+										Download Files
+									</>
+								)}
+							</button>
 						)}
 						</div>
 					</PopoverContent>

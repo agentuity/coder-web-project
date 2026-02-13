@@ -16,6 +16,7 @@ import {
 	destroySandbox,
 	buildBasicAuthHeader,
 } from '../opencode';
+import { sandboxDownloadArchive } from '@agentuity/server';
 import type { SandboxContext } from '../opencode';
 import {
 	isSandboxHealthy,
@@ -580,6 +581,53 @@ api.post('/:id/share', async (c) => {
 			return c.json({ error: 'Failed to create share link' }, 500);
 		}
 	});
+});
+
+// GET /api/sessions/:id/download — download sandbox files as a tar.gz archive
+api.get('/:id/download', async (c) => {
+	const user = c.get('user')!;
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+
+	c.var.session.metadata.action = 'download-sandbox';
+	c.var.session.metadata.sessionDbId = session.id;
+
+	if (!session.sandboxId) {
+		return c.json({ error: 'Session has no active sandbox' }, 400);
+	}
+
+	// Determine the project working directory
+	const metadata = parseMetadata(session);
+	const repoUrl = typeof metadata.repoUrl === 'string' ? metadata.repoUrl : undefined;
+	const repoName = repoUrl ? repoUrl.split('/').pop()?.replace('.git', '') : undefined;
+	const downloadPath = repoName ? `/home/agentuity/${repoName}` : '/home/agentuity';
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const archiveStream = await sandboxDownloadArchive(apiClient, {
+			sandboxId: session.sandboxId,
+			path: downloadPath,
+			format: 'tar.gz',
+		});
+
+		const sanitizedId = session.sandboxId.replace(/[^a-zA-Z0-9_-]/g, '_');
+		c.header('Content-Type', 'application/gzip');
+		c.header('Content-Disposition', `attachment; filename="sandbox-${sanitizedId}.tar.gz"`);
+
+		return new Response(archiveStream, {
+			status: 200,
+			headers: {
+				'Content-Type': 'application/gzip',
+				'Content-Disposition': `attachment; filename="sandbox-${sanitizedId}.tar.gz"`,
+			},
+		});
+	} catch (error) {
+		c.var.logger.error('Failed to download sandbox archive', { error, sessionId: session.id });
+		return c.json({ error: 'Failed to download sandbox files', details: String(error) }, 500);
+	}
 });
 
 export default api;

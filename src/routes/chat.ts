@@ -9,7 +9,7 @@ import { db } from '../db';
 import { chatSessions } from '../db/schema';
 import { and, eq } from '@agentuity/drizzle';
 import { getOpencodeClient, buildBasicAuthHeader } from '../opencode';
-import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
+import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles, sandboxMkDir } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
 import { decrypt } from '../lib/encryption';
 import { SpanStatusCode } from '@opentelemetry/api';
@@ -160,14 +160,14 @@ api.post('/:id/messages', async (c) => {
 	const fileParts: Array<{ type: 'file'; mime: string; filename?: string; url: string }> = [];
 
 	if (attachments.length > 0) {
-		const execution = await sandboxExecute(apiClient, {
-			sandboxId: session.sandboxId,
-			options: {
-				command: ['bash', '-c', `mkdir -p '${UPLOADS_DIR}'`],
-				timeout: '10s',
-			},
-		});
-		if (execution.status !== 'completed') {
+		try {
+			await sandboxMkDir(apiClient, {
+				sandboxId: session.sandboxId,
+				path: UPLOADS_DIR,
+				recursive: true,
+			});
+		} catch (mkdirErr) {
+			c.var.logger?.warn?.('Failed to create upload directory', { error: String(mkdirErr) });
 			return c.json({ error: 'Failed to prepare upload directory.' }, 500);
 		}
 
