@@ -7,6 +7,7 @@ import { GitHubSettings } from '../settings/GitHubSettings';
 import { VoiceSettings } from '../settings/VoiceSettings';
 import { DefaultAgentSetting } from '../settings/DefaultAgentSetting';
 import { KeybindingsSettings } from '../settings/KeybindingsSettings';
+import { EditorPreferencesSettings } from '../settings/EditorPreferencesSettings';
 
 interface Workspace {
 	id: string;
@@ -334,9 +335,18 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 				<DefaultAgentSetting />
 			</Card>
 
-			{/* Voice */}
-			<Card className="p-4 mb-6">
-				<h3 className="text-sm font-medium text-[var(--foreground)] mb-4">Voice (Narrator)</h3>
+		{/* Code Editor */}
+		<Card className="p-4 mb-6">
+			<h3 className="text-sm font-medium text-[var(--foreground)] mb-2">Code Editor</h3>
+			<p className="text-xs text-[var(--muted-foreground)] mb-4">
+				Customize the code editor appearance and behavior.
+			</p>
+			<EditorPreferencesSettings />
+		</Card>
+
+		{/* Voice */}
+		<Card className="p-4 mb-6">
+			<h3 className="text-sm font-medium text-[var(--foreground)] mb-4">Voice (Narrator)</h3>
 				<p className="text-xs text-[var(--muted-foreground)] mb-4">
 					Configure voice input and text-to-speech for narrator conversations.
 				</p>
