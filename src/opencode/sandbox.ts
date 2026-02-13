@@ -14,6 +14,15 @@ function generatePassword(): string {
   return randomBytes(8).toString('hex'); // 16 chars
 }
 
+/**
+ * Build a watchdog shell command that starts OpenCode in a restart loop.
+ * If the process crashes or exits, the watchdog waits 2s and restarts it.
+ * This prevents overnight hangs where the sandbox stays alive but OpenCode dies.
+ */
+function buildWatchdogCommand(workDir: string): string {
+  return `nohup bash -c 'while true; do cd "'"'"'${workDir}'"'"'" && opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 >> /tmp/opencode.log 2>&1; echo "[watchdog] OpenCode exited (code=$?) at $(date), restarting in 2s..." >> /tmp/opencode.log; sleep 2; done' > /dev/null 2>&1 &`;
+}
+
 /** Build Basic Auth header value for OpenCode server. */
 export function buildBasicAuthHeader(password: string): string {
   return `Basic ${Buffer.from(`${OPENCODE_USERNAME}:${password}`).toString('base64')}`;
@@ -173,10 +182,8 @@ export async function createSandbox(
       `cat > ~/.config/opencode/ui-spec-instructions.md << 'UISPECEOF'\n${getUISpecInstructions()}\nUISPECEOF`,
     );
 
-    // 4. Start OpenCode server (nohup — runs in background, script continues)
-    setupScriptParts.push(
-      `cd '${workDir}' && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
-    );
+    // 4. Start OpenCode server with watchdog (auto-restarts on crash)
+    setupScriptParts.push(buildWatchdogCommand(workDir));
 
     // Fire the single combined script
     ctx.logger.info('Executing combined setup script (config + clone + skills + server start)...');
@@ -298,9 +305,7 @@ export async function forkSandbox(
     if (config.githubToken) {
       forkSetupParts.push('gh auth setup-git 2>/dev/null || true');
     }
-    forkSetupParts.push(
-      `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
-    );
+    forkSetupParts.push(buildWatchdogCommand(config.workDir));
     sandbox.execute({
       command: ['bash', '-c', forkSetupParts.join('\n')],
     });
@@ -409,7 +414,7 @@ export async function createSandboxFromSnapshot(
           `mkdir -p ~/.config/opencode/skills`,
           `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
           `gh auth setup-git 2>/dev/null || true`,
-          `cd ${config.workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
+          buildWatchdogCommand(config.workDir),
         ].join('\n'),
       ],
     });
