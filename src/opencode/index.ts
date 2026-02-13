@@ -2,5 +2,5 @@ export { getOpencodeClient, removeOpencodeClient, hasOpencodeClient } from './cl
 export type { OpencodeClient } from './client';
 export { generateOpenCodeConfig, serializeOpenCodeConfig } from './config';
 export type { OpenCodeConfig, OpenCodeConfigOptions, SourceConfig } from './config';
-export { createSandbox, destroySandbox, checkSandboxHealth, OPENCODE_PORT } from './sandbox';
-export type { SandboxConfig, SandboxContext } from './sandbox';
+export { createSandbox, forkSandbox, createSandboxFromSnapshot, destroySandbox, checkSandboxHealth, buildBasicAuthHeader, OPENCODE_PORT } from './sandbox';
+export type { SandboxConfig, ForkSandboxConfig, SnapshotSandboxConfig, SandboxContext } from './sandbox';

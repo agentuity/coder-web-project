@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useAnalytics } from '@agentuity/react';
 import { Shield, ShieldCheck, ShieldX } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
@@ -12,18 +13,26 @@ interface PermissionCardProps {
 export function PermissionCard({ request, sessionId }: PermissionCardProps) {
 	const [replying, setReplying] = useState(false);
 	const [replied, setReplied] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const { track } = useAnalytics();
 
 	const handleReply = async (reply: 'once' | 'always' | 'reject') => {
 		setReplying(true);
+		setError(null);
 		try {
-			await fetch(`/api/sessions/${sessionId}/permissions/${request.id}`, {
+			const res = await fetch(`/api/sessions/${sessionId}/permissions/${request.id}`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ reply }),
 			});
+			if (!res.ok) {
+				setError('Failed to send reply. Try again.');
+				return;
+			}
+			track('permission_responded', { action: reply === 'reject' ? 'reject' : 'allow' });
 			setReplied(true);
 		} catch {
-			// Failed to reply
+			setError('Network error. Try again.');
 		} finally {
 			setReplying(false);
 		}
@@ -81,6 +90,9 @@ export function PermissionCard({ request, sessionId }: PermissionCardProps) {
 							Deny
 						</Button>
 					</div>
+					{error && (
+						<div className="text-xs text-red-400 mt-2">{error}</div>
+					)}
 				</div>
 			</div>
 		</div>

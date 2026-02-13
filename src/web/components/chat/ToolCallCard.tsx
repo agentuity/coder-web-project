@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import type { ToolPart } from '../../types/opencode';
 import { FileDiff as PierreDiff } from '@pierre/diffs/react';
 import { parseDiffFromFile, type DiffLineAnnotation, type SelectedLineRange } from '@pierre/diffs';
@@ -10,6 +10,8 @@ import { parseFileOutput } from '../../lib/file-output';
 import { CodeWithComments } from './CodeWithComments';
 import type { CodeComment } from '../../hooks/useCodeComments';
 import { Commit } from '../ai-elements/commit';
+import { Streamdown } from 'streamdown';
+import { createCodePlugin } from '@streamdown/code';
 import {
 	Tool,
 	ToolContent,
@@ -19,6 +21,10 @@ import {
 } from '../ai-elements/tool';
 import type { ToolState, ToolStatus } from '../ai-elements/tool';
 import { SourcesView, type SourceItem } from './SourcesView';
+
+const toolCallCodePlugin = createCodePlugin({
+	themes: ['github-dark', 'github-light'],
+});
 
 interface ToolCallCardProps {
 	part: ToolPart;
@@ -207,11 +213,13 @@ function AgentInvocationView({ input }: { input: { subagent_type: string; descri
 				<Badge variant="secondary" className="text-[10px]">{agentLabel}</Badge>
 				<span className="truncate">{input.description ?? 'Agent task'}</span>
 			</div>
-			{input.prompt && (
-				<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-2 text-xs text-[var(--foreground)] whitespace-pre-wrap">
+		{input.prompt && (
+			<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-[11px] font-mono text-[var(--foreground)] overflow-hidden leading-relaxed max-h-64 overflow-y-auto [&_h1]:text-[11px] [&_h1]:font-bold [&_h1]:font-mono [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:font-mono [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-[11px] [&_h3]:font-bold [&_h3]:font-mono [&_h3]:mt-1.5 [&_h3]:mb-0.5 [&_p]:text-[11px] [&_p]:my-1 [&_li]:text-[11px] [&_ul]:my-1 [&_ol]:my-1 [&_pre]:text-[10px] [&_pre]:my-1 [&_pre]:p-2 [&_code]:text-[10px] [&_table]:text-[10px] [&_th]:text-[10px] [&_th]:px-1.5 [&_th]:py-0.5 [&_td]:text-[10px] [&_td]:px-1.5 [&_td]:py-0.5 [&_blockquote]:text-[11px]">
+				<Streamdown plugins={{ code: toolCallCodePlugin }}>
 					{input.prompt}
-				</div>
-			)}
+				</Streamdown>
+			</div>
+		)}
 		</div>
 	);
 }
@@ -340,7 +348,7 @@ function FileListView({ title, output }: { title: string; output?: string }) {
 			{items.length === 0 ? (
 				<div className="text-xs text-[var(--muted-foreground)]">No results</div>
 			) : (
-				<ul className="space-y-1 text-xs text-[var(--foreground)]">
+				<ul className="space-y-1 text-xs text-[var(--foreground)] pl-1">
 					{items.map((item) => (
 						<li key={item} className="font-mono truncate" title={item}>{item}</li>
 					))}
@@ -532,7 +540,7 @@ function DefaultView({ input, output }: { input: Record<string, unknown>; output
 // Main component
 // ---------------------------------------------------------------------------
 
-export function ToolCallCard({
+export const ToolCallCard = React.memo(function ToolCallCard({
 	part,
 	onAddComment,
 	getDiffAnnotations,
@@ -678,4 +686,4 @@ export function ToolCallCard({
 			</ToolContent>
 		</Tool>
 	);
-}
+});

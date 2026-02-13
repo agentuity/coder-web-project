@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
 import { isValidElement } from 'react';
+import { Streamdown } from 'streamdown';
 import { Badge } from '../ui/badge';
 import {
 	Collapsible,
@@ -103,7 +104,7 @@ export const ToolHeader = ({
 	>
 		<div className="flex items-center gap-2">
 			<WrenchIcon className="h-4 w-4 text-[var(--muted-foreground)]" />
-			<span className="text-xs font-medium text-[var(--foreground)] group-data-[state=closed]:text-[var(--muted-foreground)]">
+			<span className="text-xs font-bold font-mono text-[var(--foreground)] group-data-[state=closed]:text-[var(--muted-foreground)]">
 				{title ?? type.split('-').slice(1).join('-')}
 			</span>
 			{getStatusBadge(status, state)}
@@ -166,7 +167,11 @@ export const ToolOutput = ({
 			);
 		}
 		if (typeof output === 'string') {
-			return <pre className="overflow-x-auto p-3 font-mono text-xs">{output}</pre>;
+			return (
+				<div className="p-3 text-[11px] font-mono leading-relaxed overflow-auto max-h-96 [&_h1]:text-[11px] [&_h1]:font-bold [&_h1]:font-mono [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:font-mono [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-[11px] [&_h3]:font-bold [&_h3]:font-mono [&_h3]:mt-1.5 [&_h3]:mb-0.5 [&_p]:text-[11px] [&_p]:my-1 [&_li]:text-[11px] [&_pre]:text-[10px] [&_pre]:my-1 [&_code]:text-[10px] [&_table]:text-[10px]">
+					<Streamdown>{output}</Streamdown>
+				</div>
+			);
 		}
 		return <div className="p-3">{output as ReactNode}</div>;
 	};

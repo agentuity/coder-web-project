@@ -5,7 +5,7 @@
  * reducer, and exposes sorted messages, parts, permissions, questions, todos,
  * and connection state.
  */
-import { useEffect, useReducer, useRef, useCallback } from 'react';
+import { useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
 import type {
 	Message,
 	Part,
@@ -29,6 +29,7 @@ export interface SessionEventState {
 	todos: Todo[];
 	isConnected: boolean;
 	error: string | null;
+	revertState: { messageID: string; partID?: string } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +47,7 @@ type Action =
 	| { type: 'QUESTION_ASKED'; request: QuestionRequest }
 	| { type: 'QUESTION_REPLIED'; requestID: string }
 	| { type: 'TODO_UPDATED'; todos: Todo[] }
+	| { type: 'SESSION_UPDATED'; payload: { revert?: { messageID: string; partID?: string } } }
 	| { type: 'CONNECTED' }
 	| { type: 'DISCONNECTED'; error?: string }
 	| { type: 'CLEAR' }
@@ -64,6 +66,7 @@ const initialState: SessionEventState = {
 	todos: [],
 	isConnected: false,
 	error: null,
+	revertState: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -133,6 +136,13 @@ function reducer(state: SessionEventState, action: Action): SessionEventState {
 
 		case 'TODO_UPDATED':
 			return { ...state, todos: action.todos };
+
+		case 'SESSION_UPDATED': {
+			return {
+				...state,
+				revertState: action.payload.revert || null,
+			};
+		}
 
 		case 'CONNECTED':
 			return { ...state, isConnected: true, error: null };
@@ -211,6 +221,14 @@ function dispatchChatEvent(dispatch: React.Dispatch<Action>, event: ChatEvent): 
 		case 'session.error':
 			dispatch({ type: 'DISCONNECTED', error: event.properties.error });
 			break;
+		case 'session.updated': {
+			const sessionInfo = (event as any).properties?.info;
+			dispatch({
+				type: 'SESSION_UPDATED',
+				payload: { revert: sessionInfo?.revert || null },
+			});
+			break;
+		}
 	}
 }
 
@@ -229,6 +247,7 @@ export function useSessionEvents(sessionId: string | undefined) {
 	const eventSourceRef = useRef<EventSource | null>(null);
 	const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const retryCountRef = useRef(0);
+	const shouldReconnectRef = useRef(true);
 
 	// -----------------------------------------------------------------------
 	// SSE connection lifecycle
@@ -238,6 +257,7 @@ export function useSessionEvents(sessionId: string | undefined) {
 
 		// Reset retry counter on fresh mount / sessionId change
 		retryCountRef.current = 0;
+		shouldReconnectRef.current = true;
 
 		// Hydrate existing messages on mount
 		fetch(`/api/sessions/${sessionId}/messages`)
@@ -277,18 +297,50 @@ export function useSessionEvents(sessionId: string | undefined) {
 		// -------------------------------------------------------------------
 		// EventSource setup with exponential-backoff reconnect
 		// -------------------------------------------------------------------
+		function scheduleReconnect(reason?: string) {
+			if (!shouldReconnectRef.current) return;
+			if (reconnectTimerRef.current) return;
+			retryCountRef.current += 1;
+			if (retryCountRef.current <= MAX_RETRIES) {
+				dispatch({ type: 'DISCONNECTED', error: reason });
+				const delay = Math.min(
+					RECONNECT_DELAY_MS * Math.pow(1.5, retryCountRef.current - 1),
+					10_000,
+				);
+				reconnectTimerRef.current = setTimeout(() => {
+					reconnectTimerRef.current = null;
+					connect();
+				}, delay);
+			} else {
+				dispatch({
+					type: 'DISCONNECTED',
+					error: reason ?? 'Max reconnection attempts reached',
+				});
+			}
+		}
+
 		function connect() {
 			const es = new EventSource(`/api/sessions/${sessionId}/events`);
 			eventSourceRef.current = es;
 
 			es.onopen = () => {
 				retryCountRef.current = 0; // Reset on successful connection
+				if (reconnectTimerRef.current) {
+					clearTimeout(reconnectTimerRef.current);
+					reconnectTimerRef.current = null;
+				}
 				dispatch({ type: 'CONNECTED' });
 			};
 
 			es.onmessage = (e: MessageEvent) => {
 				try {
 					const event = JSON.parse(e.data as string) as ChatEvent;
+					if (event.type === 'session.error') {
+						dispatchChatEvent(dispatch, event);
+						es.close();
+						scheduleReconnect(event.properties?.error ?? 'Session error');
+						return;
+					}
 					dispatchChatEvent(dispatch, event);
 				} catch {
 					// Ignore malformed SSE payloads
@@ -296,27 +348,16 @@ export function useSessionEvents(sessionId: string | undefined) {
 			};
 
 			es.onerror = () => {
+				if (eventSourceRef.current !== es) return;
 				es.close();
-				dispatch({ type: 'DISCONNECTED' });
-				retryCountRef.current += 1;
-				if (retryCountRef.current <= MAX_RETRIES) {
-					const delay = Math.min(
-						RECONNECT_DELAY_MS * Math.pow(1.5, retryCountRef.current - 1),
-						10_000,
-					);
-					reconnectTimerRef.current = setTimeout(connect, delay);
-				} else {
-					dispatch({
-						type: 'DISCONNECTED',
-						error: 'Max reconnection attempts reached',
-					});
-				}
+				scheduleReconnect('Connection lost');
 			};
 		}
 
 		connect();
 
 		return () => {
+			shouldReconnectRef.current = false;
 			eventSourceRef.current?.close();
 			eventSourceRef.current = null;
 			if (reconnectTimerRef.current) {
@@ -332,11 +373,12 @@ export function useSessionEvents(sessionId: string | undefined) {
 	// -----------------------------------------------------------------------
 
 	/** Messages sorted by creation time (ascending). */
-	const sortedMessages = useCallback(() => {
-		return Array.from(state.messages.values()).sort(
+	const sortedMessages = useMemo(
+		() => Array.from(state.messages.values()).sort(
 			(a, b) => a.time.created - b.time.created,
-		);
-	}, [state.messages]);
+		),
+		[state.messages],
+	);
 
 	/** Get all parts belonging to a given message. */
 	const getPartsForMessage = useCallback(
@@ -347,14 +389,25 @@ export function useSessionEvents(sessionId: string | undefined) {
 		[state.partsByMessage],
 	);
 
-	return {
-		messages: sortedMessages(),
+	const memoizedPermissions = useMemo(
+		() => Array.from(state.pendingPermissions.values()),
+		[state.pendingPermissions],
+	);
+
+	const memoizedQuestions = useMemo(
+		() => Array.from(state.pendingQuestions.values()),
+		[state.pendingQuestions],
+	);
+
+	return useMemo(() => ({
+		messages: sortedMessages,
 		getPartsForMessage,
 		sessionStatus: state.sessionStatus,
-		pendingPermissions: Array.from(state.pendingPermissions.values()),
-		pendingQuestions: Array.from(state.pendingQuestions.values()),
+		pendingPermissions: memoizedPermissions,
+		pendingQuestions: memoizedQuestions,
 		todos: state.todos,
 		isConnected: state.isConnected,
 		error: state.error,
-	};
+		revertState: state.revertState,
+	}), [sortedMessages, getPartsForMessage, state.sessionStatus, memoizedPermissions, memoizedQuestions, state.todos, state.isConnected, state.error, state.revertState]);
 }

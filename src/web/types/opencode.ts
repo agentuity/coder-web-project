@@ -345,6 +345,22 @@ export interface EventSessionError {
 	properties: { sessionID: string; error: string };
 }
 
+export interface EventSessionUpdated {
+	type: 'session.updated';
+	properties: {
+		info: {
+			id: string;
+			revert?: {
+				messageID: string;
+				partID?: string;
+				snapshot?: string;
+				diff?: string;
+			};
+			[key: string]: unknown;
+		};
+	};
+}
+
 export type ChatEvent =
 	| EventMessageUpdated
 	| EventMessageRemoved
@@ -358,4 +374,5 @@ export type ChatEvent =
 	| EventQuestionReplied
 	| EventQuestionRejected
 	| EventTodoUpdated
-	| EventSessionError;
+	| EventSessionError
+	| EventSessionUpdated;

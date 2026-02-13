@@ -1,7 +1,7 @@
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { userSettings } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq } from '@agentuity/drizzle';
 import { encrypt, decrypt } from '../lib/encryption';
 
 const router = createRouter();
@@ -19,6 +19,33 @@ function maskToken(token: string) {
 	const suffix = token.slice(-4);
 	return suffix ? `••••${suffix}` : '••••';
 }
+
+// GET /api/user/settings — return user settings (default command, etc.)
+router.get('/settings', async (c) => {
+	const user = c.get('user')!;
+	const [settings] = await db.select().from(userSettings).where(eq(userSettings.userId, user.id));
+	return c.json({
+		defaultCommand: settings?.defaultCommand ?? '',
+	});
+});
+
+// PUT /api/user/settings — update user settings
+router.put('/settings', async (c) => {
+	const user = c.get('user')!;
+	const body = (await c.req.json<{ defaultCommand?: string }>().catch(() => ({}))) as { defaultCommand?: string };
+	const defaultCommand = typeof body.defaultCommand === 'string' ? body.defaultCommand : '';
+
+	const [existing] = await db.select().from(userSettings).where(eq(userSettings.userId, user.id));
+	if (existing) {
+		await db
+			.update(userSettings)
+			.set({ defaultCommand, updatedAt: new Date() })
+			.where(eq(userSettings.userId, user.id));
+	} else {
+		await db.insert(userSettings).values({ userId: user.id, defaultCommand });
+	}
+	return c.json({ defaultCommand });
+});
 
 // GET /api/user/github — check if PAT is configured
 router.get('/github', async (c) => {

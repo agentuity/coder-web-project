@@ -16,6 +16,9 @@ import sharedRoutes from '../routes/shared';
 import githubRoutes from '../routes/github';
 import githubGlobalRoutes from '../routes/github-global';
 import userSettingsRoutes from '../routes/user-settings';
+import voiceRoutes from '../routes/voice';
+import voiceSettingsRoutes from '../routes/voice-settings';
+import snapshotRoutes from '../routes/snapshots';
 
 const api = createRouter();
 
@@ -51,6 +54,10 @@ api.get('/me', async (c) => {
 
 // User settings routes
 api.route('/user', userSettingsRoutes);
+api.route('/user/voice', voiceSettingsRoutes);
+
+// Voice routes
+api.route('/voice', voiceRoutes);
 
 // GitHub routes (non-session scoped)
 api.route('/github', githubGlobalRoutes);
@@ -80,5 +87,8 @@ api.route('/sessions', sessionMcpRoutes);
 // Sources routes (nested under workspaces + standalone)
 api.route('/workspaces/:wid/sources', sourceRoutes);
 api.route('/sources', sourceRoutes);
+
+// Snapshot routes (nested under workspaces)
+api.route('/workspaces/:wid/snapshots', snapshotRoutes);
 
 export default api;

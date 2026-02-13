@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useAnalytics, useTrackOnMount } from '@agentuity/react';
 import { Plus, Sparkles, Pencil, Trash2, ToggleLeft, ToggleRight } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -29,6 +30,8 @@ interface RegistrySkill {
 }
 
 export function SkillsPage({ workspaceId }: SkillsPageProps) {
+	const { track } = useAnalytics();
+	useTrackOnMount({ eventName: 'page_viewed', properties: { page: 'skills' } });
 	const [skills, setSkills] = useState<Skill[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [showForm, setShowForm] = useState(false);
@@ -132,17 +135,23 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 		setSaving(true);
 		try {
 			if (editingSkill) {
-				await fetch(`/api/skills/${editingSkill.id}`, {
+				const res = await fetch(`/api/skills/${editingSkill.id}`, {
 					method: 'PATCH',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify(formData),
 				});
+				if (res.ok) {
+					track('skill_updated');
+				}
 			} else {
-				await fetch(`/api/workspaces/${workspaceId}/skills`, {
+				const res = await fetch(`/api/workspaces/${workspaceId}/skills`, {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify(formData),
 				});
+				if (res.ok) {
+					track('skill_created');
+				}
 			}
 			setShowForm(false);
 			setEditingSkill(null);
@@ -166,6 +175,7 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 				const errBody = await res.json().catch(() => null);
 				throw new Error(errBody?.error || 'Failed to toggle skill');
 			}
+			track('skill_toggled', { enabled: !skill.enabled });
 			fetchSkills();
 		} catch (err: any) {
 			setRegistryError(err?.message || 'Failed to toggle skill.');
@@ -181,6 +191,7 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 				const errBody = await res.json().catch(() => null);
 				throw new Error(errBody?.error || 'Failed to delete skill');
 			}
+			track('skill_deleted');
 			fetchSkills();
 		} catch (err: any) {
 			setRegistryError(err?.message || 'Failed to delete skill.');
@@ -237,6 +248,7 @@ export function SkillsPage({ workspaceId }: SkillsPageProps) {
 				const errBody = await res.json().catch(() => null);
 				throw new Error(errBody?.details || errBody?.error || 'Failed to save skill');
 			}
+			track('skill_installed');
 			await fetchSkills();
 		} catch (err: any) {
 			setRegistryError(err?.message || 'Failed to install skill.');

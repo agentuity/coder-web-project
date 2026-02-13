@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, Cpu } from 'lucide-react';
+import { cn } from '../../lib/utils';
 
 const MODEL_GROUPS = [
   {
@@ -25,8 +26,8 @@ const MODEL_GROUPS = [
     color: 'bg-[#7dd3fc]',
     models: [
       {
-        value: 'openai/codex-5-2',
-        label: 'Codex 5.2',
+        value: 'openai/gpt-5.2-codex',
+        label: 'GPT 5.2 Codex',
         capabilities: ['code', 'tools'],
       },
     ],
@@ -36,9 +37,10 @@ const MODEL_GROUPS = [
 interface ModelSelectorProps {
   value: string;
   onChange: (model: string) => void;
+  disabled?: boolean;
 }
 
-export function ModelSelector({ value, onChange }: ModelSelectorProps) {
+export function ModelSelector({ value, onChange, disabled }: ModelSelectorProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
@@ -76,9 +78,12 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
     <div ref={containerRef} className="relative">
 		<button
 			type="button"
-			onClick={() => setOpen((prev) => !prev)}
-			className="inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)] hover:bg-[var(--muted)]"
-			title="Select model"
+			onClick={() => !disabled && setOpen((prev) => !prev)}
+			className={cn(
+				"inline-flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs text-[var(--foreground)]",
+				disabled ? "opacity-50 cursor-not-allowed" : "hover:bg-[var(--muted)]"
+			)}
+			title={disabled ? "Model is managed by the selected agent" : "Select model"}
 			aria-label="Select model"
 		>
 			<Cpu className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
@@ -92,7 +97,7 @@ export function ModelSelector({ value, onChange }: ModelSelectorProps) {
 		</button>
 
       {open && (
-			<div className="absolute bottom-full left-0 z-50 mb-2 w-[calc(100vw-2rem)] rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg md:w-64">
+			<div className="absolute bottom-full left-0 z-50 mb-2 w-[calc(100vw-2rem)] max-w-[90vw] rounded-md border border-[var(--border)] bg-[var(--popover)] p-2 text-xs shadow-lg md:w-64">
           {MODEL_GROUPS.map((group) => (
             <div key={group.providerID} className="mb-2 last:mb-0">
               <div className="mb-1 flex items-center gap-2 text-[10px] uppercase tracking-wide text-[var(--muted-foreground)]">

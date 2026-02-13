@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useId, useState } from 'react';
+import { useAnalytics, useTrackOnMount } from '@agentuity/react';
 import { Settings, Save, AlertTriangle, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
 import { GitHubSettings } from '../settings/GitHubSettings';
+import { VoiceSettings } from '../settings/VoiceSettings';
+import { DefaultAgentSetting } from '../settings/DefaultAgentSetting';
 
 interface Workspace {
 	id: string;
@@ -17,6 +20,8 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPageProps) {
+	const { track } = useAnalytics();
+	useTrackOnMount({ eventName: 'page_viewed', properties: { page: 'settings' } });
 	const [workspace, setWorkspace] = useState<Workspace | null>(null);
 	const [allWorkspaces, setAllWorkspaces] = useState<Workspace[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -78,13 +83,14 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 					description: description || undefined,
 				}),
 			});
-			if (!res.ok) {
-				const errBody = await res.json().catch(() => null);
-				throw new Error(errBody?.error || 'Failed to save settings');
-			}
-			setSaved(true);
-			fetchAllWorkspaces();
-			setTimeout(() => setSaved(false), 2000);
+		if (!res.ok) {
+			const errBody = await res.json().catch(() => null);
+			throw new Error(errBody?.error || 'Failed to save settings');
+		}
+		track('workspace_updated');
+		setSaved(true);
+		fetchAllWorkspaces();
+		setTimeout(() => setSaved(false), 2000);
 		} catch (err: any) {
 			setSettingsError(err?.message || 'Failed to save settings.');
 		}
@@ -153,7 +159,7 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 	}
 
 	return (
-		<div className="p-6 max-w-2xl">
+		<div className="h-full overflow-y-auto p-6">
 			{/* Header */}
 			<div className="flex items-center gap-2 mb-6">
 				<Settings className="h-5 w-5 text-[var(--primary)]" />
@@ -317,6 +323,24 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 					{settingsError}
 				</div>
 			)}
+
+			{/* Default Agent */}
+			<Card className="p-4 mt-8 mb-6">
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-2">Default Agent</h3>
+				<p className="text-xs text-[var(--muted-foreground)] mb-3">
+					Choose which agent is pre-selected when you start a new chat session.
+				</p>
+				<DefaultAgentSetting />
+			</Card>
+
+			{/* Voice */}
+			<Card className="p-4 mb-6">
+				<h3 className="text-sm font-medium text-[var(--foreground)] mb-4">Voice (Narrator)</h3>
+				<p className="text-xs text-[var(--muted-foreground)] mb-4">
+					Configure voice input and text-to-speech for narrator conversations.
+				</p>
+				<VoiceSettings />
+			</Card>
 
 			{/* GitHub */}
 			<Card className="p-4 mt-8 mb-6">

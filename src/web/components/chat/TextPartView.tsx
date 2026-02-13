@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Streamdown } from 'streamdown';
 import { createCodePlugin } from '@streamdown/code';
 import { CheckIcon, CopyIcon } from 'lucide-react';
 import type { TextPart } from '../../types/opencode';
+import { UIPartView } from './UIPartView';
 
 interface TextPartViewProps {
   part: TextPart;
@@ -59,6 +60,25 @@ const components = {
   pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => {
     const [copied, setCopied] = useState(false);
 
+    // Check if this is a ui_spec code fence
+    // Streamdown renders: <pre><code className="language-ui_spec">{ json }</code></pre>
+    const childElement = children as React.ReactElement<{ className?: string; children?: React.ReactNode }> | undefined;
+    const codeClassName = childElement?.props?.className || '';
+    const isUISpec = codeClassName.includes('language-ui_spec');
+
+    if (isUISpec) {
+      const rawText = extractText(childElement?.props?.children).trim();
+      try {
+        const spec = JSON.parse(rawText);
+        return <UIPartView spec={spec} />;
+      } catch {
+        // If JSON is incomplete (still streaming), show a loading state
+        if (rawText.length > 0) {
+          return <UIPartView spec={{}} loading />;
+        }
+      }
+    }
+
     const handleCopy = async () => {
       const text = extractText(children).trim();
       if (!text || typeof window === 'undefined' || !navigator?.clipboard?.writeText) return;
@@ -89,10 +109,10 @@ const components = {
     );
   },
   ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
-    <ul className="text-sm list-disc ml-4 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ul>
+    <ul className="text-sm list-disc ml-6 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ul>
   ),
   ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
-    <ol className="text-sm list-decimal ml-4 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ol>
+    <ol className="text-sm list-decimal ml-6 my-1.5 space-y-0.5 text-[var(--foreground)]" {...props}>{children}</ol>
   ),
   li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
     <li className="text-sm text-[var(--foreground)]" {...props}>{children}</li>
@@ -121,7 +141,7 @@ const components = {
   ),
 };
 
-export function TextPartView({ part, isStreaming }: TextPartViewProps) {
+export const TextPartView = React.memo(function TextPartView({ part, isStreaming }: TextPartViewProps) {
   if (part.ignored) return null;
   return (
     <div className="max-w-none text-sm text-[var(--foreground)]">
@@ -136,4 +156,4 @@ export function TextPartView({ part, isStreaming }: TextPartViewProps) {
       </Streamdown>
     </div>
   );
-}
+});

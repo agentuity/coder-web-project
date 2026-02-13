@@ -23,6 +23,9 @@ Copy and paste these instructions into your coding agent to automate the full se
 ```
 Set up this Agentuity Coder project from scratch. Follow these steps in order, stopping if any step fails:
 
+First you must have the Agentuity CLI installed and be logged in: https://agentuity.dev/Get-Started/installation.md - Once installed
+run agentuity login to ensure the user is logged in to Agentuity.
+
 1. Install dependencies:
    Run: bun install
 
@@ -102,7 +105,6 @@ These secrets are used by AI sandboxes (not by the app itself). Set them in your
 ```bash
 agentuity cloud env set ANTHROPIC_API_KEY <your-key> --secret --org
 agentuity cloud env set OPENAI_API_KEY <your-key> --secret --org
-agentuity cloud env set GH_TOKEN <your-token> --secret --org
 ```
 
 At minimum you need `ANTHROPIC_API_KEY` for Claude-based coding.
@@ -226,7 +228,7 @@ Example: `/?s=abc123&v=ide&tab=git` opens session abc123 in IDE mode with the gi
 - **AI**: OpenCode SDK with sandboxed execution
 - **Markdown**: Streamdown (streaming animation)
 - **Diffs**: @pierre/diffs (FileDiff + PierreFile)
-- **URL State**: nuqs (type-safe URL search params)
+- **Routing**: @tanstack/react-router (type-safe routing with Zod-validated search params)
 - **Deploy**: Agentuity Platform
 
 ## License

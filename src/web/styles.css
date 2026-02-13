@@ -166,15 +166,37 @@ code, pre, .font-mono {
   scrollbar-color: var(--muted-foreground) transparent;
 }
 
-/* Shiki dual theme support for file viewer */
+/* Shiki dual theme support — follow .dark class on <html> instead of prefers-color-scheme */
 html.dark .shiki,
 html.dark .shiki span {
   color: var(--shiki-dark) !important;
   background-color: var(--shiki-dark-bg) !important;
+  font-style: var(--shiki-dark-font-style) !important;
+  font-weight: var(--shiki-dark-font-weight) !important;
+  text-decoration: var(--shiki-dark-text-decoration) !important;
 }
 
 html:not(.dark) .shiki,
 html:not(.dark) .shiki span {
   color: var(--shiki-light) !important;
   background-color: var(--shiki-light-bg) !important;
+  font-style: var(--shiki-light-font-style) !important;
+  font-weight: var(--shiki-light-font-weight) !important;
+  text-decoration: var(--shiki-light-text-decoration) !important;
+}
+
+/*
+ * @pierre/diffs dark mode fix
+ * With themeType: 'system', pierre/diffs uses CSS light-dark() which follows
+ * the color-scheme property. Override color-scheme based on the .dark class
+ * so that code viewers and diff viewers follow the app's theme toggle.
+ */
+html.dark [data-diffs],
+html.dark [data-diffs-header] {
+  color-scheme: dark;
+}
+
+html:not(.dark) [data-diffs],
+html:not(.dark) [data-diffs-header] {
+  color-scheme: light;
 }

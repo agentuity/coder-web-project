@@ -5,7 +5,7 @@
  * - Without them → email/password fallback (local dev)
  */
 import { createAuth, createSessionMiddleware, createApiKeyMiddleware, mountAuthRoutes } from '@agentuity/auth';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { drizzleAdapter } from '@agentuity/drizzle';
 import * as authSchema from '@agentuity/auth/schema';
 import { db } from './db';
 

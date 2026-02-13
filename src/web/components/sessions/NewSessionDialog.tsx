@@ -1,10 +1,10 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { useAPI } from '@agentuity/react';
+import { useAnalytics, useAPI } from '@agentuity/react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { cn } from '../../lib/utils';
-import { Loader2, X } from 'lucide-react';
+import { Camera, Loader2, Trash2, X } from 'lucide-react';
 
 interface Repo {
 	fullName: string;
@@ -21,16 +21,31 @@ interface Branch {
 	name: string;
 }
 
+interface Snapshot {
+	id: string;
+	name: string;
+	description: string | null;
+	snapshotId: string;
+	sourceSessionId: string | null;
+	metadata: Record<string, unknown> | null;
+	createdAt: string;
+}
+
 interface NewSessionDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  onCreate: (data: { repoUrl?: string; branch?: string; prompt?: string }) => Promise<void>;
+  onCreate: (data: { repoUrl?: string; branch?: string; prompt?: string; snapshotId?: string }) => Promise<void>;
   isCreating: boolean;
   githubAvailable?: boolean;
+  workspaceId?: string;
 }
 
-export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, githubAvailable = true }: NewSessionDialogProps) {
-	const [mode, setMode] = useState<'dropdown' | 'url'>('dropdown');
+export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, githubAvailable = true, workspaceId }: NewSessionDialogProps) {
+	const { track } = useAnalytics();
+	const [mode, setMode] = useState<'dropdown' | 'url' | 'snapshot'>('dropdown');
+	const [snapshots, setSnapshots] = useState<Snapshot[]>([]);
+	const [snapshotsLoading, setSnapshotsLoading] = useState(false);
+	const [selectedSnapshot, setSelectedSnapshot] = useState<Snapshot | null>(null);
 	const [repoUrl, setRepoUrl] = useState('');
 	const [branch, setBranch] = useState('');
 	const [prompt, setPrompt] = useState('');
@@ -42,6 +57,7 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 	const [repoDropdownOpen, setRepoDropdownOpen] = useState(false);
 	const [repoError, setRepoError] = useState<string | null>(null);
 	const repoDropdownRef = useRef<HTMLDivElement | null>(null);
+	const wasOpenRef = useRef(false);
 	const repoId = useId();
 	const branchId = useId();
 	const promptId = useId();
@@ -133,6 +149,42 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 		}
 	}, [isOpen]);
 
+	useEffect(() => {
+		if (isOpen && !wasOpenRef.current) {
+			track('session_dialog_opened');
+		}
+		wasOpenRef.current = isOpen;
+	}, [isOpen, track]);
+
+	// Fetch snapshots when mode changes to 'snapshot'
+	useEffect(() => {
+		if (mode !== 'snapshot' || !workspaceId) return;
+		setSnapshotsLoading(true);
+		fetch(`/api/workspaces/${workspaceId}/snapshots`)
+			.then((r) => r.json())
+			.then((data: Snapshot[]) => {
+				setSnapshots(Array.isArray(data) ? data : []);
+			})
+			.catch(() => setSnapshots([]))
+			.finally(() => setSnapshotsLoading(false));
+	}, [mode, workspaceId]);
+
+	const handleDeleteSnapshot = async (snapshotId: string, e: React.MouseEvent) => {
+		e.stopPropagation();
+		if (!workspaceId) return;
+		try {
+			const res = await fetch(`/api/workspaces/${workspaceId}/snapshots/${snapshotId}`, { method: 'DELETE' });
+			if (res.ok) {
+				setSnapshots((prev) => prev.filter((s) => s.id !== snapshotId));
+				if (selectedSnapshot?.id === snapshotId) {
+					setSelectedSnapshot(null);
+				}
+			}
+		} catch {
+			// Ignore delete errors
+		}
+	};
+
 	const filteredRepos = useMemo(() => {
 		const term = repoSearch.trim().toLowerCase();
 		if (!term) return repos;
@@ -143,19 +195,23 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		const resolvedRepoUrl =
-			mode === 'dropdown' ? selectedRepo?.cloneUrl || undefined : repoUrl || undefined;
-		const resolvedBranch =
-			mode === 'dropdown'
-				? selectedRepo
-					? selectedBranch || selectedRepo.defaultBranch || undefined
-					: undefined
-				: branch || undefined;
-		await onCreate({
-			repoUrl: resolvedRepoUrl,
-			branch: resolvedBranch,
-			prompt: prompt || undefined,
-		});
+		if (mode === 'snapshot' && selectedSnapshot) {
+			await onCreate({ snapshotId: selectedSnapshot.id, prompt: prompt || undefined });
+		} else {
+			const resolvedRepoUrl =
+				mode === 'dropdown' ? selectedRepo?.cloneUrl || undefined : repoUrl || undefined;
+			const resolvedBranch =
+				mode === 'dropdown'
+					? selectedRepo
+						? selectedBranch || selectedRepo.defaultBranch || undefined
+						: undefined
+					: branch || undefined;
+			await onCreate({
+				repoUrl: resolvedRepoUrl,
+				branch: resolvedBranch,
+				prompt: prompt || undefined,
+			});
+		}
 		setRepoUrl('');
 		setBranch('');
 		setPrompt('');
@@ -163,6 +219,7 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 		setSelectedRepo(null);
 		setSelectedBranch('');
 		setBranches([]);
+		setSelectedSnapshot(null);
 	};
 
   return (
@@ -180,9 +237,74 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 
 		<form onSubmit={handleSubmit} className="space-y-4">
 			{!githubAvailable && (
-				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
-					Connect GitHub in Profile settings to enable repository selection and git features.
-				</div>
+				<>
+					<div className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-3 py-2 text-xs text-[var(--muted-foreground)]">
+						Connect GitHub in Profile settings to enable repository selection and git features.
+					</div>
+					{workspaceId && (
+						<div className="flex items-center gap-2 text-xs">
+							<button
+								type="button"
+								onClick={() => setMode('snapshot')}
+								className={cn(
+									"text-xs inline-flex items-center gap-1",
+									mode === 'snapshot' ? 'text-[var(--primary)]' : 'text-[var(--muted-foreground)]',
+								)}
+							>
+								<Camera className="h-3 w-3" />
+								From Snapshot
+							</button>
+						</div>
+					)}
+					{mode === 'snapshot' && (
+						<div className="space-y-2 max-h-48 overflow-y-auto">
+							{snapshotsLoading ? (
+								<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)] py-4 justify-center">
+									<Loader2 className="h-3 w-3 animate-spin" />
+									Loading snapshots...
+								</div>
+							) : snapshots.length === 0 ? (
+								<div className="text-xs text-[var(--muted-foreground)] py-4 text-center">
+									No snapshots yet. Save a snapshot from an active session to see it here.
+								</div>
+							) : (
+								snapshots.map((snap) => (
+								<div
+									key={snap.id}
+									role="button"
+									tabIndex={0}
+									onClick={() => setSelectedSnapshot(snap)}
+									onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedSnapshot(snap); } }}
+									className={cn(
+										'flex w-full items-start justify-between gap-2 rounded-md border p-2 text-left text-xs transition-colors cursor-pointer',
+										selectedSnapshot?.id === snap.id
+											? 'border-[var(--primary)] bg-[var(--accent)]'
+											: 'border-[var(--border)] hover:bg-[var(--accent)]',
+									)}
+								>
+									<div className="min-w-0 flex-1">
+										<div className="font-medium text-[var(--foreground)]">{snap.name}</div>
+										{snap.description && (
+											<div className="text-[var(--muted-foreground)] mt-0.5 truncate">{snap.description}</div>
+										)}
+										<div className="text-[10px] text-[var(--muted-foreground)] mt-1">
+											{new Date(snap.createdAt).toLocaleDateString()}
+										</div>
+									</div>
+									<button
+										type="button"
+										onClick={(e) => handleDeleteSnapshot(snap.id, e)}
+										className="shrink-0 rounded p-1 text-[var(--muted-foreground)] hover:text-red-500 hover:bg-red-500/10"
+										title="Delete snapshot"
+									>
+										<Trash2 className="h-3 w-3" />
+									</button>
+								</div>
+							))
+							)}
+						</div>
+					)}
+				</>
 			)}
 			{githubAvailable && (
 				<>
@@ -208,9 +330,72 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 						>
 							Use URL instead
 						</button>
+						{workspaceId && (
+							<>
+								<span className="text-[var(--muted-foreground)]">|</span>
+								<button
+									type="button"
+									onClick={() => setMode('snapshot')}
+									className={cn(
+										"text-xs inline-flex items-center gap-1",
+										mode === 'snapshot' ? 'text-[var(--primary)]' : 'text-[var(--muted-foreground)]',
+									)}
+								>
+									<Camera className="h-3 w-3" />
+									From Snapshot
+								</button>
+							</>
+						)}
 					</div>
 
-						{mode === 'dropdown' ? (
+						{mode === 'snapshot' ? (
+							<div className="space-y-2 max-h-48 overflow-y-auto">
+								{snapshotsLoading ? (
+									<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)] py-4 justify-center">
+										<Loader2 className="h-3 w-3 animate-spin" />
+										Loading snapshots...
+									</div>
+								) : snapshots.length === 0 ? (
+									<div className="text-xs text-[var(--muted-foreground)] py-4 text-center">
+										No snapshots yet. Save a snapshot from an active session to see it here.
+									</div>
+								) : (
+								snapshots.map((snap) => (
+									<div
+										key={snap.id}
+										role="button"
+										tabIndex={0}
+										onClick={() => setSelectedSnapshot(snap)}
+										onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedSnapshot(snap); } }}
+										className={cn(
+											'flex w-full items-start justify-between gap-2 rounded-md border p-2 text-left text-xs transition-colors cursor-pointer',
+											selectedSnapshot?.id === snap.id
+												? 'border-[var(--primary)] bg-[var(--accent)]'
+												: 'border-[var(--border)] hover:bg-[var(--accent)]',
+										)}
+									>
+										<div className="min-w-0 flex-1">
+											<div className="font-medium text-[var(--foreground)]">{snap.name}</div>
+											{snap.description && (
+												<div className="text-[var(--muted-foreground)] mt-0.5 truncate">{snap.description}</div>
+											)}
+											<div className="text-[10px] text-[var(--muted-foreground)] mt-1">
+												{new Date(snap.createdAt).toLocaleDateString()}
+											</div>
+										</div>
+										<button
+											type="button"
+											onClick={(e) => handleDeleteSnapshot(snap.id, e)}
+											className="shrink-0 rounded p-1 text-[var(--muted-foreground)] hover:text-red-500 hover:bg-red-500/10"
+											title="Delete snapshot"
+										>
+											<Trash2 className="h-3 w-3" />
+										</button>
+									</div>
+								))
+								)}
+							</div>
+						) : mode === 'dropdown' ? (
 							<div className="space-y-2" ref={repoDropdownRef}>
 								<div>
 									<label htmlFor={repoId} className="text-sm font-medium text-[var(--foreground)]">
@@ -358,7 +543,7 @@ export function NewSessionDialog({ isOpen, onClose, onCreate, isCreating, github
 
           <div className="flex justify-end gap-2">
             <Button variant="outline" onClick={onClose} type="button">Cancel</Button>
-            <Button type="submit" disabled={isCreating}>
+            <Button type="submit" disabled={isCreating || (mode === 'snapshot' && !selectedSnapshot)}>
               {isCreating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />

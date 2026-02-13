@@ -1,7 +1,9 @@
+import React from 'react';
 import { BrainIcon, ChevronDownIcon } from 'lucide-react';
 import type { ComponentProps, ReactNode } from 'react';
 import { createContext, memo, useContext, useMemo, useState } from 'react';
 import { Streamdown } from 'streamdown';
+import { createCodePlugin } from '@streamdown/code';
 import {
 	Collapsible,
 	CollapsibleContent,
@@ -10,6 +12,57 @@ import {
 import { cn } from '../../lib/utils';
 import { Badge } from '../ui/badge';
 import { Shimmer } from './shimmer';
+
+const reasoningCodePlugin = createCodePlugin({
+	themes: ['github-dark', 'github-light'],
+});
+
+const reasoningComponents = {
+	h1: ({ children, ...props }: React.ComponentPropsWithoutRef<'h1'>) => (
+		<h1 className="text-xs font-bold mt-2 mb-1 text-[var(--muted-foreground)]" {...props}>{children}</h1>
+	),
+	h2: ({ children, ...props }: React.ComponentPropsWithoutRef<'h2'>) => (
+		<h2 className="text-xs font-bold mt-1.5 mb-0.5 text-[var(--muted-foreground)]" {...props}>{children}</h2>
+	),
+	h3: ({ children, ...props }: React.ComponentPropsWithoutRef<'h3'>) => (
+		<h3 className="text-[11px] font-semibold mt-1 mb-0.5 text-[var(--muted-foreground)]" {...props}>{children}</h3>
+	),
+	p: ({ children, ...props }: React.ComponentPropsWithoutRef<'p'>) => (
+		<p className="text-[11px] leading-relaxed text-[var(--muted-foreground)] my-1" {...props}>{children}</p>
+	),
+	code: ({ children, className, ...props }: React.ComponentPropsWithoutRef<'code'>) => {
+		if (className && className.includes('language-')) {
+			return <code className={className} {...props}>{children}</code>;
+		}
+		return (
+			<code className="rounded bg-[var(--muted)] px-1 py-0.5 text-[10px] font-mono text-[var(--muted-foreground)]" {...props}>
+				{children}
+			</code>
+		);
+	},
+	pre: ({ children, ...props }: React.ComponentPropsWithoutRef<'pre'>) => (
+		<pre className="overflow-x-auto rounded-md bg-[var(--muted)] p-2 text-[10px] leading-relaxed font-mono my-1" {...props}>
+			{children}
+		</pre>
+	),
+	ul: ({ children, ...props }: React.ComponentPropsWithoutRef<'ul'>) => (
+		<ul className="text-[11px] list-disc ml-4 my-1 space-y-0.5 text-[var(--muted-foreground)]" {...props}>{children}</ul>
+	),
+	ol: ({ children, ...props }: React.ComponentPropsWithoutRef<'ol'>) => (
+		<ol className="text-[11px] list-decimal ml-4 my-1 space-y-0.5 text-[var(--muted-foreground)]" {...props}>{children}</ol>
+	),
+	li: ({ children, ...props }: React.ComponentPropsWithoutRef<'li'>) => (
+		<li className="text-[11px] text-[var(--muted-foreground)]" {...props}>{children}</li>
+	),
+	strong: ({ children, ...props }: React.ComponentPropsWithoutRef<'strong'>) => (
+		<strong className="font-semibold text-[var(--muted-foreground)]" {...props}>{children}</strong>
+	),
+	blockquote: ({ children, ...props }: React.ComponentPropsWithoutRef<'blockquote'>) => (
+		<blockquote className="border-l-2 border-[var(--border)] pl-2 my-1 text-[11px] text-[var(--muted-foreground)] italic" {...props}>
+			{children}
+		</blockquote>
+	),
+};
 
 type ReasoningContextValue = {
 	isStreaming: boolean;
@@ -65,7 +118,7 @@ export const Reasoning = memo(
 		return (
 			<ReasoningContext.Provider value={context}>
 				<Collapsible
-					className={cn('not-prose mb-2', className)}
+					className={cn('not-prose mb-2 min-w-0 overflow-hidden', className)}
 					defaultOpen={defaultOpen}
 					onOpenChange={handleOpenChange}
 					open={isOpen}
@@ -151,7 +204,7 @@ export const ReasoningContent = memo(
 				)}
 				{...props}
 			>
-				<div className="max-h-48 overflow-y-auto rounded-md border border-[var(--border)]/50 bg-[var(--muted)]/30 p-2.5 text-[11px]">
+				<div className="max-h-48 overflow-y-auto overflow-x-hidden rounded-md border border-[var(--border)]/50 bg-[var(--muted)]/30 p-2.5 text-[11px] min-w-0 break-words whitespace-pre-wrap [word-break:break-word] [&_*]:max-w-full [&_pre]:whitespace-pre-wrap [&_pre]:overflow-hidden [&_code]:break-all [&_.streamdown]:overflow-hidden [&_.streamdown]:break-words">
 					{isStreaming && !trimmed ? (
 						<div className="space-y-2">
 							<Shimmer className="block h-2 w-2/3 rounded bg-[var(--muted)]">&nbsp;</Shimmer>
@@ -163,6 +216,8 @@ export const ReasoningContent = memo(
 						isAnimating={isStreaming}
 						caret={isStreaming ? 'block' : undefined}
 						mode={isStreaming ? 'streaming' : undefined}
+						components={reasoningComponents}
+						plugins={{ code: reasoningCodePlugin }}
 					>{children}</Streamdown>
 					)}
 				</div>

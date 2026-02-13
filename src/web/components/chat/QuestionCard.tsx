@@ -17,18 +17,26 @@ export function QuestionCard({ request, sessionId }: QuestionCardProps) {
 	const [replying, setReplying] = useState(false);
 	const [replied, setReplied] = useState(false);
 	const [customInputs, setCustomInputs] = useState<Record<number, string>>({});
+	const [error, setError] = useState<string | null>(null);
 
 	const handleReply = async (answers: string[][]) => {
 		setReplying(true);
+		setError(null);
 		try {
-			await fetch(`/api/sessions/${sessionId}/questions/${request.id}`, {
+			const res = await fetch(`/api/sessions/${sessionId}/questions/${request.id}`, {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
 				body: JSON.stringify({ answers }),
 			});
+			if (!res.ok) {
+				const detail = await res.text().catch(() => '');
+				const message = detail ? `Failed to send answer: ${detail}` : 'Failed to send answer. Try again.';
+				setError(message);
+				return;
+			}
 			setReplied(true);
 		} catch {
-			// Failed to reply
+			setError('Network error. Try again.');
 		} finally {
 			setReplying(false);
 		}
@@ -113,6 +121,9 @@ export function QuestionCard({ request, sessionId }: QuestionCardProps) {
 						</pre>
 					</CollapsibleContent>
 				</Collapsible>
+				{error && (
+					<div className="text-xs text-red-400">{error}</div>
+				)}
 				</div>
 			</div>
 		</div>

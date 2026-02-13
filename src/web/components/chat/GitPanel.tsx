@@ -533,16 +533,16 @@ function StatusSection({
 			)}
 			{status && status.branch && (
 				<div className="mt-2 space-y-1.5">
-					<div className="flex items-center gap-2">
-						<Badge variant="secondary" className="text-[10px] font-mono">
+					<div className="flex items-center gap-2 min-w-0">
+						<Badge variant="secondary" className="text-[10px] font-mono truncate min-w-0 shrink">
 							{status.branch}
 						</Badge>
 						{status.isDirty ? (
-							<Badge variant="destructive" className="text-[10px]">
+							<Badge variant="destructive" className="text-[10px] shrink-0 whitespace-nowrap">
 								{status.changedFiles.length} changed
 							</Badge>
 						) : (
-							<Badge variant="outline" className="text-[10px]">
+							<Badge variant="outline" className="text-[10px] shrink-0 whitespace-nowrap">
 								Clean
 							</Badge>
 						)}
@@ -1015,6 +1015,7 @@ export function GitPanel({ sessionId, metadata, onOpenDiff, onBranchChange }: Gi
 export function useGitStatus(sessionId: string | undefined, enabled = true) {
 	const [branch, setBranch] = useState<string | null>(null);
 	const [changedCount, setChangedCount] = useState(0);
+	const [hasRepo, setHasRepo] = useState(false);
 
 	const load = useCallback(async () => {
 		if (!sessionId || !enabled) return;
@@ -1024,6 +1025,7 @@ export function useGitStatus(sessionId: string | undefined, enabled = true) {
 			const data: GitStatus = await res.json();
 			setBranch(data.branch);
 			setChangedCount(data.changedFiles.length);
+			setHasRepo(data.hasRepo);
 		} catch {
 			// ignore
 		}
@@ -1040,5 +1042,5 @@ export function useGitStatus(sessionId: string | undefined, enabled = true) {
 		return () => clearInterval(interval);
 	}, [sessionId, enabled, load]);
 
-	return { branch, changedCount, refresh: load };
+	return { branch, changedCount, hasRepo, refresh: load };
 }

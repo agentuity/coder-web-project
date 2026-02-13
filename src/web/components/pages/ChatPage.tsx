@@ -2,15 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEventHandler } from 'react';
 import {
 	Check,
+	Clock,
+	Code2,
 	Copy,
 	GitBranch,
 	GitFork,
+	Camera,
 	Circle,
 	ListOrdered,
 	ListTodo,
 	Loader2,
+	MessageSquare,
 	Paperclip,
 	ExternalLink,
+	RotateCcw,
 	Terminal,
 
 	WifiOff,
@@ -21,11 +26,15 @@ import { Badge } from '../ui/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { useSessionEvents } from '../../hooks/useSessionEvents';
 import { FileExplorer } from '../chat/FileExplorer';
-
 import { CommandPicker } from '../chat/AgentSelector';
 import { ModelSelector } from '../chat/ModelSelector';
 import { GitPanel, useGitStatus } from '../chat/GitPanel';
-import type { Message as ChatMessage, Part, ReasoningPart, ToolPart } from '../../types/opencode';
+import type {
+	Message as ChatMessage,
+	Part,
+	ReasoningPart,
+	ToolPart,
+} from '../../types/opencode';
 import { TextPartView } from '../chat/TextPartView';
 import { ToolCallCard } from '../chat/ToolCallCard';
 import { FilePartView } from '../chat/FilePartView';
@@ -65,8 +74,15 @@ import { Loader } from '../ai-elements/loader';
 import { useToast } from '../ui/toast';
 import { useFileTabs } from '../../hooks/useFileTabs';
 import { useCodeComments } from '../../hooks/useCodeComments';
+import { useNarratorMode } from '../../hooks/useNarratorMode';
+import { useAudioPlayback } from '../../hooks/useAudioPlayback';
+import { VoiceControls } from '../ui/VoiceControls';
 import { cn } from '../../lib/utils';
-import { useUrlState } from '../../hooks/useUrlState';
+import { apiFetch } from '../../lib/api';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import type { z } from 'zod';
+import { sessionSearchSchema } from '../../router';
+import { useAnalytics } from '@agentuity/react';
 
 interface ChatPageProps {
   sessionId: string;
@@ -109,6 +125,8 @@ type AttachmentItem = {
 	content: string;
 };
 
+type SessionSearch = z.infer<typeof sessionSearchSchema>;
+
 const MAX_ATTACHMENTS = 5;
 const MAX_ATTACHMENT_SIZE = 10 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = new Set([
@@ -137,6 +155,7 @@ const ALLOWED_EXTENSIONS = new Set([
 export function ChatPage({ sessionId, session: initialSession, onForkedSession, githubAvailable = true }: ChatPageProps) {
   const [session, setSession] = useState(initialSession);
   const { toast } = useToast();
+  const { track } = useAnalytics();
   const [statusStartedAt, setStatusStartedAt] = useState(() => Date.now());
   const [statusElapsedMs, setStatusElapsedMs] = useState(0);
   const [archivedMessages, setArchivedMessages] = useState<ChatMessage[]>([]);
@@ -170,26 +189,32 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
   useEffect(() => {
     if (session.status === 'active') return;
 
+    const controller = new AbortController();
+    let aborted = false;
+
     const poll = setInterval(async () => {
       try {
-		const res = await fetch(`/api/sessions/${sessionId}`);
-		if (res.ok) {
-			const data = await res.json();
-			if (data.status === 'active') {
-				setSession((prev) => ({
-					...prev,
-					status: 'active',
-					sandboxId: data.sandboxId ?? prev.sandboxId,
-					sandboxUrl: data.sandboxUrl ?? prev.sandboxUrl,
-				}));
-			}
-		}
-	} catch {
+        const res = await apiFetch(`/api/sessions/${sessionId}`, { signal: controller.signal });
+        const data = await res.json();
+        if (data.status === 'active' && !aborted) {
+          setSession((prev) => ({
+            ...prev,
+            status: 'active',
+            sandboxId: data.sandboxId ?? prev.sandboxId,
+            sandboxUrl: data.sandboxUrl ?? prev.sandboxUrl,
+          }));
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         // Ignore — will retry on next interval
       }
     }, 3000);
 
-    return () => clearInterval(poll);
+    return () => {
+      aborted = true;
+      controller.abort();
+      clearInterval(poll);
+    };
   }, [session.status, sessionId]);
 
   useEffect(() => {
@@ -201,15 +226,13 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       return;
     }
 
+    const controller = new AbortController();
     let isMounted = true;
     setIsLoadingArchive(true);
     setArchiveError(null);
 
-    fetch(`/api/sessions/${sessionId}/messages`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to load messages');
-        return res.json();
-      })
+    apiFetch(`/api/sessions/${sessionId}/messages`, { signal: controller.signal })
+      .then((res) => res.json())
       .then((data: unknown) => {
         if (!isMounted) return;
         const messages: ChatMessage[] = [];
@@ -244,8 +267,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
         setArchivedMessages(messages);
         setArchivedParts(partsByMessage);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!isMounted) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         setArchiveError('Unable to load chat history');
       })
       .finally(() => {
@@ -255,6 +279,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, [session.status, sessionId]);
 
@@ -269,6 +294,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		todos,
 		isConnected,
 		error,
+		revertState,
 	} = useSessionEvents(activeSessionId);
 
 	const [isRetrying, setIsRetrying] = useState(false);
@@ -292,23 +318,129 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [inputText, setInputText] = useState('');
 	const [isSending, setIsSending] = useState(false);
 	const [attachments, setAttachments] = useState<AttachmentItem[]>([]);
-  const [selectedCommand, setSelectedCommand] = useState('');
+  // Only initialize from session.agent if it's a real agent (not a template command).
+  // Template commands (memory-save, cadence, etc.) are one-shot and shouldn't persist.
+  // DB stores without '/' prefix, picker uses with '/' — normalize on load.
+  const [selectedCommand, setSelectedCommand] = useState(() => {
+    const agent = session.agent || '';
+    const templateCommands = new Set(['agentuity-cadence', 'agentuity-memory-save', 'agentuity-memory-share', 'agentuity-cloud', 'agentuity-sandbox']);
+    if (!agent || templateCommands.has(agent)) return '';
+    return agent.startsWith('/') ? agent : `/${agent}`;
+  });
+  const [hasManuallySelectedCommand, setHasManuallySelectedCommand] = useState(false);
   const [selectedModel, setSelectedModel] = useState(session.model || 'anthropic/claude-sonnet-4-5');
 	const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
 	const [showTodos, setShowTodos] = useState(false);
 	const [showChanges, setShowChanges] = useState(false);
 	const [isForking, setIsForking] = useState(false);
 	const [isSharing, setIsSharing] = useState(false);
+	const [showSnapshotDialog, setShowSnapshotDialog] = useState(false);
+	const [snapshotName, setSnapshotName] = useState('');
+	const [snapshotDescription, setSnapshotDescription] = useState('');
+	const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
 	const [shareUrl, setShareUrl] = useState<string | null>(null);
 	const [shareCopied, setShareCopied] = useState(false);
-	const [urlState, setUrlState] = useUrlState();
-	const viewMode = urlState.v;
-	const sidebarTab = urlState.tab;
+	const { v: viewMode, tab: sidebarTab } = useSearch({ from: '/session/$sessionId' });
+	const navigate = useNavigate({ from: '/session/$sessionId' });
 	const [sshCopied, setSshCopied] = useState(false);
 	const [sandboxCopied, setSandboxCopied] = useState(false);
+	const [attachCopied, setAttachCopied] = useState(false);
+	const [passwordCopied, setPasswordCopied] = useState(false);
+	const [opencodePassword, setOpencodePassword] = useState<string | null>(null);
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const passwordFetchController = useRef<AbortController | null>(null);
+
+	useEffect(() => () => {
+		passwordFetchController.current?.abort();
+	}, []);
+
+	const handleModelChange = useCallback((model: string) => {
+		setSelectedModel(model);
+		track('model_changed', { model });
+	}, [track]);
+
+	const handleViewModeChange = useCallback((mode: 'chat' | 'ide') => {
+		navigate({ search: (prev: SessionSearch) => ({ ...prev, v: mode }) });
+		track('view_mode_changed', { mode });
+	}, [navigate, track]);
+
+	const { enqueue: enqueueAudio, clearQueue: clearAudioQueue, isSpeaking } = useAudioPlayback();
+
+	const handleSendRef = useRef<(text: string) => Promise<void>>(undefined);
+
+	const handleNarratorAutoSend = useCallback((text: string) => {
+		void handleSendRef.current?.(text);
+	}, []);
+
+	const handleNarratorCancel = useCallback(() => {
+		toast({ type: 'info', message: 'Cancelled' });
+	}, [toast]);
+
+	const handleDictation = useCallback((text: string) => {
+		setInputText((prev) => (prev ? `${prev} ${text}` : text));
+	}, []);
+
+	const {
+		narratorEnabled,
+		toggleNarrator,
+		isListening,
+		isProcessing,
+		isSupported: voiceSupported,
+		toggleMic,
+		accumulatedText,
+		interimText,
+		cancelCountdown,
+		isCountingDown,
+		countdownProgress,
+		voiceError,
+	} = useNarratorMode({
+		onAutoSend: handleNarratorAutoSend,
+		onCancel: handleNarratorCancel,
+		onDictation: handleDictation,
+		isSpeaking,
+	});
+
+	useEffect(() => {
+		if (voiceError) {
+			toast({ type: 'error', message: voiceError });
+		}
+	}, [voiceError, toast]);
+
+	const handleNarratorToggle = useCallback(() => {
+		const nextEnabled = !narratorEnabled;
+		toggleNarrator();
+		track('narrator_toggled', { enabled: nextEnabled });
+	}, [narratorEnabled, toggleNarrator, track]);
+
+	const handleMicToggle = useCallback(() => {
+		const nextEnabled = !isListening;
+		toggleMic();
+		track('voice_input_toggled', { enabled: nextEnabled });
+	}, [isListening, toggleMic, track]);
+
+	// Stop audio playback when user starts speaking (interruption)
+	useEffect(() => {
+		if (isListening) clearAudioQueue();
+	}, [isListening, clearAudioQueue]);
+
+	// Sync narrator accumulated text into the input field
+	useEffect(() => {
+		if (!narratorEnabled) return;
+		const display = interimText
+			? `${accumulatedText} ${interimText}`.trim()
+			: accumulatedText;
+		setInputText(display);
+	}, [narratorEnabled, accumulatedText, interimText]);
+
+	// When user types manually, cancel the silence countdown
+	const handleInputChange = useCallback((event: React.ChangeEvent<HTMLTextAreaElement>) => {
+		setInputText(event.target.value);
+		if (narratorEnabled) {
+			cancelCountdown();
+		}
+	}, [narratorEnabled, cancelCountdown]);
 
 	const formatFileSize = useCallback((size: number) => {
 		if (size < 1024) return `${size} B`;
@@ -377,6 +509,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				try {
 					const item = await readFile(file);
 					newItems.push(item);
+					track('file_attached', { fileType: file.type || ext || 'unknown' });
 				} catch {
 					invalidFiles.push(file.name);
 				}
@@ -400,7 +533,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				setAttachments((prev) => [...prev, ...newItems]);
 			}
 		},
-		[attachments.length, toast],
+		[attachments.length, toast, track],
 	);
 	const {
 		tabs,
@@ -420,16 +553,41 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		getDiffAnnotations,
 		getFileComments,
 	} = useCodeComments();
+	const handleAddComment = useCallback((...args: Parameters<typeof addComment>) => {
+		addComment(...args);
+		track('code_comment_added');
+	}, [addComment, track]);
 	useEffect(() => {
 		if (!sessionId) return;
 		setAttachments([]);
 	}, [sessionId]);
+
+	// Load user's default agent preference (once on mount)
+	const hasManuallySelectedRef = useRef(false);
+	useEffect(() => {
+		hasManuallySelectedRef.current = hasManuallySelectedCommand;
+	}, [hasManuallySelectedCommand]);
+
+	useEffect(() => {
+		if (initialSession.agent) return;
+		fetch('/api/user/settings')
+			.then((r) => r.json())
+			.then((data: { defaultCommand?: string }) => {
+				if (!hasManuallySelectedRef.current && data.defaultCommand) {
+					setSelectedCommand(data.defaultCommand);
+				}
+			})
+			.catch(() => {});
+	}, [initialSession.agent]);
 
 
 	const activeFilePath = activeTab?.filePath ?? null;
 	const isBusy = sessionStatus.type === 'busy';
 	const displayMessages = session.status === 'terminated' ? archivedMessages : messages;
 	const sshCommand = session.sandboxId ? `agentuity cloud ssh ${session.sandboxId}` : '';
+	const attachCommand = session.sandboxUrl
+		? `opencode attach ${session.sandboxUrl}${opencodePassword ? ` --password ${opencodePassword}` : ''}`
+		: '';
 	const getDisplayParts = useCallback(
 		(messageID: string) => {
 			if (session.status === 'terminated') {
@@ -439,7 +597,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		},
 		[archivedParts, getPartsForMessage, session.status],
 	);
-	const { branch: gitBranch, changedCount: gitChangedCount, refresh: refreshGitStatus } = useGitStatus(activeSessionId, githubAvailable);
+	const { branch: gitBranch, changedCount: gitChangedCount, hasRepo: isGitRepo, refresh: refreshGitStatus } = useGitStatus(activeSessionId, githubAvailable);
 
 	useEffect(() => {
 		if (!isEditingTitle) {
@@ -449,15 +607,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 	const promptPlaceholder = session.status === 'active'
 		? 'Message the agent...'
-		: session.status === 'terminated'
-			? 'This session is read-only.'
-			: session.status === 'error'
-				? 'Session failed to start.'
-				: 'Waiting for sandbox to be ready...';
+		: session.status === 'creating'
+			? 'Type your message... (will send when ready)'
+			: session.status === 'terminated'
+				? 'This session is read-only.'
+				: session.status === 'error'
+					? 'Session failed to start.'
+					: 'Waiting for sandbox to be ready...';
 	const attachmentAccept = Array.from(ALLOWED_EXTENSIONS)
 		.map((ext) => `.${ext}`)
 		.join(',');
-	const attachmentDisabled = session.status !== 'active' || attachments.length >= MAX_ATTACHMENTS;
+	const isSessionInputEnabled = session.status === 'active' || session.status === 'creating';
+	const attachmentDisabled = !isSessionInputEnabled || attachments.length >= MAX_ATTACHMENTS;
 
 	const sendMessage = useCallback(
 		async (payload: QueuedMessage) => {
@@ -483,6 +644,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				if (!res.ok) {
 					throw new Error('Failed to send message');
 				}
+				track('message_sent', {
+					hasAttachments: Boolean(payload.attachments?.length),
+					attachmentCount: payload.attachments?.length ?? 0,
+					command: payload.command ?? null,
+					model: payload.model,
+				});
 			} catch (err) {
 				console.error('Failed to send message:', err);
 				toast({ type: 'error', message: 'Failed to send message' });
@@ -490,7 +657,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				setIsSending(false);
 			}
 		},
-		[sessionId, toast],
+		[sessionId, toast, track],
 	);
 
 	const handleSend = async (text: string) => {
@@ -508,7 +675,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		const payload: QueuedMessage = {
 			text: fullMessage,
 			model: selectedModel,
-			command: selectedCommand || undefined,
+			command: selectedCommand,
 			attachments: nextAttachments,
 		};
 
@@ -518,21 +685,24 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			clearComments();
 		}
 
-		if (isBusy || isSending) {
+		if (isBusy || isSending || session.status === 'creating') {
 			setMessageQueue((prev) => [...prev, payload]);
 			return;
 		}
 
 		await sendMessage(payload);
 	};
+	handleSendRef.current = handleSend;
 
 	useEffect(() => {
-		if (isBusy || isSending || messageQueue.length === 0) return;
+		if (session.status !== 'active' || isBusy || isSending || messageQueue.length === 0) return;
 		const [next, ...rest] = messageQueue;
 		if (!next) return;
 		setMessageQueue(rest);
 		void sendMessage(next);
-	}, [isBusy, isSending, messageQueue, sendMessage]);
+	}, [session.status, isBusy, isSending, messageQueue, sendMessage]);
+
+
 
   const handleFork = async () => {
     if (isForking) return;
@@ -544,6 +714,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       }
       const newSession = await res.json();
       onForkedSession?.(newSession);
+      track('session_forked');
     } catch (error) {
       console.error('Failed to fork session:', error);
       toast({ type: 'error', message: 'Failed to fork session' });
@@ -551,6 +722,31 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       setIsForking(false);
     }
   };
+
+	const handleCreateSnapshot = async () => {
+		if (isSavingSnapshot || !snapshotName.trim()) return;
+		setIsSavingSnapshot(true);
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/snapshot`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ name: snapshotName.trim(), description: snapshotDescription.trim() || undefined }),
+			});
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				throw new Error(data.error || 'Failed to save snapshot');
+			}
+			toast({ type: 'success', message: 'Snapshot saved!' });
+			track('snapshot_created');
+			setShowSnapshotDialog(false);
+			setSnapshotName('');
+			setSnapshotDescription('');
+		} catch (error) {
+			toast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to save snapshot' });
+		} finally {
+			setIsSavingSnapshot(false);
+		}
+	};
 
 	const handleShare = async () => {
 		if (isSharing) return;
@@ -564,6 +760,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       const { url } = await res.json();
       setShareUrl(url);
       toast({ type: 'success', message: 'Share link created!' });
+      track('session_shared');
     } catch (error) {
       console.error('Failed to share session:', error);
       toast({ type: 'error', message: error instanceof Error ? error.message : 'Failed to share session' });
@@ -620,14 +817,75 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		}
 	}, [session.sandboxId, toast]);
 
+	const handleCopyAttachCommand = useCallback(async () => {
+		if (!attachCommand) return;
+		try {
+			await navigator.clipboard.writeText(attachCommand);
+			setAttachCopied(true);
+			setTimeout(() => setAttachCopied(false), 2000);
+		} catch {
+			toast({ type: 'error', message: 'Failed to copy attach command' });
+		}
+	}, [attachCommand, toast]);
+
+	const handleCopyPassword = useCallback(async () => {
+		if (!opencodePassword) return;
+		try {
+			await navigator.clipboard.writeText(opencodePassword);
+			setPasswordCopied(true);
+			setTimeout(() => setPasswordCopied(false), 2000);
+		} catch {
+			toast({ type: 'error', message: 'Failed to copy password' });
+		}
+	}, [opencodePassword, toast]);
+
   // Abort
   const handleAbort = async () => {
     try {
-      await fetch(`/api/sessions/${sessionId}/abort`, { method: 'POST' });
+      const res = await fetch(`/api/sessions/${sessionId}/abort`, { method: 'POST' });
+      if (res.ok) {
+        track('session_aborted');
+      }
     } catch {
       // Ignore abort errors
     }
   };
+
+	const handleRevert = useCallback(async (messageID: string) => {
+		if (!sessionId) return;
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/revert`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ messageID }),
+			});
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				console.error('Revert failed:', data);
+				return;
+			}
+			track('checkpoint_reverted');
+			// UI updates come via SSE session.updated event
+		} catch (error) {
+			console.error('Revert failed:', error);
+		}
+	}, [sessionId, track]);
+
+	const handleUnrevert = useCallback(async () => {
+		if (!sessionId) return;
+		try {
+			const res = await fetch(`/api/sessions/${sessionId}/unrevert`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+			});
+			if (!res.ok) {
+				const data = await res.json().catch(() => ({}));
+				console.error('Unrevert failed:', data);
+			}
+		} catch (error) {
+			console.error('Unrevert failed:', error);
+		}
+	}, [sessionId]);
 
 	const lastAssistantMessage = useMemo(
 		() => [...displayMessages].reverse().find((message) => message.role === 'assistant'),
@@ -639,9 +897,83 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const hasStreamingContent = lastAssistantParts.length > 0;
 	const isStreaming = isBusy;
 	const submitDisabled =
-		session.status !== 'active'
+		!isSessionInputEnabled
 		|| isSending
 		|| (!inputText.trim() && attachments.length === 0);
+
+	// Narrator: on busy→idle transition, speak the assistant's response
+	const wasBusyRef = useRef(false);
+	const lastNarratedMessageIdRef = useRef<string | null>(null);
+
+	useEffect(() => {
+		if (!narratorEnabled) {
+			wasBusyRef.current = isBusy;
+			return;
+		}
+
+		if (wasBusyRef.current && !isBusy) {
+			const lastAssistant = displayMessages.length > 0
+				? [...displayMessages].reverse().find(m => m.role === 'assistant')
+				: null;
+
+			if (lastAssistant && lastAssistant.id !== lastNarratedMessageIdRef.current) {
+				lastNarratedMessageIdRef.current = lastAssistant.id;
+
+				const parts = getDisplayParts(lastAssistant.id);
+				const textContent = parts
+					.filter(p => p.type === 'text')
+					.map(p => (p as { text: string }).text || '')
+					.join('\n')
+					.replace(/```[\s\S]*?```/g, '')
+					.replace(/\*\*([^*]+)\*\*/g, '$1')
+					.replace(/`([^`]+)`/g, '$1')
+					.replace(/#{1,6}\s/g, '')
+					.replace(/\n{2,}/g, '. ')
+					.replace(/\s{2,}/g, ' ')
+					.trim();
+
+				if (textContent) {
+					const recentChat = displayMessages.slice(-6).map(m => {
+						const msgParts = getDisplayParts(m.id);
+						const msgText = msgParts
+							.filter(p => p.type === 'text')
+							.map(p => (p as { text: string }).text || '')
+							.join('\n')
+							.replace(/```[\s\S]*?```/g, '')
+							.trim()
+							.slice(0, 500);
+						return { role: m.role, text: msgText };
+					}).filter(m => m.text.length > 0);
+
+					fetch('/api/voice/narrate', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({
+							text: textContent.slice(0, 5000),
+							conversationHistory: recentChat,
+						}),
+					})
+						.then(res => res.json())
+						.then((data: { text?: string; audio?: { base64: string; mimeType: string } }) => {
+							if (data.audio) enqueueAudio(data.audio);
+						})
+						.catch(() => {
+							// Silent fail — narrator is best-effort
+						});
+				}
+			}
+		}
+
+		wasBusyRef.current = isBusy;
+	}, [narratorEnabled, isBusy, displayMessages, getDisplayParts, enqueueAudio]);
+
+	// Clear audio on session change
+	useEffect(() => {
+		if (sessionId) {
+			clearAudioQueue();
+			lastNarratedMessageIdRef.current = null;
+		}
+	}, [sessionId, clearAudioQueue]);
 
 	const copyMessage = useCallback(
 		(message: ChatMessage) => {
@@ -732,7 +1064,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		return sources;
 	}, []);
 
-	const renderReasoning = (part: ReasoningPart, message: ChatMessage) => {
+	const renderReasoning = useCallback((part: ReasoningPart, message: ChatMessage) => {
 		const duration = part.time.end
 			? Math.max(1, Math.ceil((part.time.end - part.time.start) / 1000))
 			: undefined;
@@ -748,7 +1080,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<ReasoningContent>{part.text}</ReasoningContent>
 			</Reasoning>
 		);
-	};
+	}, [isStreaming, lastAssistantMessage]);
 
 	type ChainGroup = { type: 'chain'; filePath: string; parts: ToolPart[] };
 	type CurrentChain = {
@@ -791,7 +1123,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		return hasEdit || hasWrite;
 	}, []);
 
-	const groupPartsIntoChains = (parts: Part[]): (Part | ChainGroup)[] => {
+	const groupPartsIntoChains = useCallback((parts: Part[]): (Part | ChainGroup)[] => {
 		const groups: (Part | ChainGroup)[] = [];
 		let currentChain: CurrentChain | null = null;
 
@@ -838,11 +1170,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 		flushChain();
 		return groups;
-	};
+	}, [extractFilePath, isReadTool, isWriteOrEditTool]);
 
 
 
-	const renderPart = (part: Part, message: ChatMessage) => {
+	const renderPart = useCallback((part: Part, message: ChatMessage) => {
 		switch (part.type) {
 		case 'text':
 			return (
@@ -857,7 +1189,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<ToolCallCard
 					key={part.id}
 					part={part}
-					onAddComment={addComment}
+					onAddComment={handleAddComment}
 					getDiffAnnotations={getDiffAnnotations}
 					getFileComments={getFileComments}
 					sources={message.role === 'assistant' ? getSourcesForToolPart(part) : []}
@@ -892,66 +1224,193 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						{'📸'} Context snapshot saved
 					</div>
 				);
-			case 'compaction':
-				return (
-					<div key={part.id} className="text-[10px] italic text-[var(--muted-foreground)]">
-						{'🗜️'} Context compacted{part.auto ? ' (auto)' : ''}
-					</div>
-				);
-			case 'retry':
-				return (
-					<div key={part.id} className="flex items-center gap-2 text-xs text-yellow-500">
-						<span>Retry attempt {part.attempt}: {part.error.message || part.error.type}</span>
-					</div>
-				);
+		case 'compaction':
+			return (
+				<div key={part.id} className="text-[10px] italic text-[var(--muted-foreground)]">
+					{'🗜️'} Context compacted{part.auto ? ' (auto)' : ''}
+				</div>
+			);
+		case 'retry':
+			return (
+				<div key={part.id} className="flex items-center gap-2 text-xs text-yellow-500">
+					<span>Retry attempt {part.attempt}: {part.error.message || part.error.type}</span>
+				</div>
+			);
 			case 'step-start':
 				return null;
 			default:
 				return null;
 		}
-	};
+	}, [isStreaming, lastAssistantMessage, renderReasoning, handleAddComment, getDiffAnnotations, getFileComments, getSourcesForToolPart]);
+
+	const renderedMessages = useMemo(() => {
+		if (displayMessages.length === 0) return null;
+		return displayMessages.map((message, msgIndex) => {
+			const parts = getDisplayParts(message.id);
+			const agent = 'agent' in message ? message.agent : undefined;
+			const errorInfo = 'error' in message ? message.error : undefined;
+			const isAfterRevertPoint = isGitRepo && revertState != null && (() => {
+				const revertMsgIndex = displayMessages.findIndex(m => m.id === revertState.messageID);
+				return msgIndex > revertMsgIndex;
+			})();
+
+			return (
+				<div key={message.id} className={isAfterRevertPoint ? 'opacity-30 pointer-events-none' : ''}>
+				<Message
+					from={message.role === 'user' ? 'user' : 'assistant'}
+				>
+					<MessageContent>
+						{agent && (
+							<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
+								{agent}
+							</div>
+						)}
+					{groupPartsIntoChains(parts).map((part) => {
+						if (part.type === 'chain') {
+							return (
+								<ChainOfThought
+									key={`chain-${part.filePath}-${part.parts[0]?.id ?? 'start'}`}
+									filePath={part.filePath}
+									stepCount={part.parts.length}
+								>
+									{part.parts.map((chainPart) => renderPart(chainPart, message))}
+								</ChainOfThought>
+							);
+						}
+						return renderPart(part, message);
+					})}
+						{errorInfo && (
+							<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+								Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
+							</div>
+						)}
+					</MessageContent>
+					{message.role === 'assistant' && (
+						<MessageToolbar>
+							<ContextIndicator
+								tokens={message.tokens}
+								cost={message.cost}
+								modelID={message.modelID}
+								providerID={message.providerID}
+								label="Message"
+								compact
+							/>
+						<MessageActions>
+							{isGitRepo && (
+								<MessageAction
+									label="Restore"
+									onClick={() => handleRevert(message.id)}
+									title="Restore to this checkpoint"
+								>
+									<RotateCcw className="h-3.5 w-3.5" />
+								</MessageAction>
+							)}
+							<MessageAction
+								label="Copy"
+								onClick={() => copyMessage(message)}
+								title="Copy"
+							>
+								<Copy className="h-3.5 w-3.5" />
+							</MessageAction>
+						</MessageActions>
+						</MessageToolbar>
+					)}
+				</Message>
+				</div>
+			);
+		});
+	}, [displayMessages, getDisplayParts, isGitRepo, revertState, groupPartsIntoChains, renderPart, copyMessage, handleRevert]);
 
 	const conversationView = (
 		<Conversation className="flex-1 min-w-0">
 		<ConversationContent>
-			{session.status !== 'active' && (
-				<div
-					className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
-						session.status === 'error'
-							? 'border-red-500/30 bg-red-500/10 text-red-400'
-							: session.status === 'terminated'
-								? 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400'
-								: 'border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)]'
-					}`}
-				>
-					<div className="flex items-center justify-between gap-3">
-						<span>
-							{session.status === 'creating' && (statusElapsedMs > 20000
-								? '🔄 Almost ready...'
-								: statusElapsedMs > 10000
-									? '🔄 Setting up AI agent...'
-									: '🔄 Creating sandbox environment...')}
-							{session.status === 'error' && '❌ Failed to create sandbox.'}
-							{session.status === 'terminated' && "This session's sandbox has been terminated. Chat history is read-only."}
-						</span>
-						{session.status === 'error' && (
-							<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
-								{isRetrying ? (
-									<>
-										<Loader2 className="mr-1 h-3 w-3 animate-spin" />
-										Retrying...
-									</>
-								) : (
-									'Retry'
-								)}
-							</Button>
-						)}
-					</div>
-					{session.status === 'terminated' && (archiveError || isLoadingArchive) && (
-						<p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
-							{isLoadingArchive ? 'Loading chat history...' : archiveError}
-						</p>
+		{session.status !== 'active' && session.status === 'creating' && (
+			<div className="flex flex-col items-center justify-center py-16 gap-6">
+				<div className="relative">
+					<div className="h-10 w-10 rounded-full border-2 border-[var(--border)]" />
+					<div className="absolute inset-0 h-10 w-10 rounded-full border-2 border-t-[var(--primary)] animate-spin" />
+				</div>
+				<div className="text-center space-y-2">
+					<p className="text-sm font-medium text-[var(--foreground)]">
+						{statusElapsedMs > 25000
+							? 'Almost ready...'
+							: statusElapsedMs > 15000
+								? 'Starting AI agent'
+								: statusElapsedMs > 8000
+									? 'Installing tools & skills'
+									: statusElapsedMs > 3000
+										? 'Setting up environment'
+										: 'Creating sandbox'}
+					</p>
+					<p className="text-xs text-[var(--muted-foreground)]">
+						{statusElapsedMs > 25000
+							? 'Verifying the agent is responsive'
+							: statusElapsedMs > 15000
+								? 'Launching OpenCode server'
+								: statusElapsedMs > 8000
+									? 'Configuring agent capabilities'
+									: statusElapsedMs > 3000
+										? 'Cloning repository and preparing workspace'
+										: 'Provisioning an isolated sandbox environment'}
+					</p>
+				</div>
+				<div className="flex items-center gap-1.5">
+					{[3000, 8000, 15000, 25000].map((threshold) => (
+						<div
+							key={threshold}
+							className={`h-1 w-8 rounded-full transition-colors duration-500 ${
+								statusElapsedMs > threshold
+									? 'bg-[var(--primary)]'
+									: 'bg-[var(--border)]'
+							}`}
+						/>
+					))}
+				</div>
+				<p className="text-[10px] text-[var(--muted-foreground)]">
+					{Math.floor(statusElapsedMs / 1000)}s
+				</p>
+			</div>
+		)}
+		{session.status !== 'active' && session.status !== 'creating' && (
+			<div
+				className={`mb-3 rounded-lg border px-3 py-2 text-xs ${
+					session.status === 'error'
+						? 'border-red-500/30 bg-red-500/10 text-red-400'
+						: 'border-yellow-500/30 bg-yellow-500/10 text-yellow-400'
+				}`}
+			>
+				<div className="flex items-center justify-between gap-3">
+					<span>
+						{session.status === 'error' && '❌ Failed to create sandbox.'}
+						{session.status === 'terminated' && "This session's sandbox has been terminated. Chat history is read-only."}
+					</span>
+					{session.status === 'error' && (
+						<Button size="sm" onClick={handleRetry} disabled={isRetrying}>
+							{isRetrying ? (
+								<>
+									<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+									Retrying...
+								</>
+							) : (
+								'Retry'
+							)}
+						</Button>
 					)}
+				</div>
+				{session.status === 'terminated' && (archiveError || isLoadingArchive) && (
+					<p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+						{isLoadingArchive ? 'Loading chat history...' : archiveError}
+					</p>
+				)}
+			</div>
+		)}
+			{typeof (session.metadata as Record<string, unknown> | null)?.cloneError === 'string' && (
+				<div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
+					<div className="font-medium">⚠️ Repository clone failed</div>
+					<p className="mt-1 text-[10px]">{(session.metadata as Record<string, string>).cloneError}</p>
+					<p className="mt-1 text-[10px] text-[var(--muted-foreground)]">
+						The session started without code. Check your GitHub PAT permissions in Profile settings, or provide the repo URL to the agent.
+					</p>
 				</div>
 			)}
 			{displayMessages.length === 0 && !isBusy ? (
@@ -996,66 +1455,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					)}
 				</ConversationEmptyState>
 			) : (
-				displayMessages.map((message) => {
-					const parts = getDisplayParts(message.id);
-					const agent = 'agent' in message ? message.agent : undefined;
-					const errorInfo = 'error' in message ? message.error : undefined;
-
-					return (
-						<Message
-							from={message.role === 'user' ? 'user' : 'assistant'}
-							key={message.id}
-						>
-							<MessageContent>
-								{agent && (
-									<div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-										{agent}
-									</div>
-								)}
-							{groupPartsIntoChains(parts).map((part) => {
-								if (part.type === 'chain') {
-									return (
-										<ChainOfThought
-											key={`chain-${part.filePath}-${part.parts[0]?.id ?? 'start'}`}
-											filePath={part.filePath}
-											stepCount={part.parts.length}
-										>
-											{part.parts.map((chainPart) => renderPart(chainPart, message))}
-										</ChainOfThought>
-									);
-								}
-								return renderPart(part, message);
-							})}
-								{errorInfo && (
-									<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-										Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
-									</div>
-								)}
-							</MessageContent>
-							{message.role === 'assistant' && (
-								<MessageToolbar>
-									<ContextIndicator
-										tokens={message.tokens}
-										cost={message.cost}
-										modelID={message.modelID}
-										providerID={message.providerID}
-										label="Message"
-										compact
-									/>
-									<MessageActions>
-										<MessageAction
-											label="Copy"
-											onClick={() => copyMessage(message)}
-											title="Copy"
-										>
-											<Copy className="h-3.5 w-3.5" />
-										</MessageAction>
-									</MessageActions>
-								</MessageToolbar>
-							)}
-						</Message>
-					);
-				})
+				renderedMessages
 			)}
 
 				{pendingPermissions.map((perm) => (
@@ -1090,6 +1490,18 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 	const inputArea = (
 		<div className="relative z-40 shrink-0 border-t border-[var(--border)] bg-[var(--background)] p-4">
+			{revertState && isGitRepo && (
+				<div className="flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400 mb-2">
+					<span>Session reverted to an earlier checkpoint. New messages will continue from this point.</span>
+					<button
+						type="button"
+						onClick={handleUnrevert}
+						className="shrink-0 rounded px-2 py-0.5 text-xs font-medium text-amber-400 hover:bg-amber-500/20 transition-colors"
+					>
+						Undo Revert
+					</button>
+				</div>
+			)}
 			{messageQueue.length > 0 && (
 				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
 					<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
@@ -1107,9 +1519,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<PromptInput onSubmit={({ text }) => handleSend(text)}>
 					<PromptInputTextarea
 						value={inputText}
-						onChange={(event) => setInputText(event.target.value)}
+						onChange={handleInputChange}
 						placeholder={promptPlaceholder}
-						disabled={session.status !== 'active'}
+						disabled={!isSessionInputEnabled}
 					/>
 					{attachments.length > 0 && (
 						<div className="flex flex-wrap gap-2 px-3 pb-2">
@@ -1124,23 +1536,26 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									<span className="text-[10px] text-[var(--muted-foreground)]">
 										{formatFileSize(attachment.size)}
 									</span>
-									<button
-										type="button"
-										className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-										onClick={() => handleRemoveAttachment(attachment.id)}
-										title="Remove attachment"
-									>
-										<X className="h-3 w-3" />
-									</button>
-								</div>
-							))}
-						</div>
-					)}
-					<PromptInputFooter>
-					<div className="flex flex-wrap items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
-						<CommandPicker value={selectedCommand} onChange={setSelectedCommand} />
-						<ModelSelector value={selectedModel} onChange={setSelectedModel} />
-						<span className="hidden md:inline">Enter to send · Shift+Enter for new line</span>
+								<button
+									type="button"
+									className="inline-flex h-5 w-5 sm:h-4 sm:w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+									onClick={() => handleRemoveAttachment(attachment.id)}
+									title="Remove attachment"
+								>
+									<X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
+								</button>
+							</div>
+						))}
+					</div>
+				)}
+				<PromptInputFooter>
+					<div className="flex flex-wrap items-center gap-1 sm:gap-2 text-[10px] text-[var(--muted-foreground)]">
+					<CommandPicker value={selectedCommand} onChange={(cmd) => {
+					setSelectedCommand(cmd);
+					setHasManuallySelectedCommand(true);
+				}} />
+					<ModelSelector value={selectedModel} onChange={handleModelChange} disabled={selectedCommand === '/agentuity-coder' || selectedCommand === '/agentuity-cadence'} />
+					<span className="hidden md:inline">Enter to send · Shift+Enter for new line</span>
 							{commentCount > 0 && (
 								<Badge variant="secondary" className="text-[10px]">
 									{commentCount} comment{commentCount > 1 ? 's' : ''}
@@ -1177,11 +1592,25 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 							>
 								<Paperclip className="h-4 w-4" />
 							</Button>
+							{session.status === 'active' && (
+							<VoiceControls
+								narratorEnabled={narratorEnabled}
+								onNarratorToggle={handleNarratorToggle}
+								isListening={isListening}
+								onMicToggle={handleMicToggle}
+								isProcessing={isProcessing}
+								isSupported={voiceSupported}
+								isCountingDown={isCountingDown}
+								countdownProgress={countdownProgress}
+							/>
+							)}
 							<PromptInputSubmit
 								disabled={submitDisabled}
 								status={isBusy ? 'streaming' : 'ready'}
 								onStop={handleAbort}
-							/>
+							>
+								{session.status === 'creating' ? <Clock className="h-4 w-4" /> : undefined}
+							</PromptInputSubmit>
 						</div>
 					</PromptInputFooter>
 				</PromptInput>
@@ -1232,21 +1661,33 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						</button>
 					</h2>
 				)}
-				{session.status === 'active' && (
-					<Button
-						variant="ghost"
-						size="sm"
-              onClick={handleFork}
-              className="h-7 w-7 p-0"
-              title="Fork session"
-              disabled={isForking}
-            >
-              {isForking ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <GitFork className="h-3.5 w-3.5" />
-              )}
-            </Button>
+			{session.status === 'active' && (
+				<Popover>
+					<PopoverTrigger asChild>
+						<Button variant="ghost" size="sm" className="h-7 w-7 p-0" title="Fork & Snapshot">
+							<GitFork className="h-3.5 w-3.5" />
+						</Button>
+					</PopoverTrigger>
+					<PopoverContent className="w-48 p-1" align="end">
+						<button
+							type="button"
+							onClick={handleFork}
+							disabled={isForking}
+							className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-[var(--accent)] disabled:opacity-50"
+						>
+							{isForking ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <GitFork className="h-3.5 w-3.5" />}
+							Fork Session
+						</button>
+						<button
+							type="button"
+							onClick={() => setShowSnapshotDialog(true)}
+							className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-[var(--accent)]"
+						>
+							<Camera className="h-3.5 w-3.5" />
+							Save Snapshot
+						</button>
+					</PopoverContent>
+				</Popover>
           )}
 				{shareUrl ? (
 					<Button
@@ -1290,14 +1731,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						/>
 					)}
 				</div>
-				<div className="hidden md:block">
-					{queuedCount > 0 && (
-						<Badge variant="secondary" className="text-[10px] gap-1">
-							<ListOrdered className="h-2.5 w-2.5" />
-							Queue {queuedCount}
-						</Badge>
-					)}
-				</div>
+	
           {sessionStatus.type === 'retry' && (
             <Badge variant="destructive" className="text-[10px]">
               Retrying ({sessionStatus.attempt})
@@ -1307,7 +1741,19 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			<div className="ml-auto flex items-center gap-2">
 				{/* SSH info popover */}
 				{session.sandboxId && (
-					<Popover>
+					<Popover onOpenChange={(open) => {
+						if (open && !opencodePassword) {
+							passwordFetchController.current?.abort();
+							const controller = new AbortController();
+							passwordFetchController.current = controller;
+							apiFetch(`/api/sessions/${sessionId}/password`, { signal: controller.signal })
+								.then((r) => r.json())
+								.then((data) => { if (data?.password) setOpencodePassword(data.password); })
+								.catch((err) => {
+									if (err instanceof DOMException && err.name === 'AbortError') return;
+								});
+						}
+					}}>
 					<PopoverTrigger asChild>
 						<Button variant="ghost" size="sm" className="h-7 text-xs gap-1">
 							<Terminal className="h-3.5 w-3.5" />
@@ -1317,7 +1763,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<PopoverContent
 						align="end"
 						side="bottom"
-						className="w-[calc(100vw-2rem)] border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] md:w-80"
+						className="w-[calc(100vw-2rem)] max-w-[90vw] border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] md:w-80"
 					>
 						<div className="space-y-3">
 							<div className="flex items-center gap-2 text-xs">
@@ -1370,6 +1816,50 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 									</button>
 								</div>
 							</div>
+						{opencodePassword && (
+							<div>
+								<p className="text-xs text-[var(--muted-foreground)] mb-1">OpenCode Password</p>
+								<div className="flex items-center gap-2">
+									<code className="text-xs bg-[var(--muted)] px-2 py-1 rounded flex-1 block truncate font-mono">
+										{'•'.repeat(opencodePassword.length)}
+									</code>
+									<button
+										type="button"
+										onClick={handleCopyPassword}
+										className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+										title="Copy password"
+									>
+										{passwordCopied ? (
+											<Check className="h-3.5 w-3.5 text-green-500" />
+										) : (
+											<Copy className="h-3.5 w-3.5" />
+										)}
+									</button>
+								</div>
+							</div>
+						)}
+							{attachCommand && (
+							<div>
+								<p className="text-xs text-[var(--muted-foreground)] mb-1">OpenCode Attach</p>
+								<div className="flex items-center gap-2">
+									<code className="text-xs bg-[var(--muted)] px-2 py-1 rounded flex-1 block truncate">
+										{attachCommand}
+									</code>
+									<button
+										type="button"
+										onClick={handleCopyAttachCommand}
+										className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--muted)] text-[var(--foreground)] transition-colors hover:bg-[var(--accent)]"
+										title="Copy attach command"
+									>
+										{attachCopied ? (
+											<Check className="h-3.5 w-3.5 text-green-500" />
+										) : (
+											<Copy className="h-3.5 w-3.5" />
+										)}
+									</button>
+								</div>
+							</div>
+							)}
 						</div>
 					</PopoverContent>
 					</Popover>
@@ -1408,18 +1898,20 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={() => setUrlState({ v: 'chat' })}
+						onClick={() => handleViewModeChange('chat')}
 						className={`h-7 px-2 text-xs ${viewMode === 'chat' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+						title="Chat"
 					>
-						Chat
+						<MessageSquare className="h-3.5 w-3.5" />
 					</Button>
 					<Button
 						variant="ghost"
 						size="sm"
-						onClick={() => setUrlState({ v: 'ide' })}
+						onClick={() => handleViewModeChange('ide')}
 						className={`h-7 px-2 text-xs ${viewMode === 'ide' ? 'bg-[var(--background)] shadow-sm' : ''}`}
+						title="Code"
 					>
-						IDE
+						<Code2 className="h-3.5 w-3.5" />
 					</Button>
 				</div>
 				<div
@@ -1445,11 +1937,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 											? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
 											: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
 									)}
-									onClick={() => setUrlState({ tab: 'files' })}
-									type="button"
-								>
-									Files
-								</button>
+															onClick={() => navigate({ search: (prev: SessionSearch) => ({ ...prev, tab: 'files' }) })}
+															type="button"
+														>
+															Files
+														</button>
 								<button
 									className={cn(
 										"flex-1 px-3 py-2 text-xs font-medium transition-colors",
@@ -1457,9 +1949,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 											? 'text-[var(--foreground)] border-b-2 border-[var(--primary)]'
 											: 'text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
 									)}
-									onClick={() => setUrlState({ tab: 'git' })}
-									type="button"
-								>
+															onClick={() => navigate({ search: (prev: SessionSearch) => ({ ...prev, tab: 'git' }) })}
+															type="button"
+														>
 									<span>Git</span>
 									{gitChangedCount > 0 && (
 										<span className="ml-1 rounded px-1 text-[10px] bg-[var(--muted)] text-[var(--primary)]">
@@ -1497,17 +1989,17 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 					</div>
 				}
 						codePanel={
-							<CodePanel
-								sessionId={sessionId}
-								tabs={tabs}
-								activeId={activeId}
-								onSelectTab={setActiveId}
-								onCloseTab={closeTab}
-								onUpdateTab={updateTab}
-								onAddComment={addComment}
-								getDiffAnnotations={getDiffAnnotations}
-								getFileComments={getFileComments}
-							/>
+					<CodePanel
+						sessionId={sessionId}
+						tabs={tabs}
+						activeId={activeId}
+						onSelectTab={setActiveId}
+						onCloseTab={closeTab}
+						onUpdateTab={updateTab}
+						onAddComment={handleAddComment}
+						getDiffAnnotations={getDiffAnnotations}
+						getFileComments={getFileComments}
+					/>
 						}
 					/>
 				</div>
@@ -1528,38 +2020,38 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 											<span className="text-[10px] text-[var(--muted-foreground)]">
 												{formatFileSize(attachment.size)}
 											</span>
-											<button
-												type="button"
-												className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-												onClick={() => handleRemoveAttachment(attachment.id)}
-												title="Remove attachment"
-											>
-												<X className="h-3 w-3" />
-											</button>
-										</div>
-									))}
-								</div>
-							)}
-							{messageQueue.length > 0 && (
-								<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
-									<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
-										Queued ({messageQueue.length})
-									</span>
-									{messageQueue.map((msg, i) => (
-										<div key={`${msg.text}-${i}`} className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-											<Circle className="h-2 w-2 shrink-0" />
-											<span className="truncate">{msg.text.slice(0, 60)}...</span>
-										</div>
-									))}
-								</div>
-							)}
-							<div className="flex items-center gap-2">
+							<button
+								type="button"
+								className="inline-flex h-5 w-5 sm:h-4 sm:w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+								onClick={() => handleRemoveAttachment(attachment.id)}
+								title="Remove attachment"
+							>
+								<X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
+							</button>
+						</div>
+					))}
+				</div>
+			)}
+			{messageQueue.length > 0 && (
+				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
+					<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
+						Queued ({messageQueue.length})
+					</span>
+					{messageQueue.map((msg, i) => (
+						<div key={`${msg.text}-${i}`} className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+							<Circle className="h-2 w-2 shrink-0" />
+							<span className="truncate">{msg.text.slice(0, 60)}...</span>
+						</div>
+					))}
+				</div>
+			)}
+			<div className="flex items-center gap-1 sm:gap-2">
 								<div className="flex-1 min-w-0">
 									<PromptInputTextarea
 										value={inputText}
-										onChange={(event) => setInputText(event.target.value)}
-										placeholder="Message the agent..."
-										disabled={session.status !== 'active'}
+										onChange={handleInputChange}
+										placeholder={promptPlaceholder}
+										disabled={!isSessionInputEnabled}
 									/>
 								</div>
 								{commentCount > 0 && (
@@ -1579,11 +2071,25 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 								>
 									<Paperclip className="h-4 w-4" />
 								</Button>
+								{session.status === 'active' && (
+								<VoiceControls
+									narratorEnabled={narratorEnabled}
+									onNarratorToggle={handleNarratorToggle}
+									isListening={isListening}
+									onMicToggle={handleMicToggle}
+									isProcessing={isProcessing}
+									isSupported={voiceSupported}
+									isCountingDown={isCountingDown}
+									countdownProgress={countdownProgress}
+								/>
+								)}
 								<PromptInputSubmit
 									disabled={submitDisabled}
 									status={isBusy ? 'streaming' : 'ready'}
 									onStop={handleAbort}
-								/>
+								>
+									{session.status === 'creating' ? <Clock className="h-4 w-4" /> : undefined}
+								</PromptInputSubmit>
 							</div>
 						</PromptInput>
 					</PromptInputProvider>
@@ -1618,6 +2124,49 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			</>
 		)}
 
+		{/* Snapshot dialog */}
+		{showSnapshotDialog && (
+			<div
+				className="fixed inset-0 z-50 flex items-center justify-center"
+				style={{ backgroundColor: 'color-mix(in oklab, var(--foreground) 50%, transparent)' }}
+			>
+				<div className="w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-xl">
+					<h3 className="text-sm font-semibold text-[var(--foreground)]">Save Snapshot</h3>
+					<p className="text-xs text-[var(--muted-foreground)] mt-1">
+						Save the current state of your sandbox for reuse in new sessions.
+					</p>
+					<input
+						type="text"
+						value={snapshotName}
+						onChange={(e) => setSnapshotName(e.target.value)}
+						placeholder="Snapshot name"
+						className="mt-3 w-full rounded-md border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] outline-none focus:ring-1 focus:ring-[var(--ring)]"
+					/>
+					<textarea
+						value={snapshotDescription}
+						onChange={(e) => setSnapshotDescription(e.target.value)}
+						placeholder="Description (optional)"
+						rows={2}
+						className="mt-2 w-full rounded-md border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] outline-none focus:ring-1 focus:ring-[var(--ring)] resize-none"
+					/>
+					<div className="flex justify-end gap-2 mt-3">
+						<Button variant="outline" size="sm" onClick={() => { setShowSnapshotDialog(false); setSnapshotName(''); setSnapshotDescription(''); }}>
+							Cancel
+						</Button>
+						<Button size="sm" onClick={handleCreateSnapshot} disabled={isSavingSnapshot || !snapshotName.trim()}>
+							{isSavingSnapshot ? (
+								<>
+									<Loader2 className="mr-1 h-3 w-3 animate-spin" />
+									Saving...
+								</>
+							) : (
+								'Save'
+							)}
+						</Button>
+					</div>
+				</div>
+			</div>
+		)}
 		</div>
 	);
 }

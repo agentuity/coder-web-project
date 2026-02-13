@@ -1,6 +1,6 @@
-# Scout Report: Agentuity Coder Frontend & Backend State
+# Scout Report: Agentuity Coder - Complete Project Analysis
 
-> **Question:** Thoroughly explore the current frontend and backend state of the Agentuity Coder project, including SSE streaming flow, session creation polling, file/diff handling, command picker, component inventory, and identify any issues.
+> **Question:** Provide a comprehensive understanding of the entire Agentuity Coder project structure, architecture, dependencies, agents, database schema, authentication, web frontend, API routes, build system, and all key patterns for creating detailed AGENTS.md documentation.
 
 ## Sources
 

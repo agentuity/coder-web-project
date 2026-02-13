@@ -6,6 +6,8 @@
 export interface OpenCodeConfig {
   $schema: string;
   plugin: string[];
+  default_agent?: string;
+  instructions?: string[];
   agent?: Record<string, {
     mode?: string;
     model?: string;
@@ -27,6 +29,7 @@ export interface OpenCodeConfig {
 
 export interface OpenCodeConfigOptions {
 	model?: string | null;
+	defaultCommand?: string | null;
 }
 
 export interface SourceConfig {
@@ -48,6 +51,7 @@ export function generateOpenCodeConfig(
 	const config: OpenCodeConfig = {
 		$schema: 'https://opencode.ai/config.json',
 		plugin: ['@agentuity/opencode'],
+		instructions: ['~/.config/opencode/ui-spec-instructions.md'],
 		agent: {
 			build: {
 				mode: 'primary',
@@ -60,6 +64,14 @@ export function generateOpenCodeConfig(
 			},
 		},
 	};
+
+  // Map command to OpenCode agent name
+  if (options.defaultCommand === '/agentuity-coder') {
+    config.default_agent = 'Agentuity Coder Lead';
+  } else if (options.defaultCommand === '/agentuity-cadence') {
+    config.default_agent = 'Agentuity Coder Lead';
+  }
+  // '' (Chat) = no default_agent, uses OpenCode's built-in default
 
   // Add MCP sources — transform our DB format to OpenCode format
   const enabledSources = sources.filter(s => s.enabled);

@@ -143,6 +143,25 @@ function checkAuthSecret() {
 	}
 }
 
+function checkAuthBaseUrl() {
+	const cloudBaseUrl = Bun.env.AGENTUITY_CLOUD_BASE_URL;
+	const baseUrl = Bun.env.AGENTUITY_BASE_URL;
+	const betterAuthUrl = Bun.env.BETTER_AUTH_URL;
+	if (cloudBaseUrl || baseUrl || betterAuthUrl) {
+		const which = cloudBaseUrl
+			? "AGENTUITY_CLOUD_BASE_URL"
+			: baseUrl
+				? "AGENTUITY_BASE_URL"
+				: "BETTER_AUTH_URL";
+		log("PASS", `Auth base URL configured via ${which}`);
+	} else {
+		log(
+			"WARN",
+			"No auth base URL set (AGENTUITY_CLOUD_BASE_URL, AGENTUITY_BASE_URL, or BETTER_AUTH_URL) — auth callbacks may fail in local dev. Set BETTER_AUTH_URL=http://localhost:3500 in .env",
+		);
+	}
+}
+
 function checkGoogleOAuth() {
 	const clientId = Bun.env.GOOGLE_CLIENT_ID;
 	const clientSecret = Bun.env.GOOGLE_CLIENT_SECRET;
@@ -181,6 +200,7 @@ await checkAgentuityJson();
 await checkEnvFile();
 checkDatabaseUrl();
 checkAuthSecret();
+checkAuthBaseUrl();
 checkGoogleOAuth();
 checkGhToken();
 

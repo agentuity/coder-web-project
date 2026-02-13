@@ -1,9 +1,10 @@
 /**
  * Database schema — used by both the application at runtime and drizzle-kit
- * for migrations. Imports from drizzle-orm/pg-core so both Bun and Node
- * (drizzle-kit) can resolve it.
+ * for migrations. Imports from @agentuity/drizzle/schema which re-exports
+ * drizzle-orm/pg-core types without Bun-specific runtime deps, so both
+ * Bun and Node (drizzle-kit) can resolve it.
  */
-import { pgTable, uuid, text, timestamp, jsonb, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, boolean } from '@agentuity/drizzle/schema';
 
 /**
  * Workspaces group sessions, skills, and sources for a single user today.
@@ -33,6 +34,7 @@ export const chatSessions = pgTable('chat_sessions', {
   opencodeSessionId: text('opencode_session_id'),
 	agent: text('agent'),
 	model: text('model'),
+  forkedFromSessionId: uuid('forked_from_session_id'),
   flagged: boolean('flagged').default(false),
   metadata: jsonb('metadata').default({}),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
@@ -63,10 +65,29 @@ export const sources = pgTable('sources', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });
 
+export const sandboxSnapshots = pgTable('sandbox_snapshots', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+  createdBy: text('created_by').notNull(),
+  name: text('name').notNull(),
+  description: text('description'),
+  snapshotId: text('snapshot_id').notNull(),
+  sourceSessionId: uuid('source_session_id'),
+  metadata: jsonb('metadata').default({}),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+});
+
 export const userSettings = pgTable('user_settings', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: text('user_id').notNull().unique(),
   githubPat: text('github_pat'),
-  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
+  voiceEnabled: boolean('voice_enabled').default(false),
+  voiceModel: text('voice_model').default('gpt-4o-mini-tts'),
+  voiceName: text('voice_name').default('coral'),
+  voiceAutoSpeak: boolean('voice_auto_speak').default(true),
+  voiceSpeed: text('voice_speed').default('1.0'),
+	preferredMic: text('preferred_mic'),
+	defaultCommand: text('default_command').default(''),
+	createdAt: timestamp('created_at', { withTimezone: true }).defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow(),
 });

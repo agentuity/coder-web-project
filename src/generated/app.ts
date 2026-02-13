@@ -75,7 +75,8 @@ app.use('*', createBaseMiddleware({
 	meter: otel.meter,
 }));
 
-app.use('/_agentuity/workbench/*', createCorsMiddleware());
+// Note: Workbench routes use their own CORS middleware (defined in createWorkbenchRouter)
+// which includes signature headers for production authentication
 app.use('/api/*', createCorsMiddleware());
 
 // Critical: otelMiddleware creates session/thread/waitUntilHandler
@@ -342,30 +343,27 @@ if (isDevelopment() && process.env.VITE_PORT) {
 const { default: router_0 } = await import('../api/index.js');
 app.route('/api', router_0);
 
-const hasWorkbenchConfig = true;
-const hasWorkbench = isDevelopment() && hasWorkbenchConfig;
-if (hasWorkbench) {
-	// Mount workbench API routes (/_agentuity/workbench/*)
-	const workbenchRouter = createWorkbenchRouter();
-	app.route('/', workbenchRouter);
-}
+// Mount workbench API routes (/_agentuity/workbench/*)
+// Always available for cloud workbench communication
+// Auth is handled inside the router (signature verification in production)
+const workbenchRouter = createWorkbenchRouter();
+app.route('/', workbenchRouter);
 
-if (hasWorkbench) {
-	// Development mode: Let Vite serve source files with HMR
-	if (isDevelopment()) {
-		const workbenchSrcDir = import.meta.dir + '/workbench-src';
-		const workbenchIndexPath = import.meta.dir + '/workbench-src/index.html';
-		app.get('/workbench', async (c: Context) => {
-			const html = await Bun.file(workbenchIndexPath).text();
-			// Rewrite script/css paths to use Vite's @fs protocol
-			const withVite = html
-				.replace('src="./main.tsx"', `src="/@fs${workbenchSrcDir}/main.tsx"`)
-				.replace('href="./styles.css"', `href="/@fs${workbenchSrcDir}/styles.css"`);
-			return c.html(withVite);
-		});
-	} else {
-		// Production mode disables the workbench assets
-	}
+// hasWorkbenchConfig controls whether the local workbench UI is served (dev mode only)
+const hasWorkbenchConfig = true;
+
+// Workbench UI is only available in development mode (API routes are always available)
+if (hasWorkbenchConfig && isDevelopment()) {
+	const workbenchSrcDir = import.meta.dir + '/workbench-src';
+	const workbenchIndexPath = import.meta.dir + '/workbench-src/index.html';
+	app.get('/workbench', async (c: Context) => {
+		const html = await Bun.file(workbenchIndexPath).text();
+		// Rewrite script/css paths to use Vite's @fs protocol
+		const withVite = html
+			.replace('src="./main.tsx"', `src="/@fs${workbenchSrcDir}/main.tsx"`)
+			.replace('href="./styles.css"', `href="/@fs${workbenchSrcDir}/styles.css"`);
+		return c.html(withVite);
+	});
 }
 
 // Web routes - Runtime mode detection (dev proxies to Vite, prod serves static)
@@ -407,7 +405,7 @@ if (isDevelopment()) {
 	// 404 for unmatched API/system routes
 	app.all('/_agentuity/*', (c: Context) => c.notFound());
 	app.all('/api/*', (c: Context) => c.notFound());
-	if (!hasWorkbench) {
+	if (!(hasWorkbenchConfig && isDevelopment())) {
 		app.all('/workbench/*', (c: Context) => c.notFound());
 	}
 	
@@ -451,7 +449,7 @@ if (isDevelopment()) {
 	// 404 for unmatched API/system routes (IMPORTANT: comes before SPA fallback)
 	app.all('/_agentuity/*', (c: Context) => c.notFound());
 	app.all('/api/*', (c: Context) => c.notFound());
-	if (!hasWorkbench) {
+	if (!(hasWorkbenchConfig && isDevelopment())) {
 		app.all('/workbench/*', (c: Context) => c.notFound());
 	}
 

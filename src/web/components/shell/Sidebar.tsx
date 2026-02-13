@@ -1,5 +1,7 @@
 import { Plus, Sparkles, Plug, Settings, Star, RefreshCw, Trash2, ChevronRight, ChevronDown, ChevronLeft, LogOut, Moon, Sun, User } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { useAnalytics } from '@agentuity/react';
+import { useNavigate, useRouterState } from '@tanstack/react-router';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
 import { Separator } from '../ui/separator';
@@ -18,14 +20,12 @@ interface Session {
 
 interface SidebarProps {
   sessions: Session[];
+  sessionsLoading?: boolean;
   activeSessionId?: string;
   onNewSession: () => void;
-  onSelectSession: (id: string) => void;
-  onNavigate: (page: 'skills' | 'sources' | 'settings' | 'profile') => void;
-  onFlagSession?: (id: string, flagged: boolean) => void;
-  onRetrySession?: (id: string) => void;
-  onDeleteSession?: (id: string) => void;
-  currentPage: string;
+  onFlagSession?: (id: string, flagged: boolean) => void | Promise<void>;
+  onRetrySession?: (id: string) => void | Promise<void>;
+  onDeleteSession?: (id: string) => void | Promise<void>;
   isMobileOpen?: boolean;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -33,7 +33,38 @@ interface SidebarProps {
   userName?: string;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
-  onSignOut: () => void;
+  onSignOut: () => void | Promise<void>;
+}
+
+function getCurrentPage(pathname: string) {
+  if (pathname.startsWith('/skills')) return 'skills';
+  if (pathname.startsWith('/sources')) return 'sources';
+  if (pathname.startsWith('/settings')) return 'settings';
+  if (pathname.startsWith('/profile')) return 'profile';
+  return 'chat';
+}
+
+function SessionSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
+  return (
+    <>
+      {[75, 60, 85, 50, 70].map((width) => (
+        <div
+          key={width}
+          className={cn(
+            'flex items-center gap-2 rounded-md py-2 animate-pulse',
+            isCollapsed ? 'justify-center px-2' : 'px-3'
+          )}
+        >
+          <div className="h-2 w-2 rounded-full bg-[var(--muted)]" />
+          {!isCollapsed && (
+            <div className="flex-1">
+              <div className="h-3 rounded bg-[var(--muted)]" style={{ width: `${width}%` }} />
+            </div>
+          )}
+        </div>
+      ))}
+    </>
+  );
 }
 
 function getStatusColor(status: string) {
@@ -48,14 +79,12 @@ function getStatusColor(status: string) {
 
 export function Sidebar({
   sessions,
+  sessionsLoading,
   activeSessionId,
   onNewSession,
-  onSelectSession,
-  onNavigate,
   onFlagSession,
   onRetrySession,
   onDeleteSession,
-  currentPage,
   isMobileOpen,
   collapsed,
   onToggleCollapse,
@@ -65,7 +94,12 @@ export function Sidebar({
   onToggleTheme,
   onSignOut,
 }: SidebarProps) {
+  const { track } = useAnalytics();
+  const navigate = useNavigate();
+  const location = useRouterState({ select: (state) => state.location });
+  const currentPage = getCurrentPage(location.pathname);
   const [showTerminated, setShowTerminated] = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const isCollapsed = Boolean(collapsed) && !isMobileOpen;
   const displayName = userName || userEmail || 'User';
   const showEmail = Boolean(userName && userEmail);
@@ -77,6 +111,25 @@ export function Sidebar({
       terminatedSessions: sessions.filter(isTerminated),
     };
   }, [sessions]);
+
+  const handleNewSession = () => {
+    track('sidebar_new_session_clicked');
+    onNewSession();
+  };
+
+  const handleSessionSelect = (id: string) => {
+    track('sidebar_session_selected');
+    navigate({ to: '/session/$sessionId', params: { sessionId: id } });
+  };
+
+  const handleNavigate = (destination: 'skills' | 'sources' | 'settings' | 'profile') => {
+    track('sidebar_navigation', { destination });
+    navigate({ to: `/${destination}` });
+  };
+
+  const handleGoHome = () => {
+    navigate({ to: '/' });
+  };
 
   const renderSessionRow = (session: Session) => (
     <div
@@ -91,7 +144,7 @@ export function Sidebar({
     >
       <button
         type="button"
-        onClick={() => onSelectSession(session.id)}
+        onClick={() => handleSessionSelect(session.id)}
         className={cn(
           'flex flex-1 items-center gap-2 truncate text-left',
           isCollapsed && 'justify-center'
@@ -168,22 +221,27 @@ export function Sidebar({
 
   return (
     <div
-		className={cn(
-			'flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-200',
-			isCollapsed ? 'w-14' : 'w-64',
-			isMobileOpen
-				? 'absolute inset-y-0 left-0 z-50 flex md:static md:flex'
-				: 'hidden md:flex',
-		)}
+      className={cn(
+        'flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-200',
+        isCollapsed ? 'w-14' : 'w-64',
+        isMobileOpen
+          ? 'absolute inset-y-0 left-0 z-50 flex md:static md:flex'
+          : 'hidden md:flex',
+      )}
     >
-      <div className={cn('flex items-center gap-2 px-4 py-3', isCollapsed && 'justify-center px-2')}>
+      <button
+        type="button"
+        onClick={handleGoHome}
+        className={cn('flex items-center gap-2 px-4 py-3 hover:opacity-80 transition-opacity cursor-pointer', isCollapsed && 'justify-center px-2')}
+        title="Go to home"
+      >
         <AgentuityLogo size={20} className="text-cyan-400" />
         {!isCollapsed && <span id="logo" className="text-xl font-semibold tracking-tight">Coder</span>}
-      </div>
+      </button>
       <div className={cn('p-3', isCollapsed && 'px-2')}>
         {isCollapsed ? (
           <Button
-            onClick={onNewSession}
+            onClick={handleNewSession}
             className="w-full"
             size="icon"
             title="New Session"
@@ -192,7 +250,7 @@ export function Sidebar({
             <Plus className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={onNewSession} className="w-full" size="sm">
+          <Button onClick={handleNewSession} className="w-full" size="sm">
             <Plus className="mr-2 h-4 w-4" />
             New Session
           </Button>
@@ -205,48 +263,65 @@ export function Sidebar({
         <div className="space-y-3">
           {isCollapsed ? (
             <div className="space-y-1">
-              {activeSessions.map(renderSessionRow)}
+              {sessionsLoading ? (
+                <SessionSkeleton isCollapsed={true} />
+              ) : (
+                activeSessions.map(renderSessionRow)
+              )}
             </div>
           ) : (
             <>
-              {activeSessions.length > 0 && (
+              {sessionsLoading ? (
                 <div>
                   <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">
-                    Active
+                    Sessions
                   </div>
                   <div className="space-y-1">
-                    {activeSessions.map(renderSessionRow)}
+                    <SessionSkeleton isCollapsed={false} />
                   </div>
                 </div>
-              )}
-              {terminatedSessions.length > 0 && (
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowTerminated((prev) => !prev)}
-                    className="flex w-full items-center gap-2 rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
-                  >
-                    {showTerminated ? (
-                      <ChevronDown className="h-3 w-3" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3" />
-                    )}
-                    Terminated
-                    <Badge variant="secondary" className="ml-auto text-[9px]">
-                      {terminatedSessions.length}
-                    </Badge>
-                  </button>
-                  {showTerminated && (
-                    <div className="mt-1 space-y-1">
-                      {terminatedSessions.map(renderSessionRow)}
+              ) : (
+                <>
+                  {activeSessions.length > 0 && (
+                    <div>
+                      <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)]">
+                        Active
+                      </div>
+                      <div className="space-y-1">
+                        {activeSessions.map(renderSessionRow)}
+                      </div>
                     </div>
                   )}
-                </div>
-              )}
-              {sessions.length === 0 && (
-                <p className="px-3 py-6 text-center text-sm text-[var(--muted-foreground)]">
-                  No sessions yet. Create one to get started.
-                </p>
+                  {terminatedSessions.length > 0 && (
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => setShowTerminated((prev) => !prev)}
+                        className="flex w-full items-center gap-2 rounded-md px-3 py-1 text-[10px] font-semibold uppercase tracking-widest text-[var(--muted-foreground)] hover:bg-[var(--accent)]"
+                      >
+                        {showTerminated ? (
+                          <ChevronDown className="h-3 w-3" />
+                        ) : (
+                          <ChevronRight className="h-3 w-3" />
+                        )}
+                        Terminated
+                        <Badge variant="secondary" className="ml-auto text-[9px]">
+                          {terminatedSessions.length}
+                        </Badge>
+                      </button>
+                      {showTerminated && (
+                        <div className="mt-1 space-y-1">
+                          {terminatedSessions.map(renderSessionRow)}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {sessions.length === 0 && (
+                    <p className="px-3 py-6 text-center text-sm text-[var(--muted-foreground)]">
+                      No sessions yet. Create one to get started.
+                    </p>
+                  )}
+                </>
               )}
             </>
           )}
@@ -256,7 +331,7 @@ export function Sidebar({
       <div className={cn('p-2 space-y-1', isCollapsed && 'px-1')}>
         <button
           type="button"
-          onClick={() => onNavigate('skills')}
+          onClick={() => handleNavigate('skills')}
           className={cn(
             'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
             currentPage === 'skills' ? 'bg-[var(--accent)]' : '',
@@ -270,7 +345,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          onClick={() => onNavigate('sources')}
+          onClick={() => handleNavigate('sources')}
           className={cn(
             'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
             currentPage === 'sources' ? 'bg-[var(--accent)]' : '',
@@ -284,7 +359,7 @@ export function Sidebar({
         </button>
         <button
           type="button"
-          onClick={() => onNavigate('settings')}
+          onClick={() => handleNavigate('settings')}
           className={cn(
             'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
             currentPage === 'settings' ? 'bg-[var(--accent)]' : '',
@@ -306,7 +381,7 @@ export function Sidebar({
             </div>
           )}
           <button
-            onClick={() => onNavigate('profile')}
+            onClick={() => handleNavigate('profile')}
             className={cn(
               'shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]',
               currentPage === 'profile' && 'text-[var(--foreground)]'
@@ -326,29 +401,45 @@ export function Sidebar({
             {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
           </button>
           <button
-            onClick={onSignOut}
+            onClick={() => setShowSignOutConfirm(true)}
             className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-red-500 hover:bg-[var(--accent)]"
             title="Sign out"
             type="button"
           >
             <LogOut className="h-3.5 w-3.5" />
           </button>
-        </div>
-        <div className="p-2">
           <button
             onClick={onToggleCollapse}
-            className={cn(
-              'flex w-full items-center p-2 text-[var(--muted-foreground)] hover:text-[var(--foreground)]',
-              isCollapsed ? 'justify-center' : 'justify-end'
-            )}
+            className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
             type="button"
             title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
           </button>
         </div>
       </div>
+      {showSignOutConfirm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ backgroundColor: 'color-mix(in oklab, var(--foreground) 50%, transparent)' }}
+        >
+          <div className="w-full max-w-xs rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-xl">
+            <h3 className="text-sm font-semibold text-[var(--foreground)]">Sign out?</h3>
+            <p className="text-xs text-[var(--muted-foreground)] mt-1">
+              Are you sure you want to sign out?
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <Button variant="outline" size="sm" onClick={() => setShowSignOutConfirm(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" size="sm" onClick={() => { setShowSignOutConfirm(false); onSignOut(); }}>
+                Sign Out
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

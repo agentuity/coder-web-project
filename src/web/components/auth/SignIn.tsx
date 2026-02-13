@@ -1,5 +1,7 @@
 import { AlertCircle, Loader2, Mail } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { useAnalytics } from '@agentuity/react';
 import { authClient } from '../../lib/auth-client';
 
 const GoogleIcon = () => (
@@ -14,6 +16,11 @@ const GoogleIcon = () => (
 
 export function SignIn() {
   const { data: session } = authClient.useSession();
+  const { track } = useAnalytics();
+  const navigate = useNavigate();
+  const nameInputId = useId();
+  const emailInputId = useId();
+  const passwordInputId = useId();
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [mode, setMode] = useState<'choose' | 'email'>('choose');
@@ -25,9 +32,9 @@ export function SignIn() {
 
   useEffect(() => {
     if (session?.user) {
-      window.location.href = '/';
+      navigate({ to: '/', replace: true });
     }
-  }, [session]);
+  }, [navigate, session]);
 
   useEffect(() => {
     fetch('/api/auth-methods')
@@ -50,6 +57,7 @@ export function SignIn() {
     setIsLoading(true);
     try {
       await authClient.signIn.social({ provider: 'google', callbackURL: '/' });
+      track('user_signed_in', { method: 'google' });
     } catch (err) {
       setServerError(err instanceof Error ? err.message : 'Google sign-in failed');
     } finally {
@@ -70,11 +78,15 @@ export function SignIn() {
         });
         if ((result as any)?.error) {
           setServerError((result as any).error.message || 'Sign up failed');
+        } else {
+          track('user_signed_up', { method: 'email' });
         }
       } else {
         const result = await authClient.signIn.email({ email, password });
         if ((result as any)?.error) {
           setServerError((result as any).error.message || 'Sign in failed');
+        } else {
+          track('user_signed_in', { method: 'email' });
         }
       }
     } catch (err) {
@@ -124,9 +136,9 @@ export function SignIn() {
     <form onSubmit={handleEmailAuth} className="space-y-4">
       {isSignUp && (
         <div>
-          <label htmlFor="auth-name" className="block text-sm font-medium text-[var(--foreground)] mb-1">Name</label>
+          <label htmlFor={nameInputId} className="block text-sm font-medium text-[var(--foreground)] mb-1">Name</label>
           <input
-            id="auth-name"
+            id={nameInputId}
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -136,9 +148,9 @@ export function SignIn() {
         </div>
       )}
       <div>
-        <label htmlFor="auth-email" className="block text-sm font-medium text-[var(--foreground)] mb-1">Email</label>
+        <label htmlFor={emailInputId} className="block text-sm font-medium text-[var(--foreground)] mb-1">Email</label>
         <input
-          id="auth-email"
+          id={emailInputId}
           type="email"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -148,9 +160,9 @@ export function SignIn() {
         />
       </div>
       <div>
-        <label htmlFor="auth-password" className="block text-sm font-medium text-[var(--foreground)] mb-1">Password</label>
+        <label htmlFor={passwordInputId} className="block text-sm font-medium text-[var(--foreground)] mb-1">Password</label>
         <input
-          id="auth-password"
+          id={passwordInputId}
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -233,9 +245,9 @@ export function SignIn() {
         <form onSubmit={handleEmailAuth} className="space-y-4">
           {isSignUp && (
             <div>
-              <label htmlFor="auth-name" className="block text-sm font-medium text-[var(--foreground)] mb-1">Name</label>
+              <label htmlFor={nameInputId} className="block text-sm font-medium text-[var(--foreground)] mb-1">Name</label>
               <input
-                id="auth-name"
+                id={nameInputId}
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -245,9 +257,9 @@ export function SignIn() {
             </div>
           )}
           <div>
-            <label htmlFor="auth-email" className="block text-sm font-medium text-[var(--foreground)] mb-1">Email</label>
+            <label htmlFor={emailInputId} className="block text-sm font-medium text-[var(--foreground)] mb-1">Email</label>
             <input
-              id="auth-email"
+              id={emailInputId}
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -257,9 +269,9 @@ export function SignIn() {
             />
           </div>
           <div>
-            <label htmlFor="auth-password" className="block text-sm font-medium text-[var(--foreground)] mb-1">Password</label>
+            <label htmlFor={passwordInputId} className="block text-sm font-medium text-[var(--foreground)] mb-1">Password</label>
             <input
-              id="auth-password"
+              id={passwordInputId}
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}

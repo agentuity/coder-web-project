@@ -3,8 +3,8 @@
  */
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
-import { skills } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { skills, workspaces } from '../db/schema';
+import { and, eq } from '@agentuity/drizzle';
 
 const api = createRouter();
 
@@ -19,40 +19,17 @@ api.get('/search', async (c) => {
 	}
 
 	try {
-		const proc = Bun.spawn(['bunx', 'skills', 'find', query], {
-			stdout: 'pipe',
-			stderr: 'pipe',
-			timeout: 30000,
-		});
-		const stdout = await new Response(proc.stdout).text();
-		await new Response(proc.stderr).text();
-		await proc.exited;
-
-		// Parse the ANSI output from skills find
-		const ansiRegex = new RegExp('\x1B\\[[0-9;]*[a-zA-Z]', 'g');
-		const lines = stdout
-			.replace(ansiRegex, '')
-			.split('\n')
-			.map((l) => l.trim())
-			.filter(Boolean);
-
-		const results: Array<{ name: string; repo: string; url?: string }> = [];
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i]!;
-			const match = line.match(/^([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)@(.+)$/);
-			if (match && match[1] && match[2]) {
-				const repo = match[1];
-				const skillName = match[2];
-				let url: string | undefined;
-				const nextLine = lines[i + 1];
-				if (nextLine && nextLine.startsWith('\u2514')) {
-					const urlMatch = nextLine.match(/https?:\/\/[^\s]+/);
-					if (urlMatch) url = urlMatch[0];
-				}
-				results.push({ name: skillName, repo, url });
-			}
-		}
-
+		const res = await fetch(`https://skills.sh/api/search?q=${encodeURIComponent(query)}`);
+		if (!res.ok) throw new Error(`Skills API returned ${res.status}`);
+		const data = (await res.json()) as {
+			skills?: Array<{ skillId: string; source: string; name: string; installs?: number }>;
+		};
+		const results = (data.skills ?? []).map((s) => ({
+			name: s.name || s.skillId,
+			repo: s.source,
+			url: `https://skills.sh/${s.source}/${s.skillId}`,
+			installs: s.installs,
+		}));
 		return c.json(results);
 	} catch (error) {
 		return c.json({ error: 'Skill search failed', details: String(error) }, 502);
@@ -61,7 +38,13 @@ api.get('/search', async (c) => {
 
 // POST /api/workspaces/:wid/skills — create skill
 api.post('/', async (c) => {
+	const user = c.get('user')!;
 	const workspaceId = c.req.param('wid') as string;
+	const [workspace] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.id, workspaceId), eq(workspaces.organizationId, user.id)));
+	if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
 	const body = await c.req.json<{
 		name?: string;
 		description?: string;
@@ -104,13 +87,27 @@ api.post('/', async (c) => {
 
 // GET /api/workspaces/:wid/skills — list skills
 api.get('/', async (c) => {
+	const user = c.get('user')!;
 	const workspaceId = c.req.param('wid') as string;
+	const [workspace] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.id, workspaceId), eq(workspaces.organizationId, user.id)));
+	if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
 	const result = await db.select().from(skills).where(eq(skills.workspaceId, workspaceId));
 	return c.json(result);
 });
 
 // PATCH /api/skills/:id — update skill
 api.patch('/:id', async (c) => {
+	const user = c.get('user')!;
+	const [existing] = await db.select().from(skills).where(eq(skills.id, c.req.param('id')!));
+	if (!existing) return c.json({ error: 'Skill not found' }, 404);
+	const [workspace] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.id, existing.workspaceId), eq(workspaces.organizationId, user.id)));
+	if (!workspace) return c.json({ error: 'Skill not found' }, 404);
 	const body = await c.req.json<{ name?: string; description?: string; content?: string; enabled?: boolean }>();
 	const [skill] = await db
 		.update(skills)
@@ -123,6 +120,14 @@ api.patch('/:id', async (c) => {
 
 // DELETE /api/skills/:id — delete skill
 api.delete('/:id', async (c) => {
+	const user = c.get('user')!;
+	const [existing] = await db.select().from(skills).where(eq(skills.id, c.req.param('id')!));
+	if (!existing) return c.json({ error: 'Skill not found' }, 404);
+	const [workspace] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.id, existing.workspaceId), eq(workspaces.organizationId, user.id)));
+	if (!workspace) return c.json({ error: 'Skill not found' }, 404);
 	const [skill] = await db.delete(skills).where(eq(skills.id, c.req.param('id')!)).returning();
 	if (!skill) return c.json({ error: 'Skill not found' }, 404);
 	return c.json({ success: true });

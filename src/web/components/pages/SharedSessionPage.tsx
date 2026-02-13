@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useParams } from '@tanstack/react-router';
 import { Loader2, Share2 } from 'lucide-react';
 import { Badge } from '../ui/badge';
 import { TextPartView } from '../chat/TextPartView';
@@ -26,15 +27,13 @@ interface SharedSession {
 	sharedAt: string;
 }
 
-interface SharedSessionPageProps {
-	streamUrl: string;
-}
-
 /**
  * Read-only view for a publicly shared session.
  * Fetches shared session data from the stream URL and renders messages.
  */
-export function SharedSessionPage({ streamUrl }: SharedSessionPageProps) {
+export function SharedSessionPage() {
+	const { streamId } = useParams({ from: '/shared/$streamId' });
+	const streamUrl = `/api/shared/${streamId}`;
 	const [data, setData] = useState<SharedSession | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
