@@ -128,7 +128,7 @@ export async function createSandbox(
       const sanitizedBranch = config.branch.trim().replace(/[^a-zA-Z0-9._\-/]/g, '-');
       if (sanitizedBranch) {
         setupScriptParts.push(
-          `cd ${workDir} && (git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}') 2>/dev/null || true`,
+          `cd '${workDir}' && (git checkout -b '${sanitizedBranch}' || git checkout '${sanitizedBranch}') 2>/dev/null || true`,
         );
       }
     }
@@ -175,7 +175,7 @@ export async function createSandbox(
 
     // 4. Start OpenCode server (nohup — runs in background, script continues)
     setupScriptParts.push(
-      `cd ${workDir} && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
+      `cd '${workDir}' && nohup opencode serve --port ${OPENCODE_PORT} --hostname 0.0.0.0 > /tmp/opencode.log 2>&1 &`,
     );
 
     // Fire the single combined script

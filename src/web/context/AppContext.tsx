@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useToast } from '../components/ui/toast';
 import { useAnalyticsIdentify } from '../hooks/useAnalyticsIdentify';
+import { apiFetch } from '../lib/api';
 
 export interface Session {
   id: string;
@@ -104,16 +105,21 @@ export function AppProvider({ children, userEmail, userName }: { children: React
     track('page_viewed', { page: currentPage });
   }, [currentPage, track]);
 
-  const fetchGithubStatus = useCallback(() => {
+  const fetchGithubStatus = useCallback((signal?: AbortSignal) => {
     if (!userName && !userEmail) return;
-    fetch('/api/user/github')
-      .then((r) => r.json())
-      .then((data: { configured?: boolean }) => setGithubAvailable(data.configured ?? false))
-      .catch(() => setGithubAvailable(false));
+    apiFetch('/api/user/github', { signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { configured?: boolean } | null) => setGithubAvailable(data?.configured ?? false))
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setGithubAvailable(false);
+      });
   }, [userName, userEmail]);
 
   useEffect(() => {
-    fetchGithubStatus();
+    const controller = new AbortController();
+    fetchGithubStatus(controller.signal);
+    return () => controller.abort();
   }, [fetchGithubStatus]);
 
   useEffect(() => {
@@ -146,57 +152,80 @@ export function AppProvider({ children, userEmail, userName }: { children: React
 
   useEffect(() => {
     if (!userName && !userEmail) return;
+    const controller = new AbortController();
     let aborted = false;
 
-    fetch('/api/workspaces')
-      .then((r) => r.json())
-      .then((workspaces: any[]) => {
+    (async () => {
+      try {
+        const res = await apiFetch('/api/workspaces', { signal: controller.signal });
+        const workspaceList = await res.json();
         if (aborted) return;
-        if (workspaces.length > 0) {
+
+        if (workspaceList.length > 0) {
           const savedId = localStorage.getItem('selectedWorkspaceId');
-          const match = savedId ? workspaces.find((w: any) => w.id === savedId) : null;
-          const selected = match ? match.id : workspaces[0].id;
+          const selected = workspaceList.find((w: any) => w.id === savedId)?.id ?? workspaceList[0].id;
           setWorkspaceId(selected);
           localStorage.setItem('selectedWorkspaceId', selected);
         } else {
-          fetch('/api/workspaces', {
+          const createRes = await apiFetch('/api/workspaces', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: 'Default Workspace' }),
-          })
-            .then((r) => r.json())
-            .then((w) => {
-              if (aborted) return;
-              setWorkspaceId(w.id);
-              localStorage.setItem('selectedWorkspaceId', w.id);
-            });
+            signal: controller.signal,
+          });
+          const w = await createRes.json();
+          if (!aborted) {
+            setWorkspaceId(w.id);
+            localStorage.setItem('selectedWorkspaceId', w.id);
+          }
         }
-      });
+      } catch (err) {
+        if (!aborted && !(err instanceof DOMException && err.name === 'AbortError')) {
+          console.error('Workspace setup failed:', err);
+        }
+      }
+    })();
 
     return () => {
       aborted = true;
+      controller.abort();
     };
   }, [userEmail, userName]);
 
   useEffect(() => {
     if (!workspaceId) return;
     setSessionsLoading(true);
+    const controller = new AbortController();
+    let aborted = false;
+    let inFlight = false;
 
-    const fetchSessions = () => {
-      fetch(`/api/workspaces/${workspaceId}/sessions`)
-        .then((r) => r.json())
-        .then((s) => {
+    const fetchSessions = async () => {
+      if (inFlight || controller.signal.aborted) return;
+      inFlight = true;
+      try {
+        const res = await apiFetch(`/api/workspaces/${workspaceId}/sessions`, { signal: controller.signal });
+        const s = await res.json();
+        if (!aborted) {
           setSessions(s);
           setSessionsLoading(false);
-        })
-        .catch(() => {
-          setSessionsLoading(false);
-        });
+        }
+      } catch (err) {
+        if (!aborted && !(err instanceof DOMException && err.name === 'AbortError')) {
+          console.error('Failed to fetch sessions:', err);
+        }
+        if (!aborted) setSessionsLoading(false);
+      } finally {
+        inFlight = false;
+      }
     };
 
-    fetchSessions();
+    void fetchSessions();
     const interval = setInterval(fetchSessions, 5000);
-    return () => clearInterval(interval);
+    return () => {
+      aborted = true;
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [workspaceId]);
 
   const handleNewSession = useCallback(async (data: NewSessionPayload) => {

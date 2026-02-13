@@ -7,7 +7,7 @@
 import { createRouter, sse } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions } from '../db/schema';
-import { eq } from '@agentuity/drizzle';
+import { and, eq } from '@agentuity/drizzle';
 import { getOpencodeClient, buildBasicAuthHeader } from '../opencode';
 import { sandboxListFiles, sandboxReadFile, sandboxExecute, sandboxWriteFiles } from '@agentuity/server';
 import { normalizeSandboxPath } from '../lib/path-utils';
@@ -98,10 +98,11 @@ const api = createRouter();
 // GET /api/sessions/:id/messages — fetch existing messages for page load
 // ---------------------------------------------------------------------------
 api.get('/:id/messages', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
@@ -125,10 +126,11 @@ api.get('/:id/messages', async (c) => {
 // POST /api/sessions/:id/messages — send message (async, non-blocking)
 // ---------------------------------------------------------------------------
 api.post('/:id/messages', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
@@ -287,10 +289,11 @@ api.post('/:id/messages', async (c) => {
 api.get(
 	'/:id/events',
 	sse(async (c, stream) => {
+		const user = c.get('user')!;
 		const [session] = await db
 			.select()
 			.from(chatSessions)
-			.where(eq(chatSessions.id, c.req.param('id')!));
+			.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 		if (!session || !session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 			await stream.writeSSE({
 				data: JSON.stringify({ type: 'error', message: 'Session not ready' }),
@@ -414,10 +417,11 @@ api.get(
 // POST /api/sessions/:id/abort — abort running session
 // ---------------------------------------------------------------------------
 api.post('/:id/abort', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
@@ -439,10 +443,11 @@ api.post('/:id/abort', async (c) => {
 // GET /api/sessions/:id/diff — get session diffs
 // ---------------------------------------------------------------------------
 api.get('/:id/diff', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
@@ -464,10 +469,11 @@ api.get('/:id/diff', async (c) => {
 // POST /api/sessions/:id/permissions/:reqId — reply to a permission request
 // ---------------------------------------------------------------------------
 api.post('/:id/permissions/:reqId', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
@@ -499,10 +505,11 @@ api.post('/:id/permissions/:reqId', async (c) => {
 //       We fall back to posting directly to the expected REST endpoint.
 // ---------------------------------------------------------------------------
 api.post('/:id/questions/:reqId', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId || !session.sandboxUrl) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
@@ -538,10 +545,11 @@ api.post('/:id/questions/:reqId', async (c) => {
 // POST /api/sessions/:id/revert — revert session to a specific message
 // ---------------------------------------------------------------------------
 api.post('/:id/revert', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
@@ -577,10 +585,11 @@ api.post('/:id/revert', async (c) => {
 // POST /api/sessions/:id/unrevert — undo a revert
 // ---------------------------------------------------------------------------
 api.post('/:id/unrevert', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId || !session.sandboxUrl || !session.opencodeSessionId) {
 		return c.json({ error: 'Session sandbox not ready' }, 503);
@@ -605,10 +614,11 @@ api.post('/:id/unrevert', async (c) => {
 // Uses sandboxExecute with `find` for reliable, deduplicated file listing.
 // ---------------------------------------------------------------------------
 api.get('/:id/files', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
 
@@ -751,10 +761,11 @@ api.get('/:id/files', async (c) => {
 // GET /api/sessions/:id/files/content — read file content from sandbox
 // ---------------------------------------------------------------------------
 api.get('/:id/files/content', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
 
@@ -802,10 +813,11 @@ api.get('/:id/files/content', async (c) => {
 // Body: { path: string, content: string }
 // ---------------------------------------------------------------------------
 api.put('/:id/files/content', async (c) => {
+	const user = c.get('user')!;
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')!));
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
 

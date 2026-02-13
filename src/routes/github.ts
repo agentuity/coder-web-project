@@ -7,7 +7,7 @@
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions } from '../db/schema';
-import { eq } from '@agentuity/drizzle';
+import { and, eq } from '@agentuity/drizzle';
 import { sandboxExecute } from '@agentuity/server';
 import { parseMetadata } from '../lib/parse-metadata';
 import { SpanStatusCode } from '@opentelemetry/api';
@@ -129,11 +129,11 @@ function parseGitBranch(refs: string): string {
 }
 
 /** Look up a session and validate it has a sandbox. */
-async function getSession(sessionId: string) {
+async function getSession(sessionId: string, userId: string) {
 	const [session] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, sessionId));
+		.where(and(eq(chatSessions.id, sessionId), eq(chatSessions.createdBy, userId)));
 
 	if (!session) return { error: 'Session not found', status: 404 as const };
 	if (!session.sandboxId) return { error: 'No sandbox', status: 503 as const };
@@ -145,7 +145,7 @@ async function getSession(sessionId: string) {
 // GET /:id/github/status — git branch, dirty state, changed files, remotes
 // ---------------------------------------------------------------------------
 api.get('/:id/github/status', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -224,7 +224,7 @@ api.get('/:id/github/status', async (c) => {
 // GET /:id/github/log — git commit history
 // ---------------------------------------------------------------------------
 api.get('/:id/github/log', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -294,7 +294,7 @@ api.get('/:id/github/log', async (c) => {
 // POST /:id/github/init — initialize a new git repository
 // ---------------------------------------------------------------------------
 api.post('/:id/github/init', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -346,7 +346,7 @@ api.post('/:id/github/init', async (c) => {
 // POST /:id/github/create-repo — create a GitHub repo and push
 // ---------------------------------------------------------------------------
 api.post('/:id/github/create-repo', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -492,7 +492,7 @@ api.post('/:id/github/create-repo', async (c) => {
 // POST /:id/github/branch — create and checkout a new branch
 // ---------------------------------------------------------------------------
 api.post('/:id/github/branch', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -543,7 +543,7 @@ api.post('/:id/github/branch', async (c) => {
 // POST /:id/github/checkout — create and switch to a new branch from a commit
 // ---------------------------------------------------------------------------
 api.post('/:id/github/checkout', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -598,7 +598,7 @@ api.post('/:id/github/checkout', async (c) => {
 // POST /:id/github/commit — stage and commit changes
 // ---------------------------------------------------------------------------
 api.post('/:id/github/commit', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -702,7 +702,7 @@ api.post('/:id/github/commit', async (c) => {
 // POST /:id/github/pr — push and create a pull request via gh CLI
 // ---------------------------------------------------------------------------
 api.post('/:id/github/pr', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -799,7 +799,7 @@ api.post('/:id/github/pr', async (c) => {
 // POST /:id/github/push — push current branch to remote
 // ---------------------------------------------------------------------------
 api.post('/:id/github/push', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -840,7 +840,7 @@ api.post('/:id/github/push', async (c) => {
 // GET /:id/github/diff — current working tree diff
 // ---------------------------------------------------------------------------
 api.get('/:id/github/diff', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 
@@ -869,7 +869,7 @@ api.get('/:id/github/diff', async (c) => {
 // GET /:id/github/diff-file — per-file diff and content
 // ---------------------------------------------------------------------------
 api.get('/:id/github/diff-file', async (c) => {
-	const result = await getSession(c.req.param('id')!);
+	const result = await getSession(c.req.param('id')!, c.get('user')!.id);
 	if ('error' in result) return c.json({ error: result.error }, result.status);
 	const { session } = result;
 

@@ -78,6 +78,7 @@ import { useNarratorMode } from '../../hooks/useNarratorMode';
 import { useAudioPlayback } from '../../hooks/useAudioPlayback';
 import { VoiceControls } from '../ui/VoiceControls';
 import { cn } from '../../lib/utils';
+import { apiFetch } from '../../lib/api';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import type { z } from 'zod';
 import { sessionSearchSchema } from '../../router';
@@ -188,26 +189,32 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
   useEffect(() => {
     if (session.status === 'active') return;
 
+    const controller = new AbortController();
+    let aborted = false;
+
     const poll = setInterval(async () => {
       try {
-		const res = await fetch(`/api/sessions/${sessionId}`);
-		if (res.ok) {
-			const data = await res.json();
-			if (data.status === 'active') {
-				setSession((prev) => ({
-					...prev,
-					status: 'active',
-					sandboxId: data.sandboxId ?? prev.sandboxId,
-					sandboxUrl: data.sandboxUrl ?? prev.sandboxUrl,
-				}));
-			}
-		}
-	} catch {
+        const res = await apiFetch(`/api/sessions/${sessionId}`, { signal: controller.signal });
+        const data = await res.json();
+        if (data.status === 'active' && !aborted) {
+          setSession((prev) => ({
+            ...prev,
+            status: 'active',
+            sandboxId: data.sandboxId ?? prev.sandboxId,
+            sandboxUrl: data.sandboxUrl ?? prev.sandboxUrl,
+          }));
+        }
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         // Ignore — will retry on next interval
       }
     }, 3000);
 
-    return () => clearInterval(poll);
+    return () => {
+      aborted = true;
+      controller.abort();
+      clearInterval(poll);
+    };
   }, [session.status, sessionId]);
 
   useEffect(() => {
@@ -219,15 +226,13 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
       return;
     }
 
+    const controller = new AbortController();
     let isMounted = true;
     setIsLoadingArchive(true);
     setArchiveError(null);
 
-    fetch(`/api/sessions/${sessionId}/messages`)
-      .then((res) => {
-        if (!res.ok) throw new Error('Failed to load messages');
-        return res.json();
-      })
+    apiFetch(`/api/sessions/${sessionId}/messages`, { signal: controller.signal })
+      .then((res) => res.json())
       .then((data: unknown) => {
         if (!isMounted) return;
         const messages: ChatMessage[] = [];
@@ -262,8 +267,9 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
         setArchivedMessages(messages);
         setArchivedParts(partsByMessage);
       })
-      .catch(() => {
+      .catch((err) => {
         if (!isMounted) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
         setArchiveError('Unable to load chat history');
       })
       .finally(() => {
@@ -273,6 +279,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
     return () => {
       isMounted = false;
+      controller.abort();
     };
   }, [session.status, sessionId]);
 
@@ -343,6 +350,11 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 	const [isEditingTitle, setIsEditingTitle] = useState(false);
 	const [editTitle, setEditTitle] = useState(session.title || '');
 	const fileInputRef = useRef<HTMLInputElement | null>(null);
+	const passwordFetchController = useRef<AbortController | null>(null);
+
+	useEffect(() => () => {
+		passwordFetchController.current?.abort();
+	}, []);
 
 	const handleModelChange = useCallback((model: string) => {
 		setSelectedModel(model);
@@ -1731,10 +1743,15 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				{session.sandboxId && (
 					<Popover onOpenChange={(open) => {
 						if (open && !opencodePassword) {
-							fetch(`/api/sessions/${sessionId}/password`)
-								.then((r) => r.ok ? r.json() : null)
+							passwordFetchController.current?.abort();
+							const controller = new AbortController();
+							passwordFetchController.current = controller;
+							apiFetch(`/api/sessions/${sessionId}/password`, { signal: controller.signal })
+								.then((r) => r.json())
 								.then((data) => { if (data?.password) setOpencodePassword(data.password); })
-								.catch(() => {});
+								.catch((err) => {
+									if (err instanceof DOMException && err.name === 'AbortError') return;
+								});
 						}
 					}}>
 					<PopoverTrigger asChild>

@@ -1,4 +1,5 @@
 import { type ChangeEvent, type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { defineRegistry, useStateStore } from '@json-render/react';
 import { catalog } from './ui-catalog';
 import { cn } from './utils';
@@ -1193,7 +1194,10 @@ export const { registry } = defineRegistry(catalog, {
             const theme = THEMES[selectedTheme as keyof typeof THEMES] || THEMES['github-dark'];
             const svg = await renderMermaid(props.code, theme);
             if (cancelled || !containerRef.current) return;
-            containerRef.current.innerHTML = svg;
+            containerRef.current.innerHTML = DOMPurify.sanitize(svg, {
+              USE_PROFILES: { svg: true, svgFilters: true },
+              ADD_TAGS: ['foreignObject'],
+            });
 
             // Make SVG responsive
             const svgEl = containerRef.current.querySelector('svg');

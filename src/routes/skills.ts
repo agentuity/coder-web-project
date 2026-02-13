@@ -3,8 +3,8 @@
  */
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
-import { skills } from '../db/schema';
-import { eq } from '@agentuity/drizzle';
+import { skills, workspaces } from '../db/schema';
+import { and, eq } from '@agentuity/drizzle';
 
 const api = createRouter();
 
@@ -38,7 +38,13 @@ api.get('/search', async (c) => {
 
 // POST /api/workspaces/:wid/skills — create skill
 api.post('/', async (c) => {
+	const user = c.get('user')!;
 	const workspaceId = c.req.param('wid') as string;
+	const [workspace] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.id, workspaceId), eq(workspaces.organizationId, user.id)));
+	if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
 	const body = await c.req.json<{
 		name?: string;
 		description?: string;
@@ -81,13 +87,27 @@ api.post('/', async (c) => {
 
 // GET /api/workspaces/:wid/skills — list skills
 api.get('/', async (c) => {
+	const user = c.get('user')!;
 	const workspaceId = c.req.param('wid') as string;
+	const [workspace] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.id, workspaceId), eq(workspaces.organizationId, user.id)));
+	if (!workspace) return c.json({ error: 'Workspace not found' }, 404);
 	const result = await db.select().from(skills).where(eq(skills.workspaceId, workspaceId));
 	return c.json(result);
 });
 
 // PATCH /api/skills/:id — update skill
 api.patch('/:id', async (c) => {
+	const user = c.get('user')!;
+	const [existing] = await db.select().from(skills).where(eq(skills.id, c.req.param('id')!));
+	if (!existing) return c.json({ error: 'Skill not found' }, 404);
+	const [workspace] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.id, existing.workspaceId), eq(workspaces.organizationId, user.id)));
+	if (!workspace) return c.json({ error: 'Skill not found' }, 404);
 	const body = await c.req.json<{ name?: string; description?: string; content?: string; enabled?: boolean }>();
 	const [skill] = await db
 		.update(skills)
@@ -100,6 +120,14 @@ api.patch('/:id', async (c) => {
 
 // DELETE /api/skills/:id — delete skill
 api.delete('/:id', async (c) => {
+	const user = c.get('user')!;
+	const [existing] = await db.select().from(skills).where(eq(skills.id, c.req.param('id')!));
+	if (!existing) return c.json({ error: 'Skill not found' }, 404);
+	const [workspace] = await db
+		.select()
+		.from(workspaces)
+		.where(and(eq(workspaces.id, existing.workspaceId), eq(workspaces.organizationId, user.id)));
+	if (!workspace) return c.json({ error: 'Skill not found' }, 404);
 	const [skill] = await db.delete(skills).where(eq(skills.id, c.req.param('id')!)).returning();
 	if (!skill) return c.json({ error: 'Skill not found' }, 404);
 	return c.json({ success: true });

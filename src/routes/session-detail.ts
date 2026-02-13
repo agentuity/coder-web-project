@@ -4,7 +4,7 @@
 import { createRouter } from '@agentuity/runtime';
 import { db } from '../db';
 import { chatSessions, sandboxSnapshots, skills, sources, userSettings } from '../db/schema';
-import { eq } from '@agentuity/drizzle';
+import { and, eq } from '@agentuity/drizzle';
 import { randomUUID } from 'node:crypto';
 import {
 	createSandbox,
@@ -46,7 +46,11 @@ const api = createRouter();
 
 // GET /api/sessions/:id — get session with messages
 api.get('/:id', async (c) => {
-	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	const user = c.get('user')!;
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 
 	c.var.session.metadata.action = 'get-session';
@@ -95,6 +99,7 @@ api.get('/:id', async (c) => {
 
 // PATCH /api/sessions/:id — update session
 api.patch('/:id', async (c) => {
+	const user = c.get('user')!;
 	c.var.session.metadata.action = 'update-session';
 	c.var.session.metadata.sessionDbId = c.req.param('id');
 
@@ -108,7 +113,7 @@ api.patch('/:id', async (c) => {
 	const [session] = await db
 		.update(chatSessions)
 		.set({ ...body, updatedAt: new Date() })
-		.where(eq(chatSessions.id, c.req.param('id')))
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)))
 		.returning();
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 	return c.json(session);
@@ -116,7 +121,11 @@ api.patch('/:id', async (c) => {
 
 // POST /api/sessions/:id/retry — retry establishing OpenCode session
 api.post('/:id/retry', async (c) => {
-	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	const user = c.get('user')!;
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 
 	c.var.session.metadata.action = 'retry-session';
@@ -171,7 +180,7 @@ api.post('/:id/fork', async (c) => {
 	const [sourceSession] = await db
 		.select()
 		.from(chatSessions)
-		.where(eq(chatSessions.id, c.req.param('id')));
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)));
 	if (!sourceSession) return c.json({ error: 'Session not found' }, 404);
 
 	c.var.session.metadata.action = 'fork-session';
@@ -371,7 +380,10 @@ api.post('/:id/fork', async (c) => {
 // POST /api/sessions/:id/snapshot — create a reusable snapshot from a session's sandbox
 api.post('/:id/snapshot', async (c) => {
 	const user = c.get('user')!;
-	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 
 	c.var.session.metadata.action = 'create-snapshot';
@@ -426,7 +438,11 @@ api.post('/:id/snapshot', async (c) => {
 
 // DELETE /api/sessions/:id — delete session and destroy sandbox
 api.delete('/:id', async (c) => {
-	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	const user = c.get('user')!;
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 
 	c.var.session.metadata.action = 'delete-session';
@@ -449,7 +465,11 @@ api.delete('/:id', async (c) => {
 
 // GET /api/sessions/:id/password — decrypt and return the OpenCode server password
 api.get('/:id/password', async (c) => {
-	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	const user = c.get('user')!;
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 
 	const password = getSessionPassword(session);
@@ -458,7 +478,11 @@ api.get('/:id/password', async (c) => {
 
 // POST /api/sessions/:id/share — create a public share URL via durable stream
 api.post('/:id/share', async (c) => {
-	const [session] = await db.select().from(chatSessions).where(eq(chatSessions.id, c.req.param('id')));
+	const user = c.get('user')!;
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(and(eq(chatSessions.id, c.req.param('id')), eq(chatSessions.createdBy, user.id)));
 	if (!session) return c.json({ error: 'Session not found' }, 404);
 
 	c.var.session.metadata.action = 'share-session';
@@ -490,6 +514,12 @@ api.post('/:id/share', async (c) => {
 		/\bbearer\b/i,
 		/sk-[a-zA-Z0-9]{20,}/, // OpenAI-style keys
 		/\bAIza[a-zA-Z0-9_-]{35}\b/, // Google API keys
+		/AKIA[0-9A-Z]{16}/, // AWS access key IDs
+		/ghp_[a-zA-Z0-9]{36}/, // GitHub personal access tokens
+		/gho_[a-zA-Z0-9]{36}/, // GitHub OAuth tokens
+		/github_pat_[a-zA-Z0-9_]{22,}/, // GitHub fine-grained PATs
+		/xox[bpras]-[a-zA-Z0-9-]+/, // Slack tokens
+		/-----BEGIN (RSA |EC |DSA )?PRIVATE KEY-----/, // PEM private keys
 	];
 	const messagesStr = JSON.stringify(messages);
 	const hasSensitive = sensitivePatterns.some((p) => p.test(messagesStr));
