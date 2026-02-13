@@ -88,6 +88,7 @@ import { sessionSearchSchema } from '../../router';
 import { useAnalytics } from '@agentuity/react';
 import { useHotkeys } from 'react-hotkeys-hook';
 import { useKeybindings } from '../../hooks/useKeybindings';
+import { TEMPLATE_COMMANDS } from '../../../lib/agent-commands';
 
 interface ChatPageProps {
   sessionId: string;
@@ -340,8 +341,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
   // DB stores without '/' prefix, picker uses with '/' — normalize on load.
   const [selectedCommand, setSelectedCommand] = useState(() => {
     const agent = session.agent || '';
-    const templateCommands = new Set(['agentuity-cadence', 'agentuity-memory-save', 'agentuity-memory-share', 'agentuity-cloud', 'agentuity-sandbox']);
-    if (!agent || templateCommands.has(agent)) return '';
+    if (!agent || TEMPLATE_COMMANDS.has(agent)) return '';
     return agent.startsWith('/') ? agent : `/${agent}`;
   });
   const [hasManuallySelectedCommand, setHasManuallySelectedCommand] = useState(false);
@@ -719,7 +719,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		async (payload: QueuedMessage) => {
 			setIsSending(true);
 			try {
-				if (payload.command && payload.attachments && payload.attachments.length > 0) {
+				if (payload.command && TEMPLATE_COMMANDS.has(payload.command.replace(/^\//, '')) && payload.attachments && payload.attachments.length > 0) {
 					throw new Error('Attachments are not supported for commands.');
 				}
 				const res = await fetch(`/api/sessions/${sessionId}/messages`, {
@@ -757,7 +757,8 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 
 	const handleSend = async (text: string) => {
 		if (!text.trim() && attachments.length === 0) return;
-		if (selectedCommand && attachments.length > 0) {
+		const isTemplateCmd = selectedCommand && TEMPLATE_COMMANDS.has(selectedCommand.replace(/^\//, ''));
+		if (isTemplateCmd && attachments.length > 0) {
 			toast({ type: 'error', message: 'Attachments are not supported with commands.' });
 			return;
 		}

@@ -151,7 +151,7 @@ api.post('/:id/messages', async (c) => {
 	if (attachments.length > MAX_ATTACHMENTS) {
 		return c.json({ error: `Too many attachments (max ${MAX_ATTACHMENTS}).` }, 400);
 	}
-	if (body.command && attachments.length > 0) {
+	if (body.command && TEMPLATE_COMMANDS.has(body.command.replace(/^\//, '')) && attachments.length > 0) {
 		return c.json({ error: 'Attachments are not supported for commands.' }, 400);
 	}
 
