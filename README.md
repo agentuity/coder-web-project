@@ -275,7 +275,7 @@ The command palette (Ctrl+K) also provides searchable access to all actions and 
 - **Frontend**: React 19 + Tailwind CSS v4
 - **Auth**: Better Auth (`@agentuity/auth`)
 - **Database**: PostgreSQL via Drizzle ORM (`@agentuity/drizzle`)
-- **AI**: OpenCode SDK with sandboxed execution
+- **AI**: [OpenCode](https://opencode.ai) with sandboxed execution, using the [Coder OpenCode plugin](https://github.com/agentuity/sdk/tree/main/packages/opencode)
 - **Markdown**: Streamdown (streaming animation)
 - **Diffs**: @pierre/diffs (FileDiff + PierreFile)
 - **Routing**: @tanstack/react-router (type-safe routing with Zod-validated search params)
