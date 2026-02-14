@@ -2,10 +2,13 @@
  * Archive pipeline — downloads OpenCode's SQLite database from a sandbox,
  * parses it with the OpenCodeDBReader, and stores normalized data in
  * PostgreSQL before the sandbox is destroyed.
+ *
+ * Also provides `syncSessionArchive()` for proactive, event-driven background
+ * syncing via `sandboxExecute` (no file download required).
  */
 import { unlink } from "node:fs/promises";
-import { sandboxReadFile } from "@agentuity/server";
-import { and, eq, inArray } from "@agentuity/drizzle";
+import { sandboxReadFile, sandboxExecute } from "@agentuity/server";
+import { and, eq, ne, inArray } from "@agentuity/drizzle";
 import { db } from "../db";
 import {
   chatSessions,
@@ -197,6 +200,403 @@ export async function archiveSession(
         // Best-effort
       }
     }
+  }
+}
+
+// ─── Proactive Sync via sandboxExecute ────────────────────────────────────────
+
+/** Bun script executed inside the sandbox to dump the OpenCode SQLite DB as JSON. */
+const SQLITE_DUMP_SCRIPT = `import{Database}from"bun:sqlite";try{const d=new Database("/home/agentuity/.local/share/opencode/opencode.db",{readonly:true});const r={sessions:d.query("SELECT * FROM session").all(),messages:d.query("SELECT * FROM message").all(),parts:d.query("SELECT * FROM part").all(),todos:d.query("SELECT * FROM todo").all()};d.close();console.log(JSON.stringify(r))}catch(e){console.error(String(e));process.exit(1)}`;
+
+/** Raw row shapes returned from OpenCode SQLite (snake_case). */
+interface RawSqliteSession {
+  id: string;
+  slug?: string;
+  parent_id?: string | null;
+  title?: string | null;
+  project_id?: string | null;
+  directory?: string | null;
+  version?: string | null;
+  summary?: string | null;
+  share_url?: string | null;
+  time_created?: number | null;
+  time_updated?: number | null;
+}
+
+interface RawSqliteMessage {
+  id: string;
+  session_id: string;
+  role: string;
+  agent?: string | null;
+  model?: string | null;
+  cost?: number | null;
+  tokens?: string | null;
+  error?: string | null;
+  time_created?: number | null;
+  time_updated?: number | null;
+}
+
+interface RawSqlitePart {
+  id: string;
+  message_id: string;
+  session_id: string;
+  type: string;
+  data?: string | null;
+  time_created?: number | null;
+  time_updated?: number | null;
+}
+
+interface RawSqliteTodo {
+  id: string;
+  session_id: string;
+  content: string;
+  status: string;
+  priority: string;
+  position: number;
+}
+
+interface SqliteDumpData {
+  sessions: RawSqliteSession[];
+  messages: RawSqliteMessage[];
+  parts: RawSqlitePart[];
+  todos: RawSqliteTodo[];
+}
+
+/** Parse a JSON string safely, returning null on failure. */
+function safeJsonParse(str: string | null | undefined): unknown {
+  if (!str) return null;
+  try {
+    return JSON.parse(str);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Proactively sync a session's OpenCode data from the sandbox SQLite DB
+ * into PostgreSQL archive tables using `sandboxExecute`.
+ *
+ * Uses a full-replace strategy: deletes all existing archive data for the
+ * chat session, then inserts fresh data from the SQLite dump.
+ *
+ * This function NEVER throws — catches all errors, logs them, and sets
+ * archiveStatus to 'failed' on error.
+ *
+ * @returns true on success, false on failure/skip.
+ */
+export async function syncSessionArchive(
+  apiClient: unknown,
+  chatSession: ChatSession,
+  logger: Logger,
+): Promise<boolean> {
+  const sessionId = chatSession.id;
+  const sandboxId = chatSession.sandboxId;
+
+  if (!sandboxId) {
+    logger.warn("[archive-sync] No sandbox ID for session, skipping", {
+      sessionId,
+    });
+    return false;
+  }
+
+  try {
+    // 1. Atomic claim — only proceed if not already archiving
+    const [claimed] = await db
+      .update(chatSessions)
+      .set({ archiveStatus: "archiving", updatedAt: new Date() })
+      .where(
+        and(
+          eq(chatSessions.id, sessionId),
+          ne(chatSessions.archiveStatus, "archiving"),
+        ),
+      )
+      .returning();
+
+    if (!claimed) {
+      logger.info("[archive-sync] Session already being archived, skipping", {
+        sessionId,
+      });
+      return false;
+    }
+
+    // 2. Execute bun script inside sandbox to dump SQLite as JSON
+    logger.info("[archive-sync] Querying SQLite via sandboxExecute", {
+      sessionId,
+      sandboxId,
+    });
+
+    const execution = await sandboxExecute(
+      apiClient as Parameters<typeof sandboxExecute>[0],
+      {
+        sandboxId,
+        options: {
+          command: ["bun", "-e", SQLITE_DUMP_SCRIPT],
+          timeout: "30s",
+        },
+      },
+    );
+
+    // 3. Read stdout from the execution
+    let stdout = "";
+    if (execution.stdoutStreamUrl) {
+      const res = await fetch(execution.stdoutStreamUrl);
+      stdout = await res.text();
+    }
+
+    let stderr = "";
+    if (execution.stderrStreamUrl) {
+      const res = await fetch(execution.stderrStreamUrl);
+      stderr = await res.text();
+    }
+
+    const exitCode =
+      typeof execution.exitCode === "number" ? execution.exitCode : 0;
+
+    if (exitCode !== 0 || !stdout.trim()) {
+      logger.warn("[archive-sync] sandboxExecute failed or returned no data", {
+        sessionId,
+        exitCode,
+        stderr: stderr.slice(0, 500),
+      });
+      // Mark as failed
+      await db
+        .update(chatSessions)
+        .set({ archiveStatus: "failed", updatedAt: new Date() })
+        .where(eq(chatSessions.id, sessionId));
+      return false;
+    }
+
+    // 4. Parse the JSON output
+    const data = JSON.parse(stdout.trim()) as SqliteDumpData;
+
+    if (!data.sessions || data.sessions.length === 0) {
+      logger.warn("[archive-sync] No sessions found in SQLite dump", {
+        sessionId,
+      });
+      await db
+        .update(chatSessions)
+        .set({
+          archiveStatus: "archived",
+          lastArchivedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(chatSessions.id, sessionId));
+      return true;
+    }
+
+    // 5. Group messages, parts, and todos by session_id
+    const messagesBySession = new Map<string, RawSqliteMessage[]>();
+    for (const msg of data.messages) {
+      const list = messagesBySession.get(msg.session_id) ?? [];
+      list.push(msg);
+      messagesBySession.set(msg.session_id, list);
+    }
+
+    const partsBySession = new Map<string, RawSqlitePart[]>();
+    for (const part of data.parts) {
+      const list = partsBySession.get(part.session_id) ?? [];
+      list.push(part);
+      partsBySession.set(part.session_id, list);
+    }
+
+    const todosBySession = new Map<string, RawSqliteTodo[]>();
+    for (const todo of data.todos) {
+      const list = todosBySession.get(todo.session_id) ?? [];
+      list.push(todo);
+      todosBySession.set(todo.session_id, list);
+    }
+
+    // 6. Full-replace in a single transaction
+    await db.transaction(async (tx) => {
+      // Delete existing archive data — cascades to messages, parts, todos
+      await tx
+        .delete(archivedSessions)
+        .where(eq(archivedSessions.chatSessionId, sessionId));
+
+      // Insert fresh data for each session
+      for (const rawSession of data.sessions) {
+        const sessionMessages = messagesBySession.get(rawSession.id) ?? [];
+        const sessionParts = partsBySession.get(rawSession.id) ?? [];
+        const sessionTodos = todosBySession.get(rawSession.id) ?? [];
+
+        // Compute cost aggregates from messages
+        let totalCost = 0;
+        let totalTokens = 0;
+        let inputTokens = 0;
+        let outputTokens = 0;
+        let reasoningTokens = 0;
+        let cacheRead = 0;
+        let cacheWrite = 0;
+
+        for (const msg of sessionMessages) {
+          totalCost += msg.cost ?? 0;
+          const tokens = safeJsonParse(msg.tokens) as Record<
+            string,
+            number
+          > | null;
+          if (tokens) {
+            inputTokens += tokens.input ?? 0;
+            outputTokens += tokens.output ?? 0;
+            reasoningTokens += tokens.reasoning ?? 0;
+            cacheRead += tokens.cacheRead ?? 0;
+            cacheWrite += tokens.cacheWrite ?? 0;
+            totalTokens +=
+              (tokens.input ?? 0) +
+              (tokens.output ?? 0) +
+              (tokens.reasoning ?? 0);
+          }
+        }
+
+        // Insert archived session
+        const [archivedSession] = await tx
+          .insert(archivedSessions)
+          .values({
+            chatSessionId: sessionId,
+            opencodeSessionId: rawSession.id,
+            parentSessionId: rawSession.parent_id ?? null,
+            title: rawSession.title ?? null,
+            projectId: rawSession.project_id ?? null,
+            totalCost,
+            totalTokens,
+            inputTokens,
+            outputTokens,
+            reasoningTokens,
+            cacheRead,
+            cacheWrite,
+            messageCount: sessionMessages.length,
+            timeCreated: unixToDate(rawSession.time_created ?? null),
+            timeUpdated: unixToDate(rawSession.time_updated ?? null),
+            metadata: {
+              slug: rawSession.slug,
+              directory: rawSession.directory,
+              version: rawSession.version,
+              summary: rawSession.summary,
+              shareUrl: rawSession.share_url,
+            },
+          })
+          .returning();
+
+        if (!archivedSession) continue;
+
+        const archivedSessionId = archivedSession.id;
+
+        // Build opencodeMessageId → archivedMessageId map for linking parts
+        const messageIdMap = new Map<string, string>();
+
+        // Insert messages
+        for (const msg of sessionMessages) {
+          const tokens = safeJsonParse(msg.tokens) as Record<
+            string,
+            number
+          > | null;
+          const [archivedMsg] = await tx
+            .insert(archivedMessages)
+            .values({
+              archivedSessionId,
+              opencodeMessageId: msg.id,
+              role: msg.role,
+              agent: msg.agent ?? null,
+              model: msg.model ?? null,
+              cost: msg.cost ?? null,
+              tokens: tokens ?? null,
+              error: msg.error ?? null,
+              data: {
+                role: msg.role,
+                agent: msg.agent,
+                model: msg.model,
+                cost: msg.cost,
+                tokens,
+                error: msg.error,
+                time: {
+                  created: msg.time_created,
+                  completed:
+                    msg.role === "assistant" &&
+                    msg.time_updated !== msg.time_created
+                      ? msg.time_updated
+                      : undefined,
+                },
+              },
+              timeCreated: unixToDate(msg.time_created ?? null),
+              timeUpdated: unixToDate(msg.time_updated ?? null),
+            })
+            .returning();
+
+          if (archivedMsg) {
+            messageIdMap.set(msg.id, archivedMsg.id);
+          }
+        }
+
+        // Insert parts
+        for (const part of sessionParts) {
+          const archivedMessageId = messageIdMap.get(part.message_id);
+          if (!archivedMessageId) continue;
+
+          const partData = safeJsonParse(part.data) as Record<
+            string,
+            unknown
+          > | null;
+
+          await tx.insert(archivedParts).values({
+            archivedMessageId,
+            archivedSessionId,
+            opencodePartId: part.id,
+            type: part.type,
+            data: partData ?? {},
+            timeCreated: unixToDate(part.time_created ?? null),
+            timeUpdated: unixToDate(part.time_updated ?? null),
+          });
+        }
+
+        // Insert todos
+        for (const todo of sessionTodos) {
+          await tx.insert(archivedTodos).values({
+            archivedSessionId,
+            content: todo.content,
+            status: todo.status,
+            priority: todo.priority,
+            position: todo.position,
+          });
+        }
+      }
+    });
+
+    // 7. Mark as archived with timestamp
+    await db
+      .update(chatSessions)
+      .set({
+        archiveStatus: "archived",
+        lastArchivedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(chatSessions.id, sessionId));
+
+    logger.info("[archive-sync] Sync complete", {
+      sessionId,
+      sessionCount: data.sessions.length,
+      messageCount: data.messages.length,
+    });
+
+    return true;
+  } catch (error) {
+    logger.error("[archive-sync] Sync failed", {
+      sessionId,
+      error: String(error),
+    });
+
+    // Mark as failed — don't throw
+    try {
+      await db
+        .update(chatSessions)
+        .set({ archiveStatus: "failed", updatedAt: new Date() })
+        .where(eq(chatSessions.id, sessionId));
+    } catch (updateError) {
+      logger.error("[archive-sync] Failed to update archive status", {
+        sessionId,
+        error: String(updateError),
+      });
+    }
+
+    return false;
   }
 }
 

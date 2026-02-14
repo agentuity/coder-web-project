@@ -36,6 +36,7 @@ import { decrypt, encrypt } from "../lib/encryption";
 import { parseMetadata } from "../lib/parse-metadata";
 import {
   archiveSession,
+  syncSessionArchive,
   getArchivedData,
   getArchivedChildSessions,
   getArchivedChildSessionData,
@@ -90,6 +91,14 @@ api.get("/:id", async (c) => {
       );
       recordHealthResult(session.id, healthy);
       if (!healthy && shouldMarkTerminated(session.id)) {
+        // Best-effort sync before marking terminated
+        try {
+          const syncClient = (c.var.sandbox as any).client;
+          await syncSessionArchive(syncClient, session, c.var.logger);
+        } catch {
+          // Sandbox likely already gone — that's fine
+        }
+
         const [updated] = await db
           .update(chatSessions)
           .set({ status: "terminated", updatedAt: new Date() })
@@ -800,7 +809,7 @@ api.get("/:id/children", async (c) => {
   }
 });
 
-// DELETE /api/sessions/:id — archive session data, destroy sandbox, soft-delete
+// DELETE /api/sessions/:id — destroy sandbox, soft-delete (archiving handled by proactive sync)
 api.delete("/:id", async (c) => {
   const user = c.get("user")!;
   const [session] = await db
@@ -816,23 +825,6 @@ api.delete("/:id", async (c) => {
 
   c.var.session.metadata.action = "delete-session";
   c.var.session.metadata.sessionDbId = session.id;
-
-  // Archive OpenCode data BEFORE destroying sandbox
-  if (session.sandboxId) {
-    try {
-      const apiClient = (c.var.sandbox as any).client;
-      const archived = await archiveSession(apiClient, session, c.var.logger);
-      c.var.logger.info(
-        `Archive ${archived ? "succeeded" : "failed/skipped"} for session ${session.id}`,
-      );
-    } catch (error) {
-      // Archive failure must NOT block deletion
-      c.var.logger.error("Unexpected archive error", {
-        sessionId: session.id,
-        error: String(error),
-      });
-    }
-  }
 
   // Destroy sandbox
   if (session.sandboxId) {

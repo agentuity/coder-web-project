@@ -20,6 +20,7 @@ import { normalizeSandboxPath } from "../lib/path-utils";
 import { decrypt } from "../lib/encryption";
 import { SpanStatusCode } from "@opentelemetry/api";
 import { COMMAND_TO_AGENT, TEMPLATE_COMMANDS } from "../lib/agent-commands";
+import { syncSessionArchive } from "../lib/archive";
 
 /** Extract and decrypt the OpenCode server password from session metadata. */
 function getSessionPassword(session: {
@@ -407,6 +408,10 @@ api.get(
     let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
     let keepaliveTimer: ReturnType<typeof setInterval> | null = null;
 
+    // Archive sync debounce — trigger on session.idle events
+    const SYNC_DEBOUNCE_MS = 5 * 60 * 1000; // 5 minutes
+    let lastSyncTimestamp = session.lastArchivedAt?.getTime() ?? 0;
+
     const safeWrite = async (message: { data: string; event?: string }) => {
       if (closed) return;
       try {
@@ -485,6 +490,22 @@ api.get(
 
               const isParent =
                 !eventSessionId || eventSessionId === session.opencodeSessionId;
+
+              // Trigger archive sync on session.idle for the parent session
+              if (event.type === "session.idle" && isParent) {
+                const now = Date.now();
+                if (now - lastSyncTimestamp >= SYNC_DEBOUNCE_MS) {
+                  lastSyncTimestamp = now; // Optimistic update
+                  const syncClient = (c.var.sandbox as any).client;
+                  syncSessionArchive(syncClient, session, logger).catch(
+                    (err: unknown) => {
+                      logger.warn("[archive-sync] Background sync failed", {
+                        error: String(err),
+                      });
+                    },
+                  );
+                }
+              }
 
               // Tag every event with _meta so the frontend can route
               // parent vs child session events accordingly
