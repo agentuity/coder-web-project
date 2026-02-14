@@ -819,6 +819,74 @@ api.get('/:id/files/content', async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/sessions/:id/files/image — serve raw image from sandbox
+// ---------------------------------------------------------------------------
+api.get('/:id/files/image', async (c) => {
+	const user = c.get('user')!;
+	const [session] = await db
+		.select()
+		.from(chatSessions)
+		.where(and(eq(chatSessions.id, c.req.param('id')!), eq(chatSessions.createdBy, user.id)));
+	if (!session) return c.json({ error: 'Session not found' }, 404);
+	if (!session.sandboxId) return c.json({ error: 'No sandbox' }, 503);
+
+	const rawFilePath = c.req.query('path');
+	if (!rawFilePath) return c.json({ error: 'Missing path parameter' }, 400);
+
+	const filePath = toAbsoluteSandboxPath(rawFilePath);
+
+	// Only allow image extensions
+	const ext = filePath.split('.').pop()?.toLowerCase() || '';
+	const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg']);
+	if (!IMAGE_EXTS.has(ext)) return c.json({ error: 'Not an image file' }, 400);
+
+	// Map extension to MIME type
+	const MIME_MAP: Record<string, string> = {
+		png: 'image/png',
+		jpg: 'image/jpeg',
+		jpeg: 'image/jpeg',
+		gif: 'image/gif',
+		webp: 'image/webp',
+		svg: 'image/svg+xml',
+	};
+
+	try {
+		const apiClient = (c.var.sandbox as any).client;
+		const stream = await sandboxReadFile(apiClient, {
+			sandboxId: session.sandboxId,
+			path: filePath,
+		});
+
+		// Read stream into binary buffer
+		const reader = stream.getReader();
+		const chunks: Uint8Array[] = [];
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			chunks.push(value);
+		}
+		const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+		const merged = new Uint8Array(totalLength);
+		let offset = 0;
+		for (const chunk of chunks) {
+			merged.set(chunk, offset);
+			offset += chunk.length;
+		}
+
+		// Return raw bytes with caching headers
+		return new Response(merged, {
+			headers: {
+				'Content-Type': MIME_MAP[ext] || 'application/octet-stream',
+				'Content-Length': String(totalLength),
+				'Cache-Control': 'private, max-age=3600, immutable',
+			},
+		});
+	} catch (error) {
+		return c.json({ error: 'Failed to read image', details: String(error) }, 500);
+	}
+});
+
+// ---------------------------------------------------------------------------
 // PUT /api/sessions/:id/files/content — write file content to sandbox
 // Body: { path: string, content: string }
 // ---------------------------------------------------------------------------

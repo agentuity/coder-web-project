@@ -1360,7 +1360,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				/>
 			);
 			case 'file':
-				return <FilePartView key={part.id} part={part} />;
+				return <FilePartView key={part.id} part={part} sessionId={sessionId} />;
 			case 'subtask':
 				return <SubtaskView key={part.id} part={part} />;
 			case 'agent':
@@ -1405,7 +1405,7 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			default:
 				return null;
 		}
-	}, [isStreaming, lastAssistantMessage, renderReasoning, handleAddComment, getDiffAnnotations, getFileComments, getSourcesForToolPart]);
+	}, [isStreaming, lastAssistantMessage, renderReasoning, handleAddComment, getDiffAnnotations, getFileComments, getSourcesForToolPart, sessionId]);
 
 	const renderedMessages = useMemo(() => {
 		if (displayMessages.length === 0) return null;
