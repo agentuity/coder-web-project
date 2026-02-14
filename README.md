@@ -2,6 +2,13 @@
 
 A web-based AI coding IDE built on the [Agentuity](https://agentuity.dev) platform. Deploy your own instance to get a browser-based development environment powered by AI agents with sandboxed code execution.
 
+<div align="center">
+  <a href="https://youtu.be/boouePolZDM">
+    <img src="https://img.youtube.com/vi/boouePolZDM/maxresdefault.jpg" alt="Open Source Sandbox Coding Agent" width="720" />
+  </a>
+  <p><strong><a href="https://youtu.be/boouePolZDM">Watch the Demo</a></strong></p>
+</div>
+
 Each coding session gets its own isolated sandbox with a full development environment, git, and GitHub CLI. The app uses [OpenCode](https://opencode.ai) servers running in Agentuity sandboxes as the AI execution engine, with a custom React web UI.
 
 ## Features
