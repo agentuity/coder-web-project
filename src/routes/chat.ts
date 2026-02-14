@@ -59,6 +59,12 @@ const ALLOWED_EXTENSIONS = new Set([
 	'toml',
 	'csv',
 	'log',
+	'png',
+	'jpg',
+	'jpeg',
+	'gif',
+	'webp',
+	'svg',
 ]);
 
 /** Ensure a sandbox file path is absolute (rooted at /home/agentuity). */

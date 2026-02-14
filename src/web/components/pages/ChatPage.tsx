@@ -158,6 +158,12 @@ const ALLOWED_EXTENSIONS = new Set([
 	'toml',
 	'csv',
 	'log',
+	'png',
+	'jpg',
+	'jpeg',
+	'gif',
+	'webp',
+	'svg',
 ]);
 
 export function ChatPage({ sessionId, session: initialSession, onForkedSession, githubAvailable = true }: ChatPageProps) {
@@ -1402,11 +1408,22 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						}
 						return renderPart(part, message);
 					})}
-						{errorInfo && (
-							<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-								Error: {errorInfo.message || errorInfo.type || 'Unknown error'}
-							</div>
-						)}
+						{errorInfo && (() => {
+							const errorText = errorInfo.message || errorInfo.type || '';
+							const isAbort = !errorText || /abort/i.test(errorText) || /abort/i.test(errorInfo.type || '');
+							if (isAbort) {
+								return (
+									<div className="rounded-lg border border-zinc-600/30 bg-zinc-700/10 px-3 py-2 text-sm text-zinc-400">
+										Response stopped
+									</div>
+								);
+							}
+							return (
+								<div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+									Error: {errorText}
+								</div>
+							);
+						})()}
 					</MessageContent>
 					{message.role === 'assistant' && (
 						<MessageToolbar>
@@ -1581,12 +1598,12 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				renderedMessages
 			)}
 
-				{error && isConnected && displayMessages.length > 0 && (
-					<div className="mx-auto my-3 flex max-w-2xl items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-						<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-						<span>{typeof error === 'string' ? error : String(error)}</span>
-					</div>
-				)}
+			{error && isConnected && displayMessages.length > 0 && !/abort/i.test(typeof error === 'string' ? error : '') && (
+				<div className="mx-auto my-3 flex max-w-2xl items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+					<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+					<span>{typeof error === 'string' ? error : String(error)}</span>
+				</div>
+			)}
 
 				{pendingPermissions.map((perm) => (
 					<PermissionCard key={perm.id} request={perm} sessionId={sessionId} />

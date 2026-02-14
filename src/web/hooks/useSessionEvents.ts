@@ -108,8 +108,14 @@ function reducer(state: SessionEventState, action: Action): SessionEventState {
 			return { ...state, partsByMessage };
 		}
 
-		case 'SESSION_STATUS':
-			return { ...state, sessionStatus: action.status };
+		case 'SESSION_STATUS': {
+			const updates: Partial<SessionEventState> = { sessionStatus: action.status };
+			// Clear session error when work resumes (user sent a new message)
+			if (action.status.type === 'busy') {
+				updates.error = null;
+			}
+			return { ...state, ...updates };
+		}
 
 		case 'PERMISSION_ASKED': {
 			const pendingPermissions = new Map(state.pendingPermissions);
