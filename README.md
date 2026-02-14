@@ -2,6 +2,13 @@
 
 A web-based AI coding IDE built on the [Agentuity](https://agentuity.dev) platform. Deploy your own instance to get a browser-based development environment powered by AI agents with sandboxed code execution.
 
+<div align="center">
+  <a href="https://youtu.be/boouePolZDM">
+    <img src="https://img.youtube.com/vi/boouePolZDM/maxresdefault.jpg" alt="Open Source Sandbox Coding Agent" width="720" />
+  </a>
+  <p><strong><a href="https://youtu.be/boouePolZDM">Watch the Demo</a></strong></p>
+</div>
+
 Each coding session gets its own isolated sandbox with a full development environment, git, and GitHub CLI. The app uses [OpenCode](https://opencode.ai) servers running in Agentuity sandboxes as the AI execution engine, with a custom React web UI.
 
 ## Features
@@ -268,11 +275,17 @@ The command palette (Ctrl+K) also provides searchable access to all actions and 
 - **Frontend**: React 19 + Tailwind CSS v4
 - **Auth**: Better Auth (`@agentuity/auth`)
 - **Database**: PostgreSQL via Drizzle ORM (`@agentuity/drizzle`)
-- **AI**: OpenCode SDK with sandboxed execution
+- **AI**: [OpenCode](https://opencode.ai) with sandboxed execution, using the [Coder OpenCode plugin](https://github.com/agentuity/sdk/tree/main/packages/opencode)
 - **Markdown**: Streamdown (streaming animation)
 - **Diffs**: @pierre/diffs (FileDiff + PierreFile)
 - **Routing**: @tanstack/react-router (type-safe routing with Zod-validated search params)
 - **Deploy**: Agentuity Platform
+
+## Links
+
+- [Agentuity Sandbox Documentation](https://agentuity.dev/Services/Sandbox)
+- [OpenCode — The Open Source AI Coding Agent](https://opencode.ai/)
+- [Sign up for Agentuity](https://agentuity.com)
 
 ## License
 
