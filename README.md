@@ -281,6 +281,12 @@ The command palette (Ctrl+K) also provides searchable access to all actions and 
 - **Routing**: @tanstack/react-router (type-safe routing with Zod-validated search params)
 - **Deploy**: Agentuity Platform
 
+## Links
+
+- [Agentuity Sandbox Documentation](https://agentuity.dev/Services/Sandbox)
+- [OpenCode — The Open Source AI Coding Agent](https://opencode.ai/)
+- [Sign up for Agentuity](https://agentuity.com)
+
 ## License
 
 Apache License 2.0. See [LICENSE.md](LICENSE.md).
