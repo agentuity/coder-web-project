@@ -393,6 +393,14 @@ export const catalog = defineCatalog(schema, {
       }),
       description: 'Ordered or unordered list',
     },
+    JSXPreview: {
+      props: z.object({
+        jsx: z.string(),
+        title: z.string().optional(),
+        className: z.string().optional(),
+      }),
+      description: 'Render JSX strings dynamically for AI-generated UI previews',
+    },
     HtmlViewer: {
       props: z.object({
         html: z.string(),

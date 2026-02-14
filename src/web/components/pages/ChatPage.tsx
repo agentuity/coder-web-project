@@ -481,6 +481,41 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 		return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 	}, []);
 
+	const AttachmentPill = useCallback(({ attachment, onRemove }: { attachment: AttachmentItem; onRemove: (id: string) => void }) => {
+		const isImage = attachment.mime?.startsWith('image/');
+
+		return (
+			<div
+				className={cn(
+					"flex items-center gap-2 border border-[var(--border)] bg-[var(--muted)] text-[10px] text-[var(--foreground)]",
+					isImage ? "rounded-lg overflow-hidden p-0" : "rounded-full px-2 py-1"
+				)}
+			>
+				{isImage ? (
+					<img
+						src={`data:${attachment.mime};base64,${attachment.content}`}
+						alt={attachment.filename}
+						className="h-12 w-12 object-cover"
+					/>
+				) : null}
+				<span className={cn("max-w-[140px] truncate", isImage && "px-1")} title={attachment.filename}>
+					{attachment.filename}
+				</span>
+				<span className={cn("text-[10px] text-[var(--muted-foreground)]", isImage && "pr-0")}>
+					{formatFileSize(attachment.size)}
+				</span>
+				<button
+					type="button"
+					className="inline-flex h-5 w-5 sm:h-4 sm:w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+					onClick={() => onRemove(attachment.id)}
+					title="Remove attachment"
+				>
+					<X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
+				</button>
+			</div>
+		);
+	}, [formatFileSize]);
+
 	const handleOpenAttachmentPicker = useCallback(() => {
 		fileInputRef.current?.click();
 	}, []);
@@ -1670,32 +1705,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 						placeholder={promptPlaceholder}
 						disabled={!isSessionInputEnabled}
 					/>
-					{attachments.length > 0 && (
-						<div className="flex flex-wrap gap-2 px-3 pb-2">
-							{attachments.map((attachment) => (
-								<div
-									key={attachment.id}
-									className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2 py-1 text-[10px] text-[var(--foreground)]"
-								>
-									<span className="max-w-[140px] truncate" title={attachment.filename}>
-										{attachment.filename}
-									</span>
-									<span className="text-[10px] text-[var(--muted-foreground)]">
-										{formatFileSize(attachment.size)}
-									</span>
-								<button
-									type="button"
-									className="inline-flex h-5 w-5 sm:h-4 sm:w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-									onClick={() => handleRemoveAttachment(attachment.id)}
-									title="Remove attachment"
-								>
-									<X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-								</button>
-							</div>
+				{attachments.length > 0 && (
+					<div className="flex flex-wrap gap-2 px-3 pb-2">
+						{attachments.map((attachment) => (
+							<AttachmentPill key={attachment.id} attachment={attachment} onRemove={handleRemoveAttachment} />
 						))}
 					</div>
 				)}
-				<PromptInputFooter>
+			<PromptInputFooter>
 					<div className="flex flex-wrap items-center gap-1 sm:gap-2 text-[10px] text-[var(--muted-foreground)]">
 					<CommandPicker value={selectedCommand} onChange={(cmd) => {
 					setSelectedCommand(cmd);
@@ -2177,32 +2194,14 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 				<div className="relative z-40 border-t border-[var(--border)] px-3 py-2">
 					<PromptInputProvider>
 						<PromptInput onSubmit={({ text }) => handleSend(text)}>
-							{attachments.length > 0 && (
-								<div className="flex flex-wrap gap-2 px-3 pb-2">
-									{attachments.map((attachment) => (
-										<div
-											key={attachment.id}
-											className="flex items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--muted)] px-2 py-1 text-[10px] text-[var(--foreground)]"
-										>
-											<span className="max-w-[140px] truncate" title={attachment.filename}>
-												{attachment.filename}
-											</span>
-											<span className="text-[10px] text-[var(--muted-foreground)]">
-												{formatFileSize(attachment.size)}
-											</span>
-							<button
-								type="button"
-								className="inline-flex h-5 w-5 sm:h-4 sm:w-4 items-center justify-center rounded-full text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-								onClick={() => handleRemoveAttachment(attachment.id)}
-								title="Remove attachment"
-							>
-								<X className="h-3.5 w-3.5 sm:h-3 sm:w-3" />
-							</button>
-						</div>
-					))}
-				</div>
-			)}
-			{messageQueue.length > 0 && (
+						{attachments.length > 0 && (
+							<div className="flex flex-wrap gap-2 px-3 pb-2">
+								{attachments.map((attachment) => (
+									<AttachmentPill key={attachment.id} attachment={attachment} onRemove={handleRemoveAttachment} />
+								))}
+							</div>
+						)}
+		{messageQueue.length > 0 && (
 				<div className="rounded-md border border-[var(--border)] bg-[var(--muted)]/30 p-2 space-y-1 mb-2">
 					<span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase">
 						Queued ({messageQueue.length})

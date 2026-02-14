@@ -1,5 +1,6 @@
 import { type ChangeEvent, type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
+import JsxParser from 'react-jsx-parser';
 import { defineRegistry, useStateStore } from '@json-render/react';
 import { catalog } from './ui-catalog';
 import { cn } from './utils';
@@ -1102,6 +1103,42 @@ export const { registry } = defineRegistry(catalog, {
             <li key={item}>{item}</li>
           ))}
         </Tag>
+      );
+    },
+
+    /* ── JSXPreview ────────────────────────────────────────────── */
+    JSXPreview: ({ props }) => {
+      const [error, setError] = useState<string | null>(null);
+
+      return (
+        <div className={cn('rounded-lg border border-[var(--border)] overflow-hidden', props.className)}>
+          {props.title && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-[var(--muted)] border-b border-[var(--border)]">
+              <div className="flex gap-1.5">
+                <div className="h-2.5 w-2.5 rounded-full bg-red-500/60" />
+                <div className="h-2.5 w-2.5 rounded-full bg-yellow-500/60" />
+                <div className="h-2.5 w-2.5 rounded-full bg-green-500/60" />
+              </div>
+              <span className="text-xs text-[var(--muted-foreground)] truncate">{props.title}</span>
+            </div>
+          )}
+          <div className="p-4 bg-[var(--background)]">
+            {error ? (
+              <div className="text-sm text-red-400">JSX Error: {error}</div>
+            ) : (
+              <JsxParser
+                jsx={props.jsx}
+                renderInWrapper={false}
+                renderError={({ error: err }: { error: string }) => {
+                  setError(String(err));
+                  return null;
+                }}
+                components={{}}
+                onError={(err: Error) => setError(err.message)}
+              />
+            )}
+          </div>
+        </div>
       );
     },
 

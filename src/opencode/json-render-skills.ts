@@ -684,6 +684,7 @@ Sequences and conditionals can be nested — e.g. a conditional's \`then\` can b
 |-----------|-----------|-------------|
 | Map | center? [lng,lat], zoom?, markers? [{longitude, latitude, label?, popup?}], route? [[lng,lat]...], height?, markersPath?, labelPath?, interactive? | Interactive map with markers, popups, and routes (MapLibre, no API key needed). Use markersPath (JSON Pointer to state array) + interactive (click-to-add) for state-driven markers. Use labelPath to read the marker label from a state path (e.g. from an Input field) when adding markers interactively. |
 | AutoForm | schema {fieldName: {type, label?, description?, required?, placeholder?, options?, min?, max?, default?}}, title?, submitLabel? | Auto-generated form from a JSON field schema — describe fields and types, form is built automatically |
+| JSXPreview | jsx, title? | Render JSX strings dynamically for AI-generated UI |
 | HtmlViewer | html, title?, height?, className? | Sandboxed HTML viewer for rendering HTML content in an iframe. Great for raw HTML snippets, email previews, or embedded widgets. |
 | Mermaid | code, theme? ("light"\\|"dark"), className? | Render Mermaid diagrams as beautiful SVGs. Supports flowcharts, sequence, state, class, and ER diagrams. Auto-detects dark/light theme. |
 
