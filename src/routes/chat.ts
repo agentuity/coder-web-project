@@ -190,7 +190,10 @@ api.post('/:id/messages', async (c) => {
 			filesToWrite.push({ path: filePath, content: buffer });
 			fileParts.push({
 				type: 'file',
-				mime: attachment.mime || 'application/octet-stream',
+				mime: (() => {
+					const m = attachment.mime || 'application/octet-stream';
+					return m.startsWith('text/') ? 'text/plain' : m;
+				})(),
 				filename: safeName,
 				url: `file://${filePath}`,
 			});

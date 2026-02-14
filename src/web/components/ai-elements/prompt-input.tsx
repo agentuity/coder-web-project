@@ -160,7 +160,7 @@ export const PromptInputSubmit = ({
 
 	const isStreaming = status === 'streaming' && onStop;
 
-	const { onClick, ...restProps } = props;
+	const { onClick, disabled, ...restProps } = props;
 
 	return (
 		<Button
@@ -169,6 +169,7 @@ export const PromptInputSubmit = ({
 			size="icon"
 			type={isStreaming ? 'button' : 'submit'}
 			variant={isStreaming ? 'destructive' : variant}
+			disabled={isStreaming ? false : disabled}
 			{...restProps}
 			onClick={isStreaming ? onStop : onClick}
 		>

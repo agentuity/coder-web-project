@@ -50,6 +50,7 @@ type Action =
 	| { type: 'SESSION_UPDATED'; payload: { revert?: { messageID: string; partID?: string } } }
 	| { type: 'CONNECTED' }
 	| { type: 'DISCONNECTED'; error?: string }
+	| { type: 'SESSION_ERROR'; error: string }
 	| { type: 'CLEAR' }
 	| { type: 'INIT_MESSAGES'; messages: Message[]; parts: Part[] };
 
@@ -150,6 +151,9 @@ function reducer(state: SessionEventState, action: Action): SessionEventState {
 		case 'DISCONNECTED':
 			return { ...state, isConnected: false, error: action.error ?? null };
 
+		case 'SESSION_ERROR':
+			return { ...state, error: action.error, sessionStatus: { type: 'idle' } };
+
 		case 'CLEAR':
 			return { ...initialState };
 
@@ -218,9 +222,14 @@ function dispatchChatEvent(dispatch: React.Dispatch<Action>, event: ChatEvent): 
 		case 'todo.updated':
 			dispatch({ type: 'TODO_UPDATED', todos: event.properties.todos });
 			break;
-		case 'session.error':
-			dispatch({ type: 'DISCONNECTED', error: event.properties.error });
+		case 'session.error': {
+			const rawError = event.properties.error;
+			const errorStr = typeof rawError === 'string'
+				? rawError
+				: (rawError as any)?.message || (rawError as any)?.name || JSON.stringify(rawError);
+			dispatch({ type: 'SESSION_ERROR', error: errorStr });
 			break;
+		}
 		case 'session.updated': {
 			const sessionInfo = (event as any).properties?.info;
 			dispatch({
@@ -335,12 +344,6 @@ export function useSessionEvents(sessionId: string | undefined) {
 			es.onmessage = (e: MessageEvent) => {
 				try {
 					const event = JSON.parse(e.data as string) as ChatEvent;
-					if (event.type === 'session.error') {
-						dispatchChatEvent(dispatch, event);
-						es.close();
-						scheduleReconnect(event.properties?.error ?? 'Session error');
-						return;
-					}
 					dispatchChatEvent(dispatch, event);
 				} catch {
 					// Ignore malformed SSE payloads

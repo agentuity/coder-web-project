@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEventHandler } from 'react';
 import {
+	AlertTriangle,
 	Check,
 	Clock,
 	Code2,
@@ -1579,6 +1580,13 @@ export function ChatPage({ sessionId, session: initialSession, onForkedSession, 
 			) : (
 				renderedMessages
 			)}
+
+				{error && isConnected && displayMessages.length > 0 && (
+					<div className="mx-auto my-3 flex max-w-2xl items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
+						<AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+						<span>{typeof error === 'string' ? error : String(error)}</span>
+					</div>
+				)}
 
 				{pendingPermissions.map((perm) => (
 					<PermissionCard key={perm.id} request={perm} sessionId={sessionId} />
