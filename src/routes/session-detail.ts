@@ -774,11 +774,13 @@ api.get("/:id/children", async (c) => {
       reader.close();
     }
   } catch (error) {
-    c.var.logger.error("Failed to read live child sessions", {
-      error: String(error),
-      sessionId: session.id,
-    });
-    return c.json({ error: "Failed to read child sessions from sandbox" }, 500);
+    c.var.logger.debug(
+      "Live child sessions unavailable (sandbox may not have OpenCode SQLite DB)",
+      {
+        sessionId: session.id,
+      },
+    );
+    return c.json({ children: [], warning: "Live child sessions unavailable" });
   } finally {
     try {
       await unlink(tmpPath);
