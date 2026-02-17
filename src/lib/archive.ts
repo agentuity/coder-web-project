@@ -38,7 +38,7 @@ type ChatSession = typeof chatSessions.$inferSelect;
  * OpenCode stores timestamps as seconds since epoch.
  */
 function unixToDate(ts: number | null | undefined): Date | null {
-  if (!ts) return null;
+  if (ts == null) return null;
   // Timestamps < 1e12 are in seconds; >= 1e12 are in milliseconds
   return new Date(ts < 1e12 ? ts * 1000 : ts);
 }
