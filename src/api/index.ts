@@ -3,8 +3,9 @@
  * Mounts auth, workspace, session, chat, skills, and sources routes.
  */
 import { createRouter } from '@agentuity/runtime';
-import { auth, authMiddleware, authRoutes } from '../auth';
+import { auth, authMiddleware, apiKeyMiddleware, authRoutes } from '../auth';
 import workspaceRoutes from '../routes/workspaces';
+import taskRoutes from '../routes/tasks';
 import sessionRoutes from '../routes/sessions';
 import sessionDetailRoutes from '../routes/session-detail';
 import chatRoutes from '../routes/chat';
@@ -35,6 +36,11 @@ api.get('/auth-methods', (c) => {
 
 // Shared session routes (public — no authentication required)
 api.route('/shared', sharedRoutes);
+
+// Public Tasks API (API key authentication)
+api.use('/v1/tasks/*', apiKeyMiddleware);
+api.use('/v1/tasks', apiKeyMiddleware);
+api.route('/v1/tasks', taskRoutes);
 
 // All other routes require authentication
 api.use('/*', authMiddleware);
