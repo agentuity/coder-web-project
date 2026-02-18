@@ -2,31 +2,34 @@
  * API routes for Agentuity Coder.
  * Mounts auth, workspace, session, chat, skills, and sources routes.
  */
-import { createRouter } from '@agentuity/runtime';
-import { auth, authMiddleware, authRoutes } from '../auth';
-import workspaceRoutes from '../routes/workspaces';
-import sessionRoutes from '../routes/sessions';
-import sessionDetailRoutes from '../routes/session-detail';
-import chatRoutes from '../routes/chat';
-import skillRoutes from '../routes/skills';
-import sourceRoutes from '../routes/sources';
-import sessionMcpRoutes from '../routes/session-mcp';
-import sharedRoutes from '../routes/shared';
-import githubRoutes from '../routes/github';
-import githubGlobalRoutes from '../routes/github-global';
-import userSettingsRoutes from '../routes/user-settings';
-import voiceRoutes from '../routes/voice';
-import voiceSettingsRoutes from '../routes/voice-settings';
-import snapshotRoutes from '../routes/snapshots';
+import { createRouter } from "@agentuity/runtime";
+import { auth, authMiddleware, authRoutes } from "../auth";
+import workspaceRoutes from "../routes/workspaces";
+import sessionRoutes from "../routes/sessions";
+import sessionDetailRoutes from "../routes/session-detail";
+import chatRoutes from "../routes/chat";
+import skillRoutes from "../routes/skills";
+import sourceRoutes from "../routes/sources";
+import sessionMcpRoutes from "../routes/session-mcp";
+import sharedRoutes from "../routes/shared";
+import cronRoutes from "../routes/cron";
+import githubRoutes from "../routes/github";
+import githubGlobalRoutes from "../routes/github-global";
+import userSettingsRoutes from "../routes/user-settings";
+import voiceRoutes from "../routes/voice";
+import voiceSettingsRoutes from "../routes/voice-settings";
+import snapshotRoutes from "../routes/snapshots";
 
 const api = createRouter();
 
 // Auth routes (public — no middleware). Uses mountAuthRoutes for proper cookie handling.
-api.on(['GET', 'POST'], '/auth/*', authRoutes);
+api.on(["GET", "POST"], "/auth/*", authRoutes);
 
 // Public endpoint: which auth methods are available
-api.get('/auth-methods', (c) => {
-  const hasGoogle = Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+api.get("/auth-methods", (c) => {
+  const hasGoogle = Boolean(
+    process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,
+  );
   return c.json({
     google: hasGoogle,
     email: !hasGoogle,
@@ -34,55 +37,58 @@ api.get('/auth-methods', (c) => {
 });
 
 // Shared session routes (public — no authentication required)
-api.route('/shared', sharedRoutes);
+api.route("/shared", sharedRoutes);
+
+// Cron routes (no user auth — uses platform signature verification)
+api.route("/cron", cronRoutes);
 
 // All other routes require authentication
-api.use('/*', authMiddleware);
+api.use("/*", authMiddleware);
 
 // GET /api/me — current authenticated user
-api.get('/me', async (c) => {
-	const session = c.get('session');
-	const user = c.get('user');
-	return c.json({ user, session });
+api.get("/me", async (c) => {
+  const session = c.get("session");
+  const user = c.get("user");
+  return c.json({ user, session });
 });
 
 // User settings routes
-api.route('/user', userSettingsRoutes);
-api.route('/user/voice', voiceSettingsRoutes);
+api.route("/user", userSettingsRoutes);
+api.route("/user/voice", voiceSettingsRoutes);
 
 // Voice routes
-api.route('/voice', voiceRoutes);
+api.route("/voice", voiceRoutes);
 
 // GitHub routes (non-session scoped)
-api.route('/github', githubGlobalRoutes);
+api.route("/github", githubGlobalRoutes);
 
 // Workspace routes
-api.route('/workspaces', workspaceRoutes);
+api.route("/workspaces", workspaceRoutes);
 
 // Session routes (nested under workspaces)
-api.route('/workspaces/:wid/sessions', sessionRoutes);
+api.route("/workspaces/:wid/sessions", sessionRoutes);
 
 // Individual session operations
-api.route('/sessions', sessionDetailRoutes);
+api.route("/sessions", sessionDetailRoutes);
 
 // Chat routes (nested under sessions)
-api.route('/sessions', chatRoutes);
+api.route("/sessions", chatRoutes);
 
 // GitHub integration routes (nested under sessions)
-api.route('/sessions', githubRoutes);
+api.route("/sessions", githubRoutes);
 
 // Skills routes (nested under workspaces + standalone)
-api.route('/workspaces/:wid/skills', skillRoutes);
-api.route('/skills', skillRoutes);
+api.route("/workspaces/:wid/skills", skillRoutes);
+api.route("/skills", skillRoutes);
 
 // Session-scoped MCP routes
-api.route('/sessions', sessionMcpRoutes);
+api.route("/sessions", sessionMcpRoutes);
 
 // Sources routes (nested under workspaces + standalone)
-api.route('/workspaces/:wid/sources', sourceRoutes);
-api.route('/sources', sourceRoutes);
+api.route("/workspaces/:wid/sources", sourceRoutes);
+api.route("/sources", sourceRoutes);
 
 // Snapshot routes (nested under workspaces)
-api.route('/workspaces/:wid/snapshots', snapshotRoutes);
+api.route("/workspaces/:wid/snapshots", snapshotRoutes);
 
 export default api;

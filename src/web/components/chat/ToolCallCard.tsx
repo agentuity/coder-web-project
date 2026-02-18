@@ -1,143 +1,261 @@
-import React, { useMemo, useState } from 'react';
-import type { ToolPart } from '../../types/opencode';
-import { FileDiff as PierreDiff } from '@pierre/diffs/react';
-import { parseDiffFromFile, type DiffLineAnnotation, type SelectedLineRange } from '@pierre/diffs';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { Check, CheckCircle2, Circle, Copy, Loader2 } from 'lucide-react';
-import { getLangFromPath } from '../../lib/shiki';
-import { parseFileOutput } from '../../lib/file-output';
-import { CodeWithComments } from './CodeWithComments';
-import type { CodeComment } from '../../hooks/useCodeComments';
-import { Commit } from '../ai-elements/commit';
-import { Streamdown } from 'streamdown';
-import { createCodePlugin } from '@streamdown/code';
+import React, { useMemo, useState } from "react";
+import type { ToolPart } from "../../types/opencode";
+import { FileDiff as PierreDiff } from "@pierre/diffs/react";
 import {
-	Tool,
-	ToolContent,
-	ToolHeader,
-	ToolInput,
-	ToolOutput,
-} from '../ai-elements/tool';
-import type { ToolState, ToolStatus } from '../ai-elements/tool';
-import { SourcesView, type SourceItem } from './SourcesView';
+  parseDiffFromFile,
+  type DiffLineAnnotation,
+  type SelectedLineRange,
+} from "@pierre/diffs";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import {
+  Bot,
+  Check,
+  CheckCircle2,
+  Circle,
+  Copy,
+  Loader2,
+  MessageSquare,
+} from "lucide-react";
+import { getLangFromPath } from "../../lib/shiki";
+import { parseFileOutput } from "../../lib/file-output";
+import { CodeWithComments } from "./CodeWithComments";
+import type { CodeComment } from "../../hooks/useCodeComments";
+import { Commit } from "../ai-elements/commit";
+import { Streamdown } from "streamdown";
+import { createCodePlugin } from "@streamdown/code";
+import {
+  Tool,
+  ToolContent,
+  ToolHeader,
+  ToolInput,
+  ToolOutput,
+} from "../ai-elements/tool";
+import type { ToolState, ToolStatus } from "../ai-elements/tool";
+import { SourcesView, type SourceItem } from "./SourcesView";
+import { ChildSessionView } from "./ChildSessionView";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "../ui/dialog";
 
 const toolCallCodePlugin = createCodePlugin({
-	themes: ['github-dark', 'github-light'],
+  themes: ["github-dark", "github-light"],
 });
 
+/** Sub-agent tool names that create child sessions. */
+const SUB_AGENT_TOOLS = new Set(["task", "agentuity_background_task"]);
+
+/** Background task management tools that show task status/results. */
+const BG_STATUS_TOOLS = new Set([
+  "agentuity_background_output",
+  "agentuity_background_inspect",
+  "agentuity_background_cancel",
+]);
+
 interface ToolCallCardProps {
-	part: ToolPart;
-	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
-	getDiffAnnotations?: (file: string) => DiffLineAnnotation<{ id: string; comment: string }>[];
-	getFileComments?: (file: string) => CodeComment[];
-	sources?: SourceItem[];
+  part: ToolPart;
+  onAddComment?: (
+    file: string,
+    selection: SelectedLineRange,
+    comment: string,
+    origin: "diff" | "file",
+  ) => void;
+  getDiffAnnotations?: (
+    file: string,
+  ) => DiffLineAnnotation<{ id: string; comment: string }>[];
+  getFileComments?: (file: string) => CodeComment[];
+  sources?: SourceItem[];
+  /** Parent session ID — needed for sub-agent inspection API calls */
+  sessionId?: string;
+  /** Whether the parent session is archived */
+  archived?: boolean;
+  /** Child sessions list (from useChildSessions) for matching tool calls to child sessions */
+  childSessions?: Array<{
+    id: string;
+    opencodeSessionId: string;
+    parentSessionId: string | null;
+    title: string | null;
+    totalCost: number;
+    totalTokens: number;
+    messageCount: number;
+    timeCreated: string | number | null;
+    metadata?: Record<string, unknown> | null;
+  }>;
+  /** Callback to fetch full child session data */
+  fetchChildData?: (childId: string) => Promise<unknown>;
+  /** Get live streaming messages for a child session ID */
+  getChildMessages?: (
+    childSessionId: string,
+  ) => import("../../types/opencode").Message[];
+  /** Get live streaming parts for a child session + message */
+  getChildPartsForMessage?: (
+    childSessionId: string,
+    messageID: string,
+  ) => import("../../types/opencode").Part[];
+  /** Get live session status for a child session */
+  getChildStatus?: (
+    childSessionId: string,
+  ) => import("../../types/opencode").SessionStatus;
+  /** Set of child session IDs that have received live events */
+  liveChildSessionIds?: Set<string>;
 }
 
 function getToolDisplayName(tool: string): string {
-  return tool.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  return tool.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 // ---------------------------------------------------------------------------
 // Tool-type detection helpers
 // ---------------------------------------------------------------------------
 
-function isEditTool(input: Record<string, unknown>): input is Record<string, unknown> & {
+function isEditTool(input: Record<string, unknown>): input is Record<
+  string,
+  unknown
+> & {
   filePath: string;
   oldString: string;
   newString: string;
 } {
   return (
-    typeof input.filePath === 'string' &&
-    typeof input.oldString === 'string' &&
-    typeof input.newString === 'string'
+    typeof input.filePath === "string" &&
+    typeof input.oldString === "string" &&
+    typeof input.newString === "string"
   );
 }
 
-function isBashTool(input: Record<string, unknown>): input is Record<string, unknown> & {
+function isBashTool(input: Record<string, unknown>): input is Record<
+  string,
+  unknown
+> & {
   command: string;
 } {
-  return typeof input.command === 'string';
+  return typeof input.command === "string";
 }
 
-function isWebFetchTool(input: Record<string, unknown>): input is Record<string, unknown> & {
-	url: string;
+function isWebFetchTool(input: Record<string, unknown>): input is Record<
+  string,
+  unknown
+> & {
+  url: string;
 } {
-	return typeof input.url === 'string';
+  return typeof input.url === "string";
 }
 
-function isWriteTool(input: Record<string, unknown>): input is Record<string, unknown> & {
+function isWriteTool(input: Record<string, unknown>): input is Record<
+  string,
+  unknown
+> & {
   filePath: string;
   content: string;
 } {
   return (
-    typeof input.filePath === 'string' &&
-    typeof input.content === 'string' &&
-    typeof input.oldString !== 'string'
+    typeof input.filePath === "string" &&
+    typeof input.content === "string" &&
+    typeof input.oldString !== "string"
   );
 }
 
-function isReadTool(input: Record<string, unknown>): input is Record<string, unknown> & {
+function isReadTool(input: Record<string, unknown>): input is Record<
+  string,
+  unknown
+> & {
   filePath: string;
 } {
   return (
-    typeof input.filePath === 'string' &&
-    typeof input.oldString !== 'string' &&
-    typeof input.content !== 'string' &&
-    typeof input.command !== 'string'
+    typeof input.filePath === "string" &&
+    typeof input.oldString !== "string" &&
+    typeof input.content !== "string" &&
+    typeof input.command !== "string"
   );
 }
 
-function isAgentInvocation(input: Record<string, unknown>): input is Record<string, unknown> & {
-	subagent_type: string;
-	description?: string;
-	prompt?: string;
+function isAgentInvocation(input: Record<string, unknown>): input is Record<
+  string,
+  unknown
+> & {
+  subagent_type?: string;
+  agent?: string;
+  description?: string;
+  prompt?: string;
+  task?: string;
 } {
-	return typeof input.subagent_type === 'string';
+  return (
+    typeof input.subagent_type === "string" || typeof input.agent === "string"
+  );
+}
+
+/** Extract the agent name from either `subagent_type` (task tool) or `agent` (background task) */
+function getAgentName(input: Record<string, unknown>): string {
+  return (
+    (input.subagent_type as string) ?? (input.agent as string) ?? "unknown"
+  );
+}
+
+/** Extract the prompt/task content from either `prompt` (task tool) or `task` (background task) */
+function getAgentPrompt(input: Record<string, unknown>): string | undefined {
+  return (input.prompt as string) ?? (input.task as string) ?? undefined;
 }
 
 function isGitCommand(command: string) {
-	return command.trim().startsWith('git ') || command.includes(' git ');
+  return command.trim().startsWith("git ") || command.includes(" git ");
 }
 
-function parseGitFiles(output?: string): Array<{ path: string; status: 'added' | 'modified' | 'deleted' }> {
-	if (!output) return [];
-	const files: Array<{ path: string; status: 'added' | 'modified' | 'deleted' }> = [];
-	const lines = output.split('\n').map((line) => line.trim()).filter(Boolean);
-	for (const line of lines) {
-		const match = line.match(/^([MADRCU?!]{1,2})\s+(.+)$/);
-		if (!match) continue;
-		const statusToken = match[1] ?? '';
-		const path = match[2] ?? '';
-		if (!path) continue;
-		const status: 'added' | 'modified' | 'deleted' = statusToken.includes('A')
-			? 'added'
-			: statusToken.includes('D')
-				? 'deleted'
-				: 'modified';
-		files.push({ path, status });
-	}
-	return files;
+function parseGitFiles(
+  output?: string,
+): Array<{ path: string; status: "added" | "modified" | "deleted" }> {
+  if (!output) return [];
+  const files: Array<{
+    path: string;
+    status: "added" | "modified" | "deleted";
+  }> = [];
+  const lines = output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  for (const line of lines) {
+    const match = line.match(/^([MADRCU?!]{1,2})\s+(.+)$/);
+    if (!match) continue;
+    const statusToken = match[1] ?? "";
+    const path = match[2] ?? "";
+    if (!path) continue;
+    const status: "added" | "modified" | "deleted" = statusToken.includes("A")
+      ? "added"
+      : statusToken.includes("D")
+        ? "deleted"
+        : "modified";
+    files.push({ path, status });
+  }
+  return files;
 }
 
-function parseGitCommitInfo(command: string, output?: string): {
-	message: string;
-	hash?: string;
-	files?: Array<{ path: string; status: 'added' | 'modified' | 'deleted' }>;
+function parseGitCommitInfo(
+  command: string,
+  output?: string,
+): {
+  message: string;
+  hash?: string;
+  files?: Array<{ path: string; status: "added" | "modified" | "deleted" }>;
 } {
-	const outputText = output ?? '';
-	const commitLineMatch = outputText.match(/^\[(.+?)\s+([0-9a-f]{7,40})\]\s+(.+)$/m);
-	const messageFromOutput = commitLineMatch?.[3];
-	const hashFromOutput = commitLineMatch?.[2]
-		?? outputText.match(/\bcommit\s+([0-9a-f]{7,40})\b/i)?.[1];
-	const messageFromCommand = command.match(/-m\s+["']([^"']+)["']/)?.[1];
-	const message = messageFromOutput || messageFromCommand || `Git: ${command}`;
-	const files = parseGitFiles(outputText);
-	return {
-		message,
-		hash: hashFromOutput,
-		files: files.length > 0 ? files : undefined,
-	};
+  const outputText = output ?? "";
+  const commitLineMatch = outputText.match(
+    /^\[(.+?)\s+([0-9a-f]{7,40})\]\s+(.+)$/m,
+  );
+  const messageFromOutput = commitLineMatch?.[3];
+  const hashFromOutput =
+    commitLineMatch?.[2] ??
+    outputText.match(/\bcommit\s+([0-9a-f]{7,40})\b/i)?.[1];
+  const messageFromCommand = command.match(/-m\s+["']([^"']+)["']/)?.[1];
+  const message = messageFromOutput || messageFromCommand || `Git: ${command}`;
+  const files = parseGitFiles(outputText);
+  return {
+    message,
+    hash: hashFromOutput,
+    files: files.length > 0 ? files : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -148,172 +266,515 @@ function parseGitCommitInfo(command: string, output?: string): {
 // Parse read tool output — strip <file> tags and line number prefixes
 // ---------------------------------------------------------------------------
 
-
-
 // ---------------------------------------------------------------------------
 // Specialised sub-views
 // ---------------------------------------------------------------------------
 
 function shortenPath(filePath: string): string {
   // Show at most the last 3 segments
-  const parts = filePath.split('/');
+  const parts = filePath.split("/");
   if (parts.length <= 3) return filePath;
-  return '…/' + parts.slice(-3).join('/');
+  return "…/" + parts.slice(-3).join("/");
 }
 
 function getAgentBadge(agent: string) {
-	const normalized = agent.replace('Agentuity Coder ', '').trim();
-	const labels: Record<string, string> = {
-		Lead: 'Lead',
-		Scout: 'Scout',
-		Builder: 'Builder',
-		Architect: 'Architect',
-		Reviewer: 'Reviewer',
-		Memory: 'Memory',
-		Expert: 'Expert',
-		Runner: 'Runner',
-		Product: 'Product',
-	};
-	return labels[normalized] ?? normalized;
+  const normalized = agent.replace("Agentuity Coder ", "").trim();
+  const labels: Record<string, string> = {
+    Lead: "Lead",
+    Scout: "Scout",
+    Builder: "Builder",
+    Architect: "Architect",
+    Reviewer: "Reviewer",
+    Memory: "Memory",
+    Expert: "Expert",
+    Runner: "Runner",
+    Product: "Product",
+  };
+  return labels[normalized] ?? normalized;
 }
 
-function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
-	const [copied, setCopied] = useState(false);
-
-	const handleCopy = async () => {
-		if (!text || typeof window === 'undefined' || !navigator?.clipboard?.writeText) return;
-		try {
-			await navigator.clipboard.writeText(text);
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
-		} catch {
-			// Ignore copy errors
-		}
-	};
-
-	return (
-		<button
-			type="button"
-			onClick={handleCopy}
-			className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--foreground)]"
-			title={copied ? 'Copied' : label}
-		>
-			{copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-			<span className="sr-only">{copied ? 'Copied' : label}</span>
-		</button>
-	);
+/** Format a cost value as currency string (e.g. "$0.05"). Returns empty string if cost is 0 or falsy. */
+function formatCost(cost: number | undefined | null): string {
+  if (!cost || cost <= 0) return "";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(cost);
 }
 
-function AgentInvocationView({ input }: { input: { subagent_type: string; description?: string; prompt?: string } }) {
-	const agentLabel = getAgentBadge(input.subagent_type);
-	return (
-		<div className="px-3 py-2">
-			<div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-				<span>🤖</span>
-				<Badge variant="secondary" className="text-[10px]">{agentLabel}</Badge>
-				<span className="truncate">{input.description ?? 'Agent task'}</span>
-			</div>
-		{input.prompt && (
-			<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-[11px] font-mono text-[var(--foreground)] overflow-hidden leading-relaxed max-h-64 overflow-y-auto [&_h1]:text-[11px] [&_h1]:font-bold [&_h1]:font-mono [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:font-mono [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-[11px] [&_h3]:font-bold [&_h3]:font-mono [&_h3]:mt-1.5 [&_h3]:mb-0.5 [&_p]:text-[11px] [&_p]:my-1 [&_li]:text-[11px] [&_ul]:my-1 [&_ol]:my-1 [&_pre]:text-[10px] [&_pre]:my-1 [&_pre]:p-2 [&_code]:text-[10px] [&_table]:text-[10px] [&_th]:text-[10px] [&_th]:px-1.5 [&_th]:py-0.5 [&_td]:text-[10px] [&_td]:px-1.5 [&_td]:py-0.5 [&_blockquote]:text-[11px]">
-				<Streamdown plugins={{ code: toolCallCodePlugin }}>
-					{input.prompt}
-				</Streamdown>
-			</div>
-		)}
-		</div>
-	);
+/** Clean a child session title by removing the "(@Agentuity Coder X subagent)" suffix and truncating. */
+function cleanChildTitle(
+  title: string | null | undefined,
+  maxLen = 50,
+): string {
+  if (!title) return "";
+  // Handle JSON metadata titles from background task sessions
+  if (title.startsWith("{")) {
+    try {
+      const meta = JSON.parse(title) as {
+        taskId?: string;
+        agent?: string;
+        description?: string;
+      };
+      if (meta.taskId?.startsWith("bg_")) {
+        const agentName =
+          meta.agent?.replace("Agentuity Coder ", "") ?? "Agent";
+        const friendly = meta.description
+          ? `${agentName}: ${meta.description}`
+          : `Background · ${agentName}`;
+        if (friendly.length <= maxLen) return friendly;
+        return friendly.slice(0, maxLen - 1) + "\u2026";
+      }
+    } catch {
+      // Not JSON, fall through to normal cleaning
+    }
+  }
+  const cleaned = title
+    .replace(/\s*\(@Agentuity Coder\s+\w+\s+subagent\)/i, "")
+    .trim();
+  if (cleaned.length <= maxLen) return cleaned;
+  return cleaned.slice(0, maxLen - 1) + "\u2026";
+}
+
+function CopyButton({
+  text,
+  label = "Copy",
+}: {
+  text: string;
+  label?: string;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    if (
+      !text ||
+      typeof window === "undefined" ||
+      !navigator?.clipboard?.writeText
+    )
+      return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Ignore copy errors
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border)] bg-[var(--background)] text-[var(--muted-foreground)] opacity-0 transition-opacity group-hover:opacity-100 hover:text-[var(--foreground)]"
+      title={copied ? "Copied" : label}
+    >
+      {copied ? (
+        <Check className="h-3.5 w-3.5" />
+      ) : (
+        <Copy className="h-3.5 w-3.5" />
+      )}
+      <span className="sr-only">{copied ? "Copied" : label}</span>
+    </button>
+  );
+}
+
+function AgentInvocationView({
+  input,
+}: {
+  input: {
+    subagent_type?: string;
+    agent?: string;
+    description?: string;
+    prompt?: string;
+    task?: string;
+  };
+}) {
+  const prompt = getAgentPrompt(input);
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+        <span className="truncate">{input.description ?? "Agent task"}</span>
+      </div>
+      {prompt && (
+        <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--muted)] p-3 text-[11px] font-mono text-[var(--foreground)] overflow-hidden leading-relaxed max-h-64 overflow-y-auto [&_h1]:text-[11px] [&_h1]:font-bold [&_h1]:font-mono [&_h1]:mt-2 [&_h1]:mb-1 [&_h2]:text-[11px] [&_h2]:font-bold [&_h2]:font-mono [&_h2]:mt-2 [&_h2]:mb-1 [&_h3]:text-[11px] [&_h3]:font-bold [&_h3]:font-mono [&_h3]:mt-1.5 [&_h3]:mb-0.5 [&_p]:text-[11px] [&_p]:my-1 [&_li]:text-[11px] [&_ul]:my-1 [&_ol]:my-1 [&_pre]:text-[10px] [&_pre]:my-1 [&_pre]:p-2 [&_code]:text-[10px] [&_table]:text-[10px] [&_th]:text-[10px] [&_th]:px-1.5 [&_th]:py-0.5 [&_td]:text-[10px] [&_td]:px-1.5 [&_td]:py-0.5 [&_blockquote]:text-[11px]">
+          <Streamdown plugins={{ code: toolCallCodePlugin }}>
+            {prompt}
+          </Streamdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Renders background task output/inspect/cancel results in a structured format. */
+function BackgroundOutputView({
+  tool,
+  input,
+  output,
+  status,
+  childSessions,
+  sessionId,
+  fetchChildData,
+  getChildMessages,
+  getChildPartsForMessage,
+  getChildStatus,
+  liveChildSessionIds,
+  archived,
+}: {
+  tool: string;
+  input: Record<string, unknown>;
+  output?: string;
+  status: string;
+  childSessions?: ToolCallCardProps["childSessions"];
+  sessionId?: string;
+  fetchChildData?: (
+    childId: string,
+  ) => Promise<import("../../hooks/useChildSessions").ChildSessionData | null>;
+  getChildMessages?: (
+    childSessionId: string,
+  ) => import("../../types/opencode").Message[] | undefined;
+  getChildPartsForMessage?: (
+    childSessionId: string,
+    messageID: string,
+  ) => import("../../types/opencode").Part[];
+  getChildStatus?: (childSessionId: string) => { type: string } | undefined;
+  liveChildSessionIds?: Set<string>;
+  archived?: boolean;
+}) {
+  const taskId =
+    (input.task_id as string) ?? (input.taskId as string) ?? "\u2014";
+
+  // Parse the output JSON
+  const parsed = useMemo(() => {
+    if (!output) return null;
+    try {
+      return typeof output === "string" ? JSON.parse(output) : output;
+    } catch {
+      return null;
+    }
+  }, [output]);
+
+  // Try to match this task to a child session
+  const matchedChild = useMemo(() => {
+    if (!childSessions?.length) return null;
+    const id = taskId === "\u2014" ? null : taskId;
+    if (!id) return null;
+
+    // Match by taskId embedded in child session title (JSON metadata)
+    return (
+      childSessions.find((c) => {
+        if (!c.title) return false;
+        try {
+          const titleData = JSON.parse(c.title);
+          return titleData?.taskId === id;
+        } catch {
+          return false;
+        }
+      }) ?? null
+    );
+  }, [childSessions, taskId]);
+
+  const [inspectOpen, setInspectOpen] = useState(false);
+
+  const taskStatus =
+    parsed?.status ?? (status === "running" ? "running" : "pending");
+  const result = parsed?.result as string | undefined;
+  const error = parsed?.error as string | undefined;
+
+  // Status styling
+  const statusConfig: Record<
+    string,
+    { label: string; color: string; icon: React.ReactNode }
+  > = {
+    completed: {
+      label: "Completed",
+      color: "text-green-500",
+      icon: <CheckCircle2 className="h-3.5 w-3.5" />,
+    },
+    running: {
+      label: "Running",
+      color: "text-blue-400",
+      icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
+    },
+    pending: {
+      label: "Pending",
+      color: "text-yellow-500",
+      icon: <Circle className="h-3.5 w-3.5" />,
+    },
+    error: {
+      label: "Error",
+      color: "text-red-500",
+      icon: <Circle className="h-3.5 w-3.5" />,
+    },
+    cancelled: {
+      label: "Cancelled",
+      color: "text-[var(--muted-foreground)]",
+      icon: <Circle className="h-3.5 w-3.5" />,
+    },
+  };
+
+  const sc = statusConfig[taskStatus] ??
+    statusConfig.pending ?? {
+      label: "Pending",
+      color: "text-yellow-500",
+      icon: <Circle className="h-3.5 w-3.5" />,
+    };
+
+  return (
+    <div className="space-y-2 px-3 py-2">
+      {/* Task info row */}
+      <div className="flex items-center gap-2 text-xs">
+        <span className="font-mono text-[var(--muted-foreground)]">
+          {taskId}
+        </span>
+        <span className={`flex items-center gap-1 font-medium ${sc.color}`}>
+          {sc.icon}
+          {sc.label}
+        </span>
+      </div>
+
+      {/* Result content */}
+      {result && (
+        <div className="rounded-md border border-[var(--border)] bg-[var(--background)] p-2 text-xs text-[var(--foreground)]">
+          <div className="mb-1 text-[10px] font-medium uppercase text-[var(--muted-foreground)]">
+            Result
+          </div>
+          <div className="max-h-64 overflow-auto whitespace-pre-wrap">
+            {result}
+          </div>
+        </div>
+      )}
+
+      {/* Error content */}
+      {error && (
+        <div className="rounded-md border border-red-500/30 bg-red-500/5 p-2 text-xs">
+          <div className="mb-1 text-[10px] font-medium uppercase text-red-500">
+            Error
+          </div>
+          <div className="max-h-48 overflow-auto whitespace-pre-wrap text-red-400">
+            {error}
+          </div>
+        </div>
+      )}
+
+      {/* Show raw output only if we have output but couldn't extract result/error */}
+      {output && !result && !error && parsed && (
+        <div className="rounded-md border border-[var(--border)] bg-[var(--background)] p-2 text-xs">
+          <div className="mb-1 text-[10px] font-medium uppercase text-[var(--muted-foreground)]">
+            Response
+          </div>
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[var(--foreground)]">
+            {JSON.stringify(parsed, null, 2)}
+          </pre>
+        </div>
+      )}
+
+      {/* Inspect child session button */}
+      {matchedChild && sessionId && (
+        <>
+          <button
+            type="button"
+            onClick={() => setInspectOpen(true)}
+            className="flex items-center gap-1.5 text-[10px] font-medium text-[var(--primary)] hover:underline w-full text-left mt-1"
+          >
+            <Bot className="h-3 w-3 shrink-0" />
+            <span className="truncate">
+              {cleanChildTitle(matchedChild.title) || "Inspect Agent Session"}
+            </span>
+            {matchedChild.messageCount > 0 && (
+              <span className="flex items-center gap-0.5 text-[var(--muted-foreground)] font-normal shrink-0">
+                <MessageSquare className="h-2.5 w-2.5" />
+                {matchedChild.messageCount}
+              </span>
+            )}
+            {matchedChild.totalCost > 0 && (
+              <span className="text-[var(--muted-foreground)] font-normal shrink-0">
+                {formatCost(matchedChild.totalCost)}
+              </span>
+            )}
+          </button>
+
+          <Dialog open={inspectOpen} onOpenChange={setInspectOpen}>
+            <DialogContent className="max-w-5xl w-[90vw] h-[85vh] flex flex-col p-0 gap-0">
+              <DialogHeader className="px-6 py-4 border-b border-[var(--border)] shrink-0">
+                <div className="flex items-center gap-3">
+                  <Bot className="h-5 w-5 text-[var(--primary)]" />
+                  <div className="flex-1 min-w-0">
+                    <DialogTitle className="text-base">
+                      {cleanChildTitle(matchedChild.title, 100) ||
+                        "Background Task Session"}
+                    </DialogTitle>
+                    <DialogDescription asChild>
+                      <div className="flex items-center gap-3 mt-1 text-sm text-[var(--muted-foreground)]">
+                        <Badge variant="secondary" className="text-[10px]">
+                          {taskId}
+                        </Badge>
+                        {matchedChild.messageCount > 0 && (
+                          <span className="flex items-center gap-1 text-xs">
+                            <MessageSquare className="h-3 w-3" />{" "}
+                            {matchedChild.messageCount} messages
+                          </span>
+                        )}
+                        {matchedChild.totalCost > 0 && (
+                          <span className="text-xs">
+                            {formatCost(matchedChild.totalCost)}
+                          </span>
+                        )}
+                      </div>
+                    </DialogDescription>
+                  </div>
+                </div>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto px-6 py-4">
+                <ChildSessionView
+                  childSessionId={matchedChild.id}
+                  parentSessionId={sessionId}
+                  archived={archived}
+                  fetchChildData={
+                    fetchChildData as
+                      | ((
+                          childId: string,
+                        ) => Promise<
+                          | import("../../hooks/useChildSessions").ChildSessionData
+                          | null
+                        >)
+                      | undefined
+                  }
+                  liveMessages={getChildMessages?.(
+                    matchedChild.opencodeSessionId,
+                  )}
+                  liveGetParts={
+                    getChildPartsForMessage
+                      ? (messageID: string) =>
+                          getChildPartsForMessage(
+                            matchedChild.opencodeSessionId,
+                            messageID,
+                          )
+                      : undefined
+                  }
+                  liveStatus={getChildStatus?.(matchedChild.opencodeSessionId)}
+                  isModal={true}
+                />
+              </div>
+            </DialogContent>
+          </Dialog>
+        </>
+      )}
+    </div>
+  );
 }
 
 function DiffView({
-	filePath,
-	oldString,
-	newString,
-	onAddComment,
-	annotations,
+  filePath,
+  oldString,
+  newString,
+  onAddComment,
+  annotations,
 }: {
-	filePath: string;
-	oldString: string;
-	newString: string;
-	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
-	annotations?: DiffLineAnnotation<{ id: string; comment: string }>[];
+  filePath: string;
+  oldString: string;
+  newString: string;
+  onAddComment?: (
+    file: string,
+    selection: SelectedLineRange,
+    comment: string,
+    origin: "diff" | "file",
+  ) => void;
+  annotations?: DiffLineAnnotation<{ id: string; comment: string }>[];
 }) {
-	const lang = getLangFromPath(filePath) as any;
-	const fileName = filePath.split('/').pop() || filePath;
-	const [selectedRange, setSelectedRange] = useState<SelectedLineRange | null>(null);
-	const [commentText, setCommentText] = useState('');
-	const diffText = useMemo(
-		() => `--- ${filePath}\n+++ ${filePath}\n\n--- Original\n${oldString}\n\n+++ Updated\n${newString}`,
-		[filePath, oldString, newString]
-	);
+  const lang = getLangFromPath(filePath) as any;
+  const fileName = filePath.split("/").pop() || filePath;
+  const [selectedRange, setSelectedRange] = useState<SelectedLineRange | null>(
+    null,
+  );
+  const [commentText, setCommentText] = useState("");
+  const diffText = useMemo(
+    () =>
+      `--- ${filePath}\n+++ ${filePath}\n\n--- Original\n${oldString}\n\n+++ Updated\n${newString}`,
+    [filePath, oldString, newString],
+  );
 
-	const diffData = useMemo(() => {
-		try {
-			return parseDiffFromFile(
-				{ name: fileName, contents: oldString, lang },
-				{ name: fileName, contents: newString, lang },
-			);
-		} catch {
-			return null;
-		}
-	}, [fileName, oldString, newString, lang]);
+  const diffData = useMemo(() => {
+    try {
+      return parseDiffFromFile(
+        { name: fileName, contents: oldString, lang },
+        { name: fileName, contents: newString, lang },
+      );
+    } catch {
+      return null;
+    }
+  }, [fileName, oldString, newString, lang]);
 
-	const handleAddComment = () => {
-		if (!onAddComment || !selectedRange) return;
-		const trimmed = commentText.trim();
-		if (!trimmed) return;
-		onAddComment(filePath, selectedRange, trimmed, 'diff');
-		setCommentText('');
-		setSelectedRange(null);
-	};
+  const handleAddComment = () => {
+    if (!onAddComment || !selectedRange) return;
+    const trimmed = commentText.trim();
+    if (!trimmed) return;
+    onAddComment(filePath, selectedRange, trimmed, "diff");
+    setCommentText("");
+    setSelectedRange(null);
+  };
 
-	return (
-		<div className="px-3 py-2">
-			<div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)] group">
-				<span className="font-mono text-[10px] text-[var(--muted-foreground)]">edit</span>
-				<span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
-				<span className="ml-auto" />
-				<CopyButton text={diffText} label="Copy diff" />
-			</div>
-			<div className="rounded-md border border-[var(--border)] overflow-hidden max-h-72 overflow-y-auto overflow-x-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
-				{diffData ? (
-					<PierreDiff
-						fileDiff={diffData}
-						selectedLines={selectedRange}
-						lineAnnotations={annotations}
-						renderAnnotation={(annotation) => (
-							<div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
-								{annotation.metadata?.comment ?? 'Comment'}
-							</div>
-						)}
-						options={{
-							theme: { dark: 'github-dark', light: 'github-light' },
-							themeType: 'system',
-							disableFileHeader: true,
-							diffStyle: 'unified',
-							diffIndicators: 'bars',
-							enableLineSelection: true,
-							onLineSelected: (range) => setSelectedRange(range),
-						}}
-					/>
-				) : (
-					<div className="px-2 py-1 text-xs text-[var(--muted-foreground)]">Unable to render diff</div>
-				)}
-			</div>
-			{onAddComment && selectedRange && (
-				<div className="mt-2 flex gap-2">
-					<input
-						value={commentText}
-						onChange={(event) => setCommentText(event.target.value)}
-						placeholder="Add a comment"
-						className="flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
-					/>
-					<Button size="sm" variant="secondary" className="h-7 text-xs" onClick={handleAddComment}>
-						Add
-					</Button>
-				</div>
-			)}
-		</div>
-	);
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)] group">
+        <span className="font-mono text-[10px] text-[var(--muted-foreground)]">
+          edit
+        </span>
+        <span className="font-mono truncate" title={filePath}>
+          {shortenPath(filePath)}
+        </span>
+        <span className="ml-auto" />
+        <CopyButton text={diffText} label="Copy diff" />
+      </div>
+      <div className="rounded-md border border-[var(--border)] overflow-hidden max-h-72 overflow-y-auto overflow-x-auto [&_pre]:!text-[11px] [&_pre]:!leading-[1.6]">
+        {diffData ? (
+          <PierreDiff
+            fileDiff={diffData}
+            selectedLines={selectedRange}
+            lineAnnotations={annotations}
+            renderAnnotation={(annotation) => (
+              <div className="rounded bg-[var(--accent)] px-2 py-1 text-[10px] text-[var(--foreground)] shadow-sm">
+                {annotation.metadata?.comment ?? "Comment"}
+              </div>
+            )}
+            options={{
+              theme: { dark: "github-dark", light: "github-light" },
+              themeType: "system",
+              disableFileHeader: true,
+              diffStyle: "unified",
+              diffIndicators: "bars",
+              enableLineSelection: true,
+              onLineSelected: (range) => setSelectedRange(range),
+            }}
+          />
+        ) : (
+          <div className="px-2 py-1 text-xs text-[var(--muted-foreground)]">
+            Unable to render diff
+          </div>
+        )}
+      </div>
+      {onAddComment && selectedRange && (
+        <div className="mt-2 flex gap-2">
+          <input
+            value={commentText}
+            onChange={(event) => setCommentText(event.target.value)}
+            placeholder="Add a comment"
+            className="flex-1 rounded border border-[var(--border)] bg-[var(--background)] px-2 py-1 text-xs"
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            className="h-7 text-xs"
+            onClick={handleAddComment}
+          >
+            Add
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function BashView({ command, output }: { command: string; output?: string }) {
@@ -321,7 +782,9 @@ function BashView({ command, output }: { command: string; output?: string }) {
     <div className="px-3 py-2 space-y-2">
       {/* Command */}
       <div className="rounded-md bg-[var(--muted)] border border-[var(--border)] px-3 py-2 font-mono text-xs text-green-400 dark:text-green-400 whitespace-pre-wrap break-all">
-        <span className="select-none text-[var(--muted-foreground)] mr-1">$</span>
+        <span className="select-none text-[var(--muted-foreground)] mr-1">
+          $
+        </span>
         {command}
       </div>
       {/* Output */}
@@ -341,117 +804,142 @@ function BashView({ command, output }: { command: string; output?: string }) {
 }
 
 function FileListView({ title, output }: { title: string; output?: string }) {
-	const items = output ? output.split('\n').filter(Boolean) : [];
-	return (
-		<div className="px-3 py-2">
-			<div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-2">{title}</div>
-			{items.length === 0 ? (
-				<div className="text-xs text-[var(--muted-foreground)]">No results</div>
-			) : (
-				<ul className="space-y-1 text-xs text-[var(--foreground)] pl-1">
-					{items.map((item) => (
-						<li key={item} className="font-mono truncate" title={item}>{item}</li>
-					))}
-				</ul>
-			)}
-		</div>
-	);
+  const items = output ? output.split("\n").filter(Boolean) : [];
+  return (
+    <div className="px-3 py-2">
+      <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-2">
+        {title}
+      </div>
+      {items.length === 0 ? (
+        <div className="text-xs text-[var(--muted-foreground)]">No results</div>
+      ) : (
+        <ul className="space-y-1 text-xs text-[var(--foreground)] pl-1">
+          {items.map((item) => (
+            <li key={item} className="font-mono truncate" title={item}>
+              {item}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
 }
 
 function WebFetchView({ url, output }: { url: string; output?: string }) {
-	const preview = output ? output.slice(0, 400) : '';
-	return (
-		<div className="px-3 py-2">
-			<div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-2">WebFetch</div>
-			<div className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-1 text-xs font-mono text-[var(--foreground)] break-all">
-				{url}
-			</div>
-			{preview && (
-				<div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-xs text-[var(--foreground)] whitespace-pre-wrap max-h-48 overflow-auto">
-					{preview}
-					{output && output.length > preview.length ? '…' : ''}
-				</div>
-			)}
-		</div>
-	);
+  const preview = output ? output.slice(0, 400) : "";
+  return (
+    <div className="px-3 py-2">
+      <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-2">
+        WebFetch
+      </div>
+      <div className="rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-1 text-xs font-mono text-[var(--foreground)] break-all">
+        {url}
+      </div>
+      {preview && (
+        <div className="mt-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-2 py-2 text-xs text-[var(--foreground)] whitespace-pre-wrap max-h-48 overflow-auto">
+          {preview}
+          {output && output.length > preview.length ? "…" : ""}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function WriteView({
-	filePath,
-	content,
-	output,
-	onAddComment,
-	comments,
+  filePath,
+  content,
+  output,
+  onAddComment,
+  comments,
 }: {
-	filePath: string;
-	content: string;
-	output?: string;
-	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
-	comments?: CodeComment[];
+  filePath: string;
+  content: string;
+  output?: string;
+  onAddComment?: (
+    file: string,
+    selection: SelectedLineRange,
+    comment: string,
+    origin: "diff" | "file",
+  ) => void;
+  comments?: CodeComment[];
 }) {
-	const lines = content.split('\n');
+  const lines = content.split("\n");
 
-	return (
-		<div className="px-3 py-2">
-			<div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)] group">
-				<span>📄</span>
-				<span className="font-mono truncate" title={filePath}>{shortenPath(filePath)}</span>
-				<div className="ml-auto flex items-center gap-2 text-[10px]">
-					<span>{lines.length} lines</span>
-					<CopyButton text={content} label="Copy file" />
-				</div>
-			</div>
-			<CodeWithComments
-				code={content}
-				filePath={filePath}
-				onAddComment={onAddComment}
-				comments={comments}
-			/>
-			{output && (
-				<div className="mt-2">
-					<div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">Output</div>
-					<pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-32 overflow-auto">
-						{output}
-					</pre>
-				</div>
-			)}
-		</div>
-	);
+  return (
+    <div className="px-3 py-2">
+      <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)] group">
+        <span>📄</span>
+        <span className="font-mono truncate" title={filePath}>
+          {shortenPath(filePath)}
+        </span>
+        <div className="ml-auto flex items-center gap-2 text-[10px]">
+          <span>{lines.length} lines</span>
+          <CopyButton text={content} label="Copy file" />
+        </div>
+      </div>
+      <CodeWithComments
+        code={content}
+        filePath={filePath}
+        onAddComment={onAddComment}
+        comments={comments}
+      />
+      {output && (
+        <div className="mt-2">
+          <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">
+            Output
+          </div>
+          <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-32 overflow-auto">
+            {output}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ReadView({
-	filePath,
-	output,
-	onAddComment,
-	comments,
+  filePath,
+  output,
+  onAddComment,
+  comments,
 }: {
-	filePath: string;
-	output?: string;
-	onAddComment?: (file: string, selection: SelectedLineRange, comment: string, origin: 'diff' | 'file') => void;
-	comments?: CodeComment[];
+  filePath: string;
+  output?: string;
+  onAddComment?: (
+    file: string,
+    selection: SelectedLineRange,
+    comment: string,
+    origin: "diff" | "file",
+  ) => void;
+  comments?: CodeComment[];
 }) {
-  const parsed = useMemo(() => (output ? parseFileOutput(output) : ''), [output]);
+  const parsed = useMemo(
+    () => (output ? parseFileOutput(output) : ""),
+    [output],
+  );
 
-	const lines = parsed.split('\n');
+  const lines = parsed.split("\n");
 
-	return (
+  return (
     <div className="px-3 py-2">
       <div className="flex items-center gap-1.5 mb-2 text-xs text-[var(--muted-foreground)] group">
         <span>📖</span>
-        <span className="font-mono truncate" title={filePath}>Read: {shortenPath(filePath)}</span>
+        <span className="font-mono truncate" title={filePath}>
+          Read: {shortenPath(filePath)}
+        </span>
         <div className="ml-auto flex items-center gap-2 text-[10px]">
           <span>{lines.length} lines</span>
           <CopyButton text={parsed} label="Copy read" />
         </div>
       </div>
-				{parsed && (
-					<CodeWithComments
-						code={parsed}
-						filePath={filePath}
-						onAddComment={onAddComment}
-						comments={comments}
-					/>
-				)}
+      {parsed && (
+        <CodeWithComments
+          code={parsed}
+          filePath={filePath}
+          onAddComment={onAddComment}
+          comments={comments}
+        />
+      )}
     </div>
   );
 }
@@ -463,16 +951,20 @@ function ReadView({
 function TodoView({ input, output }: { input?: string; output?: string }) {
   const data = useMemo(() => {
     try {
-      const raw = input || output || '{}';
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      const raw = input || output || "{}";
+      const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
       return parsed;
     } catch {
       return {};
     }
   }, [input, output]);
 
-  const todos: Array<{ id?: string; content?: string; status?: string; priority?: string }> =
-    data.todos || (Array.isArray(data) ? data : []);
+  const todos: Array<{
+    id?: string;
+    content?: string;
+    status?: string;
+    priority?: string;
+  }> = data.todos || (Array.isArray(data) ? data : []);
 
   if (todos.length === 0) {
     return (
@@ -486,23 +978,23 @@ function TodoView({ input, output }: { input?: string; output?: string }) {
     <div className="px-3 py-2 space-y-1">
       {todos.map((todo, idx) => (
         <div key={todo.id ?? idx} className="flex items-center gap-2 text-xs">
-          {todo.status === 'completed' ? (
+          {todo.status === "completed" ? (
             <CheckCircle2 className="h-3.5 w-3.5 text-green-500 shrink-0" />
-          ) : todo.status === 'in_progress' ? (
+          ) : todo.status === "in_progress" ? (
             <Loader2 className="h-3.5 w-3.5 text-blue-500 shrink-0 animate-spin" />
           ) : (
             <Circle className="h-3.5 w-3.5 text-[var(--muted-foreground)] shrink-0" />
           )}
           <span
             className={
-              todo.status === 'completed'
-                ? 'line-through text-[var(--muted-foreground)]'
-                : 'text-[var(--foreground)]'
+              todo.status === "completed"
+                ? "line-through text-[var(--muted-foreground)]"
+                : "text-[var(--foreground)]"
             }
           >
             {todo.content}
           </span>
-          {todo.priority === 'high' && (
+          {todo.priority === "high" && (
             <span className="text-[10px] font-medium text-red-500">HIGH</span>
           )}
         </div>
@@ -515,18 +1007,28 @@ function TodoView({ input, output }: { input?: string; output?: string }) {
 // Default JSON fallback (original behaviour)
 // ---------------------------------------------------------------------------
 
-function DefaultView({ input, output }: { input: Record<string, unknown>; output?: string }) {
+function DefaultView({
+  input,
+  output,
+}: {
+  input: Record<string, unknown>;
+  output?: string;
+}) {
   return (
     <>
       <div className="px-3 py-2">
-        <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">Input</div>
+        <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">
+          Input
+        </div>
         <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-48 overflow-auto">
           {JSON.stringify(input, null, 2)}
         </pre>
       </div>
       {output !== undefined && (
         <div className="border-t border-[var(--border)] px-3 py-2">
-          <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">Output</div>
+          <div className="text-[10px] font-medium uppercase text-[var(--muted-foreground)] mb-1">
+            Output
+          </div>
           <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-64 overflow-auto">
             {output}
           </pre>
@@ -541,149 +1043,452 @@ function DefaultView({ input, output }: { input: Record<string, unknown>; output
 // ---------------------------------------------------------------------------
 
 export const ToolCallCard = React.memo(function ToolCallCard({
-	part,
-	onAddComment,
-	getDiffAnnotations,
-	getFileComments,
-	sources = [],
+  part,
+  onAddComment,
+  getDiffAnnotations,
+  getFileComments,
+  sources = [],
+  sessionId,
+  archived,
+  childSessions,
+  fetchChildData,
+  getChildMessages,
+  getChildPartsForMessage,
+  getChildStatus,
+  liveChildSessionIds,
 }: ToolCallCardProps) {
-	const title = ('title' in part.state && part.state.title) ? part.state.title : getToolDisplayName(part.tool);
-	const duration = ('time' in part.state && part.state.time && 'end' in part.state.time)
-		? (((part.state.time as { start: number; end: number }).end - part.state.time.start) / 1000).toFixed(1)
-		: null;
+  const title =
+    "title" in part.state && part.state.title
+      ? part.state.title
+      : getToolDisplayName(part.tool);
+  const duration =
+    "time" in part.state && part.state.time && "end" in part.state.time
+      ? (
+          ((part.state.time as { start: number; end: number }).end -
+            part.state.time.start) /
+          1000
+        ).toFixed(1)
+      : null;
 
   const input = part.state.input;
-  const output = 'output' in part.state ? part.state.output : undefined;
+  const output = "output" in part.state ? part.state.output : undefined;
 
-	const toolState: ToolState = part.state.status === 'running'
-		? 'partial-call'
-		: part.state.status === 'pending'
-			? 'call'
-			: 'result';
-	const toolStatus = part.state.status as ToolStatus;
+  const toolState: ToolState =
+    part.state.status === "running"
+      ? "partial-call"
+      : part.state.status === "pending"
+        ? "call"
+        : "result";
+  const toolStatus = part.state.status as ToolStatus;
 
-	// Determine which specialised view to use
-	function renderBody() {
-		if (isEditTool(input)) {
-			return (
-				<>
-					<DiffView
-						filePath={input.filePath}
-						oldString={input.oldString}
-						newString={input.newString}
-						onAddComment={onAddComment}
-						annotations={getDiffAnnotations?.(input.filePath)}
-					/>
-					{output && (
-						<div className="border-t border-[var(--border)] px-3 py-1">
-							<span className="font-mono text-[10px] text-green-500">{output}</span>
-						</div>
-					)}
-				</>
-			);
-		}
+  // Determine which specialised view to use
+  function renderBody() {
+    if (isEditTool(input)) {
+      return (
+        <>
+          <DiffView
+            filePath={input.filePath}
+            oldString={input.oldString}
+            newString={input.newString}
+            onAddComment={onAddComment}
+            annotations={getDiffAnnotations?.(input.filePath)}
+          />
+          {output && (
+            <div className="border-t border-[var(--border)] px-3 py-1">
+              <span className="font-mono text-[10px] text-green-500">
+                {output}
+              </span>
+            </div>
+          )}
+        </>
+      );
+    }
 
-		if (isBashTool(input)) {
-			if (isGitCommand(input.command)) {
-				const gitInfo = parseGitCommitInfo(input.command, output);
-				return (
-					<div className="px-3 py-2 space-y-2">
-						<Commit message={gitInfo.message} hash={gitInfo.hash} files={gitInfo.files} />
-						{output && (
-							<pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-48 overflow-auto">
-								{output}
-							</pre>
-						)}
-					</div>
-				);
-			}
-			return <BashView command={input.command} output={output} />;
-		}
+    if (isBashTool(input)) {
+      if (isGitCommand(input.command)) {
+        const gitInfo = parseGitCommitInfo(input.command, output);
+        return (
+          <div className="px-3 py-2 space-y-2">
+            <Commit
+              message={gitInfo.message}
+              hash={gitInfo.hash}
+              files={gitInfo.files}
+            />
+            {output && (
+              <pre className="whitespace-pre-wrap font-mono text-xs text-[var(--foreground)] max-h-48 overflow-auto">
+                {output}
+              </pre>
+            )}
+          </div>
+        );
+      }
+      return <BashView command={input.command} output={output} />;
+    }
 
-		if (isWriteTool(input)) {
-			return (
-				<WriteView
-					filePath={input.filePath}
-					content={input.content}
-					output={output}
-					onAddComment={onAddComment}
-					comments={getFileComments?.(input.filePath)}
-				/>
-			);
-		}
+    if (isWriteTool(input)) {
+      return (
+        <WriteView
+          filePath={input.filePath}
+          content={input.content}
+          output={output}
+          onAddComment={onAddComment}
+          comments={getFileComments?.(input.filePath)}
+        />
+      );
+    }
 
-		if (isReadTool(input)) {
-			return (
-				<ReadView
-					filePath={input.filePath}
-					output={output}
-					onAddComment={onAddComment}
-					comments={getFileComments?.(input.filePath)}
-				/>
-			);
-		}
+    if (isReadTool(input)) {
+      return (
+        <ReadView
+          filePath={input.filePath}
+          output={output}
+          onAddComment={onAddComment}
+          comments={getFileComments?.(input.filePath)}
+        />
+      );
+    }
 
-		if (part.tool === 'glob' || part.tool === 'grep') {
-			return <FileListView title={part.tool.toUpperCase()} output={output} />;
-		}
+    if (part.tool === "glob" || part.tool === "grep") {
+      return <FileListView title={part.tool.toUpperCase()} output={output} />;
+    }
 
-		if (part.tool === 'webfetch' && isWebFetchTool(input)) {
-			return <WebFetchView url={input.url} output={output} />;
-		}
+    if (part.tool === "webfetch" && isWebFetchTool(input)) {
+      return <WebFetchView url={input.url} output={output} />;
+    }
 
-		if (part.tool === 'task' && isAgentInvocation(input)) {
-			return <AgentInvocationView input={input} />;
-		}
+    // Background task output/inspect/cancel — structured status view
+    if (BG_STATUS_TOOLS.has(part.tool)) {
+      return (
+        <BackgroundOutputView
+          tool={part.tool}
+          input={input}
+          output={output}
+          status={part.state.status}
+          childSessions={childSessions}
+          sessionId={sessionId}
+          fetchChildData={
+            fetchChildData as
+              | ((
+                  childId: string,
+                ) => Promise<
+                  import("../../hooks/useChildSessions").ChildSessionData | null
+                >)
+              | undefined
+          }
+          getChildMessages={getChildMessages}
+          getChildPartsForMessage={getChildPartsForMessage}
+          getChildStatus={getChildStatus}
+          liveChildSessionIds={liveChildSessionIds}
+          archived={archived}
+        />
+      );
+    }
 
-		// Todo tool — render styled checklist instead of raw JSON
-		if (part.tool === 'todowrite' || part.tool === 'TodoWrite' || part.tool === 'todo_write') {
-			return <TodoView input={JSON.stringify(input)} output={output} />;
-		}
+    if (SUB_AGENT_TOOLS.has(part.tool) && isAgentInvocation(input)) {
+      return <AgentInvocationView input={input} />;
+    }
 
-		// Fallback: raw JSON (original behaviour)
-		return (
-			<>
-				<ToolInput input={input} />
-				{part.state.status === 'completed' && (
-					<ToolOutput output={output} />
-				)}
-			</>
-		);
-	}
+    // Todo tool — render styled checklist instead of raw JSON
+    if (
+      part.tool === "todowrite" ||
+      part.tool === "TodoWrite" ||
+      part.tool === "todo_write"
+    ) {
+      return <TodoView input={JSON.stringify(input)} output={output} />;
+    }
 
-	const isEdit = isEditTool(input);
-	const isWrite = isWriteTool(input);
-	const isMutationByName = ['edit', 'write', 'create', 'patch', 'multi_edit'].includes(part.tool?.toLowerCase() ?? '');
-	const shouldOpen = part.state.status === 'error' || isEdit || isWrite || isMutationByName;
-	const agentTitle = part.tool === 'task' && isAgentInvocation(input)
-		? `Agent · ${getAgentBadge(input.subagent_type)}`
-		: title;
+    // Fallback: raw JSON (original behaviour)
+    return (
+      <>
+        <ToolInput input={input} />
+        {part.state.status === "completed" && <ToolOutput output={output} />}
+      </>
+    );
+  }
 
-	return (
-		<Tool defaultOpen={shouldOpen}>
-			<ToolHeader
-				meta={duration ? `${duration}s` : undefined}
-				state={toolState}
-				status={toolStatus}
-				title={agentTitle}
-				type={`tool-${part.tool}`}
-			/>
-			<ToolContent className="border-t border-[var(--border)] bg-[var(--muted)]">
-				{renderBody()}
-				{part.state.status === 'error' && (
-					<div className="border-t border-[var(--border)] px-3 py-2">
-						<div className="mb-1 text-[10px] font-medium uppercase text-red-500">Error</div>
-						<pre className="whitespace-pre-wrap font-mono text-xs text-red-400">
-							{part.state.error}
-						</pre>
-					</div>
-				)}
-				{sources.length > 0 && (
-					<div className="border-t border-[var(--border)]">
-						<SourcesView sources={sources} />
-					</div>
-				)}
-			</ToolContent>
-		</Tool>
-	);
+  const isEdit = isEditTool(input);
+  const isWrite = isWriteTool(input);
+  const isMutationByName = [
+    "edit",
+    "write",
+    "create",
+    "patch",
+    "multi_edit",
+  ].includes(part.tool?.toLowerCase() ?? "");
+  const shouldOpen =
+    part.state.status === "error" || isEdit || isWrite || isMutationByName;
+  const agentTitle = useMemo(() => {
+    if (SUB_AGENT_TOOLS.has(part.tool) && isAgentInvocation(input)) {
+      return `Agent \u00b7 ${getAgentBadge(getAgentName(input))}`;
+    }
+    if (BG_STATUS_TOOLS.has(part.tool)) {
+      const taskId = (input.task_id as string) ?? (input.taskId as string);
+      return taskId ? `Background Task \u00b7 ${taskId}` : "Background Task";
+    }
+    return title;
+  }, [part.tool, input, title]);
+
+  // Sub-agent inspection: detect if this tool call creates a child session
+  const isSubAgentTool = SUB_AGENT_TOOLS.has(part.tool);
+  const [inspectOpen, setInspectOpen] = useState(false);
+
+  // Try to find the matching child session from the provided list.
+  // For "task" tools, the output often contains a task_id that maps to the child session.
+  // For background tasks, match by description or agent type.
+  const matchedChild = useMemo(() => {
+    if (!isSubAgentTool || !childSessions || childSessions.length === 0)
+      return null;
+
+    // Try to extract task_id from the tool output
+    if (output) {
+      try {
+        const parsed = typeof output === "string" ? JSON.parse(output) : output;
+        const outputId = parsed?.task_id ?? parsed?.taskId;
+        if (outputId) {
+          const match = childSessions.find(
+            (c) => c.opencodeSessionId === outputId || c.id === outputId,
+          );
+          if (match) return match;
+
+          // Also match background tasks by taskId embedded in child session title
+          // (SDK stores JSON metadata as session title for background tasks)
+          const titleMatch = childSessions.find((c) => {
+            if (!c.title) return false;
+            try {
+              const titleData = JSON.parse(c.title);
+              return titleData?.taskId === outputId;
+            } catch {
+              return false;
+            }
+          });
+          if (titleMatch) return titleMatch;
+        }
+      } catch {
+        // Output might not be JSON — that's fine
+      }
+    }
+
+    // Match by agent type from input
+    if (isAgentInvocation(input)) {
+      const agentType = getAgentName(input).toLowerCase();
+      const desc = (input.description as string) ?? "";
+      // Find a child whose title or metadata matches
+      const match = childSessions.find((c) => {
+        const childTitle = (c.title ?? "").toLowerCase();
+        const childMeta = c.metadata as Record<string, unknown> | null;
+        const childAgent = ((childMeta?.agent as string) ?? "").toLowerCase();
+        return (
+          childTitle.includes(agentType) ||
+          childAgent.includes(agentType) ||
+          (desc && childTitle.includes(desc.toLowerCase().slice(0, 20)))
+        );
+      });
+      if (match) return match;
+    }
+
+    // Fallback: if there's only one child and one sub-agent tool, assume they match
+    return null;
+  }, [isSubAgentTool, childSessions, output, input]);
+
+  // Build enhanced meta string for sub-agent tools with matched child data
+  const headerMeta = useMemo(() => {
+    const parts: string[] = [];
+    if (duration) parts.push(`${duration}s`);
+    if (isSubAgentTool && matchedChild) {
+      if (matchedChild.messageCount > 0) {
+        parts.push(
+          `${matchedChild.messageCount} msg${matchedChild.messageCount !== 1 ? "s" : ""}`,
+        );
+      }
+      const cost = formatCost(matchedChild.totalCost);
+      if (cost) parts.push(cost);
+    }
+    return parts.length > 0 ? parts.join(" · ") : undefined;
+  }, [duration, isSubAgentTool, matchedChild]);
+
+  return (
+    <Tool defaultOpen={shouldOpen}>
+      <ToolHeader
+        meta={headerMeta}
+        state={toolState}
+        status={toolStatus}
+        title={agentTitle}
+        type={`tool-${part.tool}`}
+      />
+      <ToolContent className="border-t border-[var(--border)] bg-[var(--muted)]">
+        {renderBody()}
+        {/* Sub-agent inspection button + modal dialog */}
+        {isSubAgentTool && sessionId && matchedChild && (
+          <div className="border-t border-[var(--border)] px-3 py-2">
+            <button
+              type="button"
+              onClick={() => setInspectOpen(true)}
+              className="flex items-center gap-1.5 text-[10px] font-medium text-[var(--primary)] hover:underline w-full text-left"
+            >
+              <Bot className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {cleanChildTitle(matchedChild.title) || "Inspect Agent Session"}
+              </span>
+              {matchedChild.messageCount > 0 && (
+                <span className="flex items-center gap-0.5 text-[var(--muted-foreground)] font-normal shrink-0">
+                  <MessageSquare className="h-2.5 w-2.5" />
+                  {matchedChild.messageCount}
+                </span>
+              )}
+              {matchedChild.totalCost > 0 && (
+                <span className="text-[var(--muted-foreground)] font-normal shrink-0">
+                  {formatCost(matchedChild.totalCost)}
+                </span>
+              )}
+              {liveChildSessionIds?.has(matchedChild.opencodeSessionId) &&
+                getChildStatus?.(matchedChild.opencodeSessionId)?.type ===
+                  "busy" && (
+                  <span className="text-[9px] text-green-400 font-normal animate-pulse shrink-0">
+                    ● Live
+                  </span>
+                )}
+            </button>
+
+            <Dialog open={inspectOpen} onOpenChange={setInspectOpen}>
+              <DialogContent className="max-w-5xl w-[90vw] h-[85vh] flex flex-col p-0 gap-0">
+                <DialogHeader className="px-6 py-4 border-b border-[var(--border)] shrink-0">
+                  <div className="flex items-center gap-3">
+                    <Bot className="h-5 w-5 text-[var(--primary)]" />
+                    <div className="flex-1 min-w-0">
+                      <DialogTitle className="text-base">
+                        {cleanChildTitle(matchedChild.title, 100) ||
+                          "Sub-Agent Session"}
+                      </DialogTitle>
+                      <DialogDescription asChild>
+                        <div className="flex items-center gap-3 mt-1 text-sm text-[var(--muted-foreground)]">
+                          <Badge variant="secondary" className="text-[10px]">
+                            {isAgentInvocation(input)
+                              ? getAgentBadge(getAgentName(input))
+                              : "Agent"}
+                          </Badge>
+                          {matchedChild.messageCount > 0 && (
+                            <span className="flex items-center gap-1 text-xs">
+                              <MessageSquare className="h-3 w-3" />{" "}
+                              {matchedChild.messageCount} messages
+                            </span>
+                          )}
+                          {matchedChild.totalCost > 0 && (
+                            <span className="text-xs">
+                              {formatCost(matchedChild.totalCost)}
+                            </span>
+                          )}
+                          {matchedChild.totalTokens > 0 && (
+                            <span className="text-xs">
+                              {matchedChild.totalTokens > 1000
+                                ? `${(matchedChild.totalTokens / 1000).toFixed(1)}k tokens`
+                                : `${matchedChild.totalTokens} tokens`}
+                            </span>
+                          )}
+                        </div>
+                      </DialogDescription>
+                    </div>
+                  </div>
+                </DialogHeader>
+                <div className="flex-1 overflow-y-auto px-6 py-4">
+                  <ChildSessionView
+                    childSessionId={matchedChild.id}
+                    parentSessionId={sessionId}
+                    agentName={
+                      isAgentInvocation(input) ? getAgentName(input) : undefined
+                    }
+                    description={
+                      isAgentInvocation(input)
+                        ? (input.description as string)
+                        : undefined
+                    }
+                    archived={archived}
+                    fetchChildData={
+                      fetchChildData as
+                        | ((
+                            childId: string,
+                          ) => Promise<
+                            | import("../../hooks/useChildSessions").ChildSessionData
+                            | null
+                          >)
+                        | undefined
+                    }
+                    liveMessages={
+                      getChildMessages
+                        ? getChildMessages(matchedChild.opencodeSessionId)
+                        : undefined
+                    }
+                    liveGetParts={
+                      getChildPartsForMessage
+                        ? (messageID: string) =>
+                            getChildPartsForMessage(
+                              matchedChild.opencodeSessionId,
+                              messageID,
+                            )
+                        : undefined
+                    }
+                    liveStatus={
+                      getChildStatus
+                        ? getChildStatus(matchedChild.opencodeSessionId)
+                        : undefined
+                    }
+                    isModal={true}
+                  />
+                </div>
+              </DialogContent>
+            </Dialog>
+          </div>
+        )}
+        {/* Show a richer fallback for sub-agent tools without matched children */}
+        {isSubAgentTool &&
+          sessionId &&
+          !matchedChild &&
+          !isAgentInvocation(input) && (
+            <div className="border-t border-[var(--border)] px-3 py-2">
+              <div className="flex items-center gap-1.5 text-[10px] text-[var(--muted-foreground)]">
+                <Bot className="h-3 w-3 shrink-0" />
+                {isAgentInvocation(input) ? (
+                  <>
+                    <Badge
+                      variant="secondary"
+                      className="text-[9px] px-1.5 py-0"
+                    >
+                      {getAgentBadge(getAgentName(input))}
+                    </Badge>
+                    {input.description && (
+                      <span className="truncate">
+                        {String(input.description).slice(0, 60)}
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span>Sub-agent task</span>
+                )}
+                <span className="ml-auto italic shrink-0">
+                  {childSessions && childSessions.length > 0
+                    ? "Session not matched"
+                    : toolStatus === "running"
+                      ? "Awaiting session data…"
+                      : "No session data"}
+                </span>
+              </div>
+            </div>
+          )}
+        {part.state.status === "error" && (
+          <div className="border-t border-[var(--border)] px-3 py-2">
+            <div className="mb-1 text-[10px] font-medium uppercase text-red-500">
+              Error
+            </div>
+            <pre className="whitespace-pre-wrap font-mono text-xs text-red-400">
+              {part.state.error}
+            </pre>
+          </div>
+        )}
+        {sources.length > 0 && (
+          <div className="border-t border-[var(--border)]">
+            <SourcesView sources={sources} />
+          </div>
+        )}
+      </ToolContent>
+    </Tool>
+  );
 });
