@@ -38,7 +38,6 @@ interface SidebarProps {
   sessions: Session[];
   sessionsLoading?: boolean;
   activeSessionId?: string;
-  onNewSession: () => void;
   onFlagSession?: (id: string, flagged: boolean) => void | Promise<void>;
   onRetrySession?: (id: string) => void | Promise<void>;
   onDeleteSession?: (id: string) => void | Promise<void>;
@@ -128,7 +127,6 @@ export function Sidebar({
   sessions,
   sessionsLoading,
   activeSessionId,
-  onNewSession,
   onFlagSession,
   onRetrySession,
   onDeleteSession,
@@ -173,7 +171,7 @@ export function Sidebar({
 
   const handleNewSession = () => {
     track("sidebar_new_session_clicked");
-    onNewSession();
+    navigate({ to: "/" });
   };
 
   const handleSessionSelect = (id: string) => {
@@ -318,13 +316,14 @@ export function Sidebar({
             onClick={handleNewSession}
             className="w-full"
             size="icon"
+            variant="outline"
             title="New Session"
             aria-label="New Session"
           >
             <Plus className="h-4 w-4" />
           </Button>
         ) : (
-          <Button onClick={handleNewSession} className="w-full" size="sm">
+          <Button onClick={handleNewSession} className="w-full" size="sm" variant="outline">
             <Plus className="mr-2 h-4 w-4" />
             New Session
           </Button>

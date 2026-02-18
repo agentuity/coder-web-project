@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from '@tanstack/react-router';
-import { Code2, MessageSquare, Clock, Camera, GitBranch, Loader2, ChevronDown } from 'lucide-react';
+import { Code2, MessageSquare, Clock, Camera, GitBranch, Loader2, ChevronDown, X, Link } from 'lucide-react';
 import { useTrackOnMount, useAPI } from '@agentuity/react';
 import {
 	PromptInput,
@@ -50,6 +50,10 @@ export function WorkspacePage() {
 	const [prompt, setPrompt] = useState('');
 	const [selectedCommand, setSelectedCommand] = useState('');
 	const [selectedModel, setSelectedModel] = useState('anthropic/claude-sonnet-4-5');
+
+	// Repo URL input state
+	const [repoUrl, setRepoUrl] = useState('');
+	const [repoBranch, setRepoBranch] = useState('');
 
 	// Repo & snapshot selection state
 	const [repoSearch, setRepoSearch] = useState('');
@@ -140,16 +144,18 @@ export function WorkspacePage() {
 
 	const handleSubmit = (text: string) => {
 		const trimmed = text.trim();
-		if (!trimmed && !selectedRepo && !selectedSnapshot) return;
+		if (!trimmed && !selectedRepo && !selectedSnapshot && !repoUrl) return;
 		void handleNewSession({
 			prompt: trimmed || undefined,
-			repoUrl: selectedRepo?.cloneUrl || undefined,
-			branch: selectedRepo ? (selectedBranch || selectedRepo.defaultBranch || undefined) : undefined,
+			repoUrl: repoUrl || selectedRepo?.cloneUrl || undefined,
+			branch: repoUrl ? (repoBranch || undefined) : (selectedRepo ? (selectedBranch || selectedRepo.defaultBranch || undefined) : undefined),
 			snapshotId: selectedSnapshot?.id || undefined,
 			agent: selectedCommand || undefined,
 			model: selectedModel || undefined,
 		});
 		setPrompt('');
+		setRepoUrl('');
+		setRepoBranch('');
 		setSelectedRepo(null);
 		setSelectedBranch('');
 		setRepoSearch('');
@@ -181,7 +187,7 @@ export function WorkspacePage() {
 								<ModelSelector value={selectedModel} onChange={setSelectedModel} disabled={selectedCommand === '/agentuity-coder' || selectedCommand === '/agentuity-cadence'} />
 							</div>
 							<PromptInputSubmit
-								disabled={!prompt.trim() && !selectedRepo && !selectedSnapshot}
+								disabled={!prompt.trim() && !selectedRepo && !selectedSnapshot && !repoUrl}
 								status="ready"
 							/>
 						</PromptInputFooter>
@@ -197,7 +203,7 @@ export function WorkspacePage() {
 				>
 					<ChevronDown className={cn('h-3 w-3 transition-transform', showOptions && 'rotate-180')} />
 					Session options
-					{(selectedRepo || selectedSnapshot) && (
+					{(selectedRepo || selectedSnapshot || repoUrl) && (
 						<span className="rounded-full bg-[var(--primary)] h-1.5 w-1.5" />
 					)}
 				</button>
@@ -284,11 +290,57 @@ export function WorkspacePage() {
 							</div>
 						)}
 
-						{!githubAvailable && (
-							<div className="text-xs text-[var(--muted-foreground)]">
-								Connect GitHub in <button type="button" onClick={() => navigate({ to: '/profile' })} className="text-[var(--primary)] hover:underline">Profile settings</button> to enable repository selection.
+						{/* Repo URL input */}
+						{githubAvailable && (
+							<div className="flex items-center gap-2 text-[10px] text-[var(--muted-foreground)]">
+								<div className="flex-1 border-t border-[var(--border)]" />
+								<span>or enter a URL</span>
+								<div className="flex-1 border-t border-[var(--border)]" />
 							</div>
 						)}
+						{!githubAvailable && (
+							<div className="space-y-2">
+								<div className="text-xs text-[var(--muted-foreground)]">
+									Connect GitHub in <button type="button" onClick={() => navigate({ to: '/profile' })} className="text-[var(--primary)] hover:underline">Profile settings</button> to enable repository selection, or enter a URL below.
+								</div>
+								<div className="flex items-center gap-2">
+									<Link className="h-3.5 w-3.5 text-[var(--muted-foreground)]" />
+									<span className="text-xs font-medium text-[var(--foreground)]">Repository URL</span>
+								</div>
+							</div>
+						)}
+						<div className="flex items-center gap-2">
+							<Input
+								type="url"
+								placeholder="https://github.com/owner/repo"
+								value={repoUrl}
+								onChange={(e) => {
+									setRepoUrl(e.target.value);
+									if (e.target.value) {
+										setSelectedRepo(null);
+										setSelectedBranch('');
+										setRepoSearch('');
+									}
+								}}
+								className="flex-1 h-8 text-xs"
+							/>
+							<Input
+								type="text"
+								placeholder="Branch"
+								value={repoBranch}
+								onChange={(e) => setRepoBranch(e.target.value)}
+								className="w-24 h-8 text-xs"
+							/>
+							{repoUrl && (
+								<button
+									type="button"
+									onClick={() => { setRepoUrl(''); setRepoBranch(''); }}
+									className="text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+								>
+									<X className="h-3.5 w-3.5" />
+								</button>
+							)}
+						</div>
 
 						{/* Snapshot Selector */}
 						{workspaceId && (
@@ -344,13 +396,20 @@ export function WorkspacePage() {
 				)}
 
 				{/* Selected indicators when collapsed */}
-				{!showOptions && (selectedRepo || selectedSnapshot) && (
+				{!showOptions && (selectedRepo || selectedSnapshot || repoUrl) && (
 					<div className="flex flex-wrap gap-2">
 						{selectedRepo && (
 							<span className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-0.5 text-[10px] text-[var(--foreground)]">
 								<GitBranch className="h-2.5 w-2.5" />
 								{selectedRepo.fullName}
 								{selectedBranch && selectedBranch !== selectedRepo.defaultBranch && ` \u2192 ${selectedBranch}`}
+							</span>
+						)}
+						{repoUrl && !selectedRepo && (
+							<span className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-[var(--muted)] px-2 py-0.5 text-[10px] text-[var(--foreground)]">
+								<Link className="h-2.5 w-2.5" />
+								{repoUrl}
+								{repoBranch && ` \u2192 ${repoBranch}`}
 							</span>
 						)}
 						{selectedSnapshot && (

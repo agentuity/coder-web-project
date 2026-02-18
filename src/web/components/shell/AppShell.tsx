@@ -16,7 +16,6 @@ export function AppShell() {
     activeSessionId,
     theme,
     handleToggleTheme,
-    openNewSessionDialog,
     handleFlagSession,
     handleRetrySession,
     handleDeleteSession,
@@ -27,11 +26,6 @@ export function AppShell() {
     closeSidebar,
     openShortcutsHelp,
   } = useAppContext();
-
-  const handleNewSession = useCallback(() => {
-    openNewSessionDialog();
-    closeSidebar();
-  }, [openNewSessionDialog, closeSidebar]);
 
   const handleToggleSidebar = useCallback(() => {
     toggleSidebarOpen();
@@ -52,7 +46,6 @@ export function AppShell() {
         sessions={sessions}
         sessionsLoading={sessionsLoading}
         activeSessionId={activeSessionId}
-        onNewSession={handleNewSession}
         onFlagSession={handleFlagSession}
         onRetrySession={handleRetrySession}
         onDeleteSession={handleDeleteSession}

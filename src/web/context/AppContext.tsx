@@ -48,7 +48,6 @@ interface AppContextValue {
   theme: "light" | "dark";
   activeSessionId?: string;
   currentPage: string;
-  showNewDialog: boolean;
   isCreating: boolean;
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -64,8 +63,6 @@ interface AppContextValue {
   toggleSidebarCollapse: () => void;
   toggleSidebarOpen: () => void;
   closeSidebar: () => void;
-  openNewSessionDialog: () => void;
-  closeNewSessionDialog: () => void;
   handleNewSession: (data: NewSessionPayload) => Promise<void>;
   handleQuickSession: (
     prompt: string,
@@ -112,7 +109,6 @@ export function AppProvider({
 
   useAnalyticsIdentify({ name: userName, email: userEmail });
 
-  const [showNewDialog, setShowNewDialog] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [shortcutsHelpOpen, setShortcutsHelpOpen] = useState(false);
@@ -303,7 +299,6 @@ export function AppProvider({
           to: "/session/$sessionId",
           params: { sessionId: session.id },
         });
-        setShowNewDialog(false);
         track("session_created", {
           hasRepo: !!data.repoUrl,
           hasBranch: !!data.branch,
@@ -421,8 +416,6 @@ export function AppProvider({
     [navigate],
   );
 
-  const openNewSessionDialog = useCallback(() => setShowNewDialog(true), []);
-  const closeNewSessionDialog = useCallback(() => setShowNewDialog(false), []);
   const openCommandPalette = useCallback(() => setCommandPaletteOpen(true), []);
   const closeCommandPalette = useCallback(
     () => setCommandPaletteOpen(false),
@@ -462,7 +455,6 @@ export function AppProvider({
       theme,
       activeSessionId,
       currentPage,
-      showNewDialog,
       isCreating,
       commandPaletteOpen,
       setCommandPaletteOpen,
@@ -478,8 +470,6 @@ export function AppProvider({
       toggleSidebarCollapse,
       toggleSidebarOpen,
       closeSidebar,
-      openNewSessionDialog,
-      closeNewSessionDialog,
       handleNewSession,
       handleQuickSession,
       handleForkedSession,
@@ -499,7 +489,6 @@ export function AppProvider({
       theme,
       activeSessionId,
       currentPage,
-      showNewDialog,
       isCreating,
       commandPaletteOpen,
       openCommandPalette,
@@ -514,8 +503,6 @@ export function AppProvider({
       toggleSidebarCollapse,
       toggleSidebarOpen,
       closeSidebar,
-      openNewSessionDialog,
-      closeNewSessionDialog,
       handleNewSession,
       handleQuickSession,
       handleForkedSession,
