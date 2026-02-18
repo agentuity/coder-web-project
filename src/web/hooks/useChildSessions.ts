@@ -82,6 +82,8 @@ export function useChildSessions(
   // biome-ignore lint/correctness/useExhaustiveDependencies: retryCounter triggers re-fetch after hasFetched ref is reset
   useEffect(() => {
     if (!sessionId || hasFetched.current) return;
+    // Don't fetch children while sandbox is still initializing (avoids 503)
+    if (sessionStatus === "creating") return;
 
     const controller = new AbortController();
     let isMounted = true;
@@ -118,7 +120,7 @@ export function useChildSessions(
       isMounted = false;
       controller.abort();
     };
-  }, [sessionId, archived, retryCounter]);
+  }, [sessionId, archived, retryCounter, sessionStatus]);
 
   /**
    * Fetch full messages/parts for a specific child session.
