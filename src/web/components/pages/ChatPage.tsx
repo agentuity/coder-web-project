@@ -17,6 +17,7 @@ import {
   MessageSquare,
   Paperclip,
   ExternalLink,
+  Info,
   RotateCcw,
   Terminal,
   WifiOff,
@@ -443,6 +444,7 @@ export function ChatPage({
   const [sandboxCopied, setSandboxCopied] = useState(false);
   const [attachCopied, setAttachCopied] = useState(false);
   const [passwordCopied, setPasswordCopied] = useState(false);
+
   const [opencodePassword, setOpencodePassword] = useState<string | null>(null);
   const [isDownloading, setIsDownloading] = useState(false);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
@@ -879,6 +881,9 @@ export function ChatPage({
   const attachCommand = session.sandboxUrl
     ? `opencode attach ${session.sandboxUrl}${opencodePassword ? ` --password ${opencodePassword}` : ""}`
     : "";
+  const sshHost = "ion-usc.agentuity.cloud";
+  const sshUser = session.sandboxId ?? "";
+
   const getDisplayParts = useCallback(
     (messageID: string) => {
       if (session.status === "terminated" || session.status === "deleted") {
@@ -1176,6 +1181,17 @@ export function ChatPage({
       toast({ type: "error", message: "Failed to copy password" });
     }
   }, [opencodePassword, toast]);
+
+  const handleOpenVscode = useCallback(() => {
+    const uri = `vscode://vscode-remote/ssh-remote+${sshUser}@${sshHost}/home/agentuity`;
+    window.open(uri, "_blank");
+  }, [sshUser]);
+
+  const handleOpenCursor = useCallback(() => {
+    const uri = `cursor://vscode-remote/ssh-remote+${sshUser}@${sshHost}/home/agentuity`;
+    window.open(uri, "_blank");
+  }, [sshUser]);
+
 
   const handleDownloadSandbox = useCallback(async () => {
     if (isDownloading || !sessionId) return;
@@ -2144,6 +2160,39 @@ export function ChatPage({
                           <Copy className="h-3.5 w-3.5" />
                         )}
                       </button>
+                    </div>
+                  </div>
+                   <div>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        VS Code Remote SSH
+                      </p>
+                      <span
+                        className="inline-flex"
+                        title="Requires Remote - SSH extension and an SSH key registered with: agentuity auth ssh add"
+                      >
+                        <Info className="h-3 w-3 text-[var(--muted-foreground)]" />
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1 flex-1"
+                        onClick={handleOpenVscode}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Open in VS Code
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs gap-1 flex-1"
+                        onClick={handleOpenCursor}
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                        Open in Cursor
+                      </Button>
                     </div>
                   </div>
                   {attachCommand && (
