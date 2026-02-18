@@ -3,7 +3,6 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 import type { CommandPaletteAction } from './components/CommandPalette';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsHelp } from './components/ShortcutsHelp';
-import { NewSessionDialog } from './components/sessions/NewSessionDialog';
 import { AppShell } from './components/shell/AppShell';
 import { useAppContext } from './context/AppContext';
 import { useAppShortcuts } from './hooks/useAppShortcuts';
@@ -11,12 +10,6 @@ import { useKeybindings } from './hooks/useKeybindings';
 
 export function AppLayout() {
   const {
-    showNewDialog,
-    closeNewSessionDialog,
-    handleNewSession,
-    isCreating,
-    githubAvailable,
-    workspaceId,
     sessions,
     activeSessionId,
     commandPaletteOpen,
@@ -25,7 +18,6 @@ export function AppLayout() {
     openShortcutsHelp,
     closeShortcutsHelp,
     shortcutsHelpOpen,
-    openNewSessionDialog,
     handleToggleTheme,
     toggleSidebar,
   } = useAppContext();
@@ -110,8 +102,8 @@ export function AppLayout() {
 
   const handleNewSessionShortcut = useCallback(() => {
     restoreFocusRef.current = false;
-    openNewSessionDialog();
-  }, [openNewSessionDialog]);
+    navigate({ to: '/' });
+  }, [navigate]);
 
   const handleOpenShortcutsHelp = useCallback(() => {
     restoreFocusRef.current = false;
@@ -249,14 +241,6 @@ export function AppLayout() {
         actions={paletteActions}
       />
       <ShortcutsHelp open={shortcutsHelpOpen} onOpenChange={(open) => (open ? openShortcutsHelp() : closeShortcutsHelp())} />
-      <NewSessionDialog
-        isOpen={showNewDialog}
-        onClose={closeNewSessionDialog}
-        onCreate={handleNewSession}
-        isCreating={isCreating}
-        githubAvailable={githubAvailable}
-        workspaceId={workspaceId ?? undefined}
-      />
     </>
   );
 }
