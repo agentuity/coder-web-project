@@ -9,8 +9,8 @@ const MODEL_GROUPS = [
     color: 'bg-[#d0a8ff]',
     models: [
       {
-        value: 'anthropic/claude-sonnet-4-5',
-        label: 'Claude Sonnet 4.5',
+        value: 'anthropic/claude-sonnet-4-6',
+        label: 'Claude Sonnet 4.6',
         capabilities: ['reasoning', 'code', 'vision'],
       },
       {

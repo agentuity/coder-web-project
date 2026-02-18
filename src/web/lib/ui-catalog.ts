@@ -1,5 +1,6 @@
 import { defineCatalog } from '@json-render/core';
 import { schema } from '@json-render/react';
+import { shadcnComponentDefinitions } from '@json-render/shadcn/catalog';
 import { z } from 'zod';
 
 const spacing = z.enum(['sm', 'md', 'lg']);
@@ -7,44 +8,58 @@ const align = z.enum(['start', 'center', 'end', 'stretch']);
 
 export const catalog = defineCatalog(schema, {
   components: {
-    Card: {
-      props: z.object({
-        title: z.string(),
-        description: z.string().optional(),
-        padding: spacing.optional(),
-        className: z.string().optional(),
-      }),
-      slots: ['default'],
-      description: 'Container card for grouping content',
-    },
-    Text: {
-      props: z.object({
-        content: z.string(),
-        variant: z.enum(['heading', 'subheading', 'body', 'caption']).optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Text display',
-    },
-    Button: {
-      props: z.object({
-        label: z.string(),
-        variant: z.enum(['primary', 'secondary', 'outline', 'ghost']).optional(),
-        action: z.string().optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Clickable button',
-    },
-    Table: {
-      props: z.object({
-        columns: z.array(z.object({
-          key: z.string(),
-          label: z.string(),
-        })),
-        rows: z.array(z.record(z.string(), z.unknown())),
-        className: z.string().optional(),
-      }),
-      description: 'Data table',
-    },
+    /* ── shadcn components (from @json-render/shadcn) ─────────── */
+
+    // Layout
+    Card: shadcnComponentDefinitions.Card,
+    Stack: shadcnComponentDefinitions.Stack,
+    Grid: shadcnComponentDefinitions.Grid,
+    Separator: shadcnComponentDefinitions.Separator,
+
+    // Navigation
+    Tabs: shadcnComponentDefinitions.Tabs,
+    Accordion: shadcnComponentDefinitions.Accordion,
+    Collapsible: shadcnComponentDefinitions.Collapsible,
+    Pagination: shadcnComponentDefinitions.Pagination,
+
+    // Overlay
+    Dialog: shadcnComponentDefinitions.Dialog,
+    Drawer: shadcnComponentDefinitions.Drawer,
+    Tooltip: shadcnComponentDefinitions.Tooltip,
+    Popover: shadcnComponentDefinitions.Popover,
+    DropdownMenu: shadcnComponentDefinitions.DropdownMenu,
+
+    // Content
+    Heading: shadcnComponentDefinitions.Heading,
+    Text: shadcnComponentDefinitions.Text,
+    Image: shadcnComponentDefinitions.Image,
+    Avatar: shadcnComponentDefinitions.Avatar,
+    Badge: shadcnComponentDefinitions.Badge,
+    Alert: shadcnComponentDefinitions.Alert,
+    Carousel: shadcnComponentDefinitions.Carousel,
+    Table: shadcnComponentDefinitions.Table,
+
+    // Feedback
+    Progress: shadcnComponentDefinitions.Progress,
+    Skeleton: shadcnComponentDefinitions.Skeleton,
+    Spinner: shadcnComponentDefinitions.Spinner,
+
+    // Input
+    Button: shadcnComponentDefinitions.Button,
+    Link: shadcnComponentDefinitions.Link,
+    Input: shadcnComponentDefinitions.Input,
+    Textarea: shadcnComponentDefinitions.Textarea,
+    Select: shadcnComponentDefinitions.Select,
+    Checkbox: shadcnComponentDefinitions.Checkbox,
+    Radio: shadcnComponentDefinitions.Radio,
+    Switch: shadcnComponentDefinitions.Switch,
+    Slider: shadcnComponentDefinitions.Slider,
+    Toggle: shadcnComponentDefinitions.Toggle,
+    ToggleGroup: shadcnComponentDefinitions.ToggleGroup,
+    ButtonGroup: shadcnComponentDefinitions.ButtonGroup,
+
+    /* ── Custom components (no shadcn equivalent) ─────────────── */
+
     Metric: {
       props: z.object({
         label: z.string(),
@@ -73,53 +88,6 @@ export const catalog = defineCatalog(schema, {
       slots: ['default'],
       description: 'Form container',
     },
-    Input: {
-      props: z.object({
-        label: z.string(),
-        placeholder: z.string().optional(),
-        type: z.enum(['text', 'email', 'number', 'password']).optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Text input',
-    },
-    Select: {
-      props: z.object({
-        label: z.string(),
-        options: z.array(z.object({
-          value: z.string(),
-          label: z.string(),
-        })),
-        className: z.string().optional(),
-      }),
-      description: 'Dropdown select',
-    },
-    Image: {
-      props: z.object({
-        src: z.string(),
-        alt: z.string().optional(),
-        width: z.number().optional(),
-        height: z.number().optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Image display',
-    },
-    Badge: {
-      props: z.object({
-        text: z.string(),
-        variant: z.enum(['default', 'success', 'warning', 'error', 'info']).optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Status badge',
-    },
-    Alert: {
-      props: z.object({
-        message: z.string(),
-        variant: z.enum(['info', 'success', 'warning', 'error']).optional(),
-        title: z.string().optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Alert block',
-    },
     Row: {
       props: z.object({
         gap: spacing.optional(),
@@ -137,30 +105,6 @@ export const catalog = defineCatalog(schema, {
       }),
       slots: ['default'],
       description: 'Vertical layout',
-    },
-    Stack: {
-      props: z.object({
-        gap: spacing.optional(),
-        direction: z.enum(['horizontal', 'vertical']).optional(),
-        className: z.string().optional(),
-      }),
-      slots: ['default'],
-      description: 'Stacked layout',
-    },
-    Divider: {
-      props: z.object({
-        className: z.string().optional(),
-      }),
-      description: 'Visual separator',
-    },
-    Link: {
-      props: z.object({
-        href: z.string(),
-        label: z.string(),
-        external: z.boolean().optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Navigation link',
     },
     Code: {
       props: z.object({
@@ -203,15 +147,6 @@ export const catalog = defineCatalog(schema, {
       }),
       slots: ['default'],
       description: 'Max-width centered wrapper',
-    },
-    Grid: {
-      props: z.object({
-        columns: z.union([z.number(), z.enum(['1', '2', '3', '4'])]).optional(),
-        gap: z.enum(['sm', 'md', 'lg']).optional(),
-        className: z.string().optional(),
-      }),
-      slots: ['default'],
-      description: 'Responsive CSS grid layout',
     },
     Navbar: {
       props: z.object({
@@ -276,26 +211,6 @@ export const catalog = defineCatalog(schema, {
       slots: ['default'],
       description: 'Call-to-action banner with headline, description, and button slot',
     },
-    Accordion: {
-      props: z.object({
-        items: z.array(z.object({
-          title: z.string(),
-          content: z.string(),
-        })),
-        className: z.string().optional(),
-      }),
-      description: 'Collapsible content sections for FAQ or details',
-    },
-    Avatar: {
-      props: z.object({
-        src: z.string().optional(),
-        alt: z.string().optional(),
-        fallback: z.string().optional(),
-        size: z.enum(['sm', 'md', 'lg']).optional(),
-        className: z.string().optional(),
-      }),
-      description: 'Circular avatar image with fallback',
-    },
     Spacer: {
       props: z.object({
         size: z.enum(['sm', 'md', 'lg', 'xl']).optional(),
@@ -349,6 +264,7 @@ export const catalog = defineCatalog(schema, {
       }),
       description: 'Auto-generated form from a JSON field schema — describe fields and types, form is built automatically',
     },
+
     /* ── Primitive components ─────────────────────────────────────── */
 
     Box: {
@@ -369,14 +285,6 @@ export const catalog = defineCatalog(schema, {
       }),
       slots: ['default'],
       description: 'Flexbox layout container with full control over direction, alignment, and distribution',
-    },
-    Heading: {
-      props: z.object({
-        level: z.enum(['1', '2', '3', '4', '5', '6']).optional(),
-        content: z.string(),
-        className: z.string().optional(),
-      }),
-      description: 'Semantic heading (h1-h6) for page and section titles',
     },
     Paragraph: {
       props: z.object({

@@ -423,7 +423,7 @@ export function ChatPage({
   const [hasManuallySelectedCommand, setHasManuallySelectedCommand] =
     useState(false);
   const [selectedModel, setSelectedModel] = useState(
-    session.model || "anthropic/claude-sonnet-4-5",
+    session.model || "anthropic/claude-sonnet-4-6",
   );
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
   const [showTodos, setShowTodos] = useState(false);

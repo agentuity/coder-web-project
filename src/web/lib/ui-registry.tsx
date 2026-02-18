@@ -2,22 +2,24 @@ import { type ChangeEvent, type FormEvent, useCallback, useEffect, useRef, useSt
 import DOMPurify from 'dompurify';
 import JsxParser from 'react-jsx-parser';
 import { defineRegistry, useStateStore } from '@json-render/react';
+import { shadcnComponents } from '@json-render/shadcn';
 import { catalog } from './ui-catalog';
 import { cn } from './utils';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-/* ── shadcn component imports ─────────────────────────────────── */
-import { Card as ShadcnCard, CardHeader, CardTitle, CardDescription, CardContent } from '../components/ui/card';
+// Type bridge: @json-render/shadcn@0.7 components use BaseComponentProps (with `on`, `bindings`)
+// but the project's @json-render/react@0.5 uses ComponentContext (without them).
+// Runtime is compatible — components only destructure what they need.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const sc = shadcnComponents as Record<string, any>;
+
+/* ── shadcn component imports (used by custom components) ──── */
+import { Card as ShadcnCard } from '../components/ui/card';
 import { Button as ShadcnButton } from '../components/ui/button';
 import { Input as ShadcnInput } from '../components/ui/input';
-import { Badge as ShadcnBadge } from '../components/ui/badge';
-import { Separator } from '../components/ui/separator';
-import { Table as ShadcnTable, TableHeader, TableBody, TableRow, TableHead, TableCell } from '../components/ui/table';
-import { Alert as ShadcnAlert, AlertTitle, AlertDescription } from '../components/ui/alert';
 import { Select as ShadcnSelect, SelectTrigger, SelectValue, SelectContent, SelectItem } from '../components/ui/select';
 import { Avatar as ShadcnAvatar, AvatarImage, AvatarFallback } from '../components/ui/avatar';
-import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../components/ui/collapsible';
 
 /* ── helpers ──────────────────────────────────────────────────── */
 
@@ -27,12 +29,6 @@ const spacingMap: Record<'sm' | 'md' | 'lg', string> = {
   sm: 'gap-2',
   md: 'gap-4',
   lg: 'gap-6',
-};
-
-const paddingMap: Record<'sm' | 'md' | 'lg', string> = {
-  sm: 'p-3',
-  md: 'p-4',
-  lg: 'p-6',
 };
 
 const alignMap: Record<'start' | 'center' | 'end' | 'stretch', string> = {
@@ -120,45 +116,7 @@ function mermaidFixTextContrast(container: HTMLElement) {
   }
 }
 
-const textVariants: Record<'heading' | 'subheading' | 'body' | 'caption', string> = {
-  heading: 'text-lg font-semibold text-[var(--foreground)]',
-  subheading: 'text-base font-medium text-[var(--foreground)]',
-  body: 'text-sm text-[var(--foreground)]',
-  caption: 'text-xs text-[var(--muted-foreground)]',
-};
-
-/** Map catalog badge variants → shadcn badge variants + custom classes */
-const badgeVariantMap: Record<'default' | 'success' | 'warning' | 'error' | 'info', { variant: 'default' | 'secondary' | 'destructive' | 'outline'; className?: string }> = {
-  default: { variant: 'secondary' },
-  success: { variant: 'outline', className: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-600' },
-  warning: { variant: 'outline', className: 'border-amber-500/30 bg-amber-500/10 text-amber-600' },
-  error: { variant: 'destructive' },
-  info: { variant: 'outline', className: 'border-blue-500/30 bg-blue-500/10 text-blue-600' },
-};
-
-/** Map catalog button variants → shadcn button variants */
-const buttonVariantMap: Record<'primary' | 'secondary' | 'outline' | 'ghost', 'default' | 'secondary' | 'outline' | 'ghost'> = {
-  primary: 'default',
-  secondary: 'secondary',
-  outline: 'outline',
-  ghost: 'ghost',
-};
-
-/** Map catalog alert variants to classes (shadcn Alert only has default/destructive, so we add semantic colors) */
-const alertColorMap: Record<'info' | 'success' | 'warning' | 'error', string> = {
-  info: 'border-blue-500/40 bg-blue-500/5 text-blue-700 [&>h5]:text-blue-700',
-  success: 'border-emerald-500/40 bg-emerald-500/5 text-emerald-700 [&>h5]:text-emerald-700',
-  warning: 'border-amber-500/40 bg-amber-500/5 text-amber-700 [&>h5]:text-amber-700',
-  error: 'border-red-500/40 bg-red-500/5 text-red-700 [&>h5]:text-red-700',
-};
-
 const chartPalette = ['#3b82f6', '#22c55e', '#f97316', '#a855f7', '#14b8a6', '#facc15'];
-
-function slugify(label: string) {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-');
-}
 
 function toNumber(value: unknown): number {
   if (typeof value === 'number') return value;
@@ -198,76 +156,45 @@ function describeArc(cx: number, cy: number, r: number, startAngle: number, endA
 
 export const { registry } = defineRegistry(catalog, {
   components: {
-    /* ── shadcn-backed: Card ───────────────────────────────────── */
-    Card: ({ props, children }) => {
-      const paddingClass = props.padding ? paddingMap[props.padding] : undefined;
-      return (
-        <ShadcnCard className={cn(props.className)}>
-          <CardHeader className={cn(paddingClass, 'pb-2')}>
-            <CardTitle className="text-base">{props.title}</CardTitle>
-            {props.description && (
-              <CardDescription>{props.description}</CardDescription>
-            )}
-          </CardHeader>
-          {children && (
-            <CardContent className={cn(paddingClass)}>
-              {children}
-            </CardContent>
-          )}
-        </ShadcnCard>
-      );
-    },
+    /* ── shadcn-backed components (from @json-render/shadcn) ──── */
+    Card: sc.Card,
+    Text: sc.Text,
+    Button: sc.Button,
+    Table: sc.Table,
+    Input: sc.Input,
+    Select: sc.Select,
+    Image: sc.Image,
+    Badge: sc.Badge,
+    Alert: sc.Alert,
+    Link: sc.Link,
+    Stack: sc.Stack,
+    Heading: sc.Heading,
+    Avatar: sc.Avatar,
+    Accordion: sc.Accordion,
+    Grid: sc.Grid,
+    Separator: sc.Separator,
 
-    /* ── custom: Text ──────────────────────────────────────────── */
-    Text: ({ props }) => (
-      <p className={cn(textVariants[props.variant ?? 'body'], props.className)}>{props.content}</p>
-    ),
-
-    /* ── shadcn-backed: Button ─────────────────────────────────── */
-    Button: ({ props, emit }) => (
-      <ShadcnButton
-        type={props.action === 'submit' ? 'submit' : 'button'}
-        variant={buttonVariantMap[props.variant ?? 'primary']}
-        size="sm"
-        className={cn(props.className)}
-        onClick={() => emit?.('press')}
-        data-action={props.action}
-      >
-        {props.label}
-      </ShadcnButton>
-    ),
-
-    /* ── shadcn-backed: Table ──────────────────────────────────── */
-    Table: ({ props }) => (
-      <div className={cn('rounded-lg border border-[var(--border)]', props.className)}>
-        <ShadcnTable>
-          <TableHeader>
-            <TableRow>
-              {props.columns.map((column) => (
-                <TableHead key={column.key}>{column.label}</TableHead>
-              ))}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {props.rows.map((row) => {
-              const rowId = row.id ?? row.key ?? row._id;
-              const rowKey = (typeof rowId === 'string' || typeof rowId === 'number')
-                ? String(rowId)
-                : props.columns.map((column) => String(row[column.key] ?? '')).join('|') || JSON.stringify(row);
-              return (
-                <TableRow key={rowKey}>
-                  {props.columns.map((column) => (
-                    <TableCell key={column.key}>
-                      {String(row[column.key] ?? '')}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              );
-            })}
-          </TableBody>
-        </ShadcnTable>
-      </div>
-    ),
+    /* ── New shadcn components ────────────────────────────────── */
+    Tabs: sc.Tabs,
+    Collapsible: sc.Collapsible,
+    Pagination: sc.Pagination,
+    Dialog: sc.Dialog,
+    Drawer: sc.Drawer,
+    Tooltip: sc.Tooltip,
+    Popover: sc.Popover,
+    DropdownMenu: sc.DropdownMenu,
+    Carousel: sc.Carousel,
+    Progress: sc.Progress,
+    Skeleton: sc.Skeleton,
+    Spinner: sc.Spinner,
+    Textarea: sc.Textarea,
+    Checkbox: sc.Checkbox,
+    Radio: sc.Radio,
+    Switch: sc.Switch,
+    Slider: sc.Slider,
+    Toggle: sc.Toggle,
+    ToggleGroup: sc.ToggleGroup,
+    ButtonGroup: sc.ButtonGroup,
 
     /* ── custom: Metric (uses shadcn Card internally) ──────────── */
     Metric: ({ props }) => (
@@ -395,96 +322,6 @@ export const { registry } = defineRegistry(catalog, {
       );
     },
 
-    /* ── shadcn-backed: Input ──────────────────────────────────── */
-    Input: ({ props }) => {
-      const { get, set } = useStateStore();
-      const fieldName = slugify(props.label);
-      const value = get(`/form/${fieldName}`) ?? '';
-      const handleChange = (event: ChangeEvent<HTMLInputElement>) => {
-        const rawValue = event.target.value;
-        if (props.type === 'number') {
-          const parsed = rawValue === '' ? '' : Number(rawValue);
-          set(`/form/${fieldName}`, Number.isNaN(parsed) ? rawValue : parsed);
-        } else {
-          set(`/form/${fieldName}`, rawValue);
-        }
-      };
-
-      return (
-        <label className={cn('flex flex-col gap-1 text-sm text-[var(--foreground)]', props.className)}>
-          <span className="text-xs text-[var(--muted-foreground)]">{props.label}</span>
-          <ShadcnInput
-            name={fieldName}
-            type={props.type ?? 'text'}
-            value={String(value)}
-            onChange={handleChange}
-            placeholder={props.placeholder}
-          />
-        </label>
-      );
-    },
-
-    /* ── shadcn-backed: Select ─────────────────────────────────── */
-    Select: ({ props }) => {
-      const { get, set } = useStateStore();
-      const fieldName = slugify(props.label);
-      const value = (get(`/form/${fieldName}`) ?? '') as string;
-      return (
-        <label className={cn('flex flex-col gap-1 text-sm text-[var(--foreground)]', props.className)}>
-          <span className="text-xs text-[var(--muted-foreground)]">{props.label}</span>
-          <ShadcnSelect
-            value={value}
-            onValueChange={(newValue) => set(`/form/${fieldName}`, newValue)}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Choose an option" />
-            </SelectTrigger>
-            <SelectContent>
-              {props.options.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </ShadcnSelect>
-        </label>
-      );
-    },
-
-    /* ── custom: Image ─────────────────────────────────────────── */
-    Image: ({ props }) => (
-      <div className={cn('overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--background)]', props.className)}>
-        <img
-          src={props.src}
-          alt={props.alt ?? 'Image'}
-          width={props.width}
-          height={props.height}
-          className="h-auto w-full object-cover"
-        />
-      </div>
-    ),
-
-    /* ── shadcn-backed: Badge ──────────────────────────────────── */
-    Badge: ({ props }) => {
-      const mapping = badgeVariantMap[props.variant ?? 'default'];
-      return (
-        <ShadcnBadge
-          variant={mapping.variant}
-          className={cn(mapping.className, props.className)}
-        >
-          {props.text}
-        </ShadcnBadge>
-      );
-    },
-
-    /* ── shadcn-backed: Alert ──────────────────────────────────── */
-    Alert: ({ props }) => (
-      <ShadcnAlert className={cn(alertColorMap[props.variant ?? 'info'], props.className)}>
-        {props.title && <AlertTitle className="text-xs uppercase tracking-wide">{props.title}</AlertTitle>}
-        <AlertDescription>{props.message}</AlertDescription>
-      </ShadcnAlert>
-    ),
-
     /* ── custom layout: Row ────────────────────────────────────── */
     Row: ({ props, children }) => (
       <div className={cn('flex flex-row', spacingMap[props.gap ?? 'md'], alignMap[props.align ?? 'start'], props.className)}>
@@ -497,31 +334,6 @@ export const { registry } = defineRegistry(catalog, {
       <div className={cn('flex flex-col', spacingMap[props.gap ?? 'md'], alignMap[props.align ?? 'start'], props.className)}>
         {children}
       </div>
-    ),
-
-    /* ── custom layout: Stack ──────────────────────────────────── */
-    Stack: ({ props, children }) => (
-      <div className={cn('flex', props.direction === 'horizontal' ? 'flex-row' : 'flex-col', spacingMap[props.gap ?? 'md'], props.className)}>
-        {children}
-      </div>
-    ),
-
-    /* ── shadcn-backed: Divider → Separator ────────────────────── */
-    Divider: ({ props }) => (
-      <Separator className={cn(props.className)} />
-    ),
-
-    /* ── custom: Link ──────────────────────────────────────────── */
-    Link: ({ props, emit }) => (
-      <a
-        href={props.href}
-        target={props.external ? '_blank' : undefined}
-        rel={props.external ? 'noopener noreferrer' : undefined}
-        onClick={() => emit?.('press')}
-        className={cn('text-sm font-medium text-[var(--primary)] underline underline-offset-2 hover:opacity-80', props.className)}
-      >
-        {props.label}
-      </a>
     ),
 
     /* ── custom: Code ──────────────────────────────────────────── */
@@ -608,22 +420,6 @@ export const { registry } = defineRegistry(catalog, {
       };
       return (
         <div className={cn('mx-auto px-4', maxWidthMap[props.maxWidth ?? 'lg'], props.className)}>
-          {children}
-        </div>
-      );
-    },
-
-    /* ── Grid ─────────────────────────────────────────────────────── */
-    Grid: ({ props, children }) => {
-      const cols = String(props.columns ?? 3);
-      const colsMap: Record<string, string> = {
-        '1': 'grid-cols-1',
-        '2': 'grid-cols-1 md:grid-cols-2',
-        '3': 'grid-cols-1 md:grid-cols-3',
-        '4': 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4',
-      };
-      return (
-        <div className={cn('grid', colsMap[cols] ?? 'grid-cols-1 md:grid-cols-3', spacingMap[props.gap ?? 'md'], props.className)}>
           {children}
         </div>
       );
@@ -754,40 +550,6 @@ export const { registry } = defineRegistry(catalog, {
         {children && <div className="mt-6 flex flex-wrap items-center justify-center gap-3">{children}</div>}
       </section>
     ),
-
-    /* ── Accordion (uses shadcn Collapsible) ──────────────────────── */
-    Accordion: ({ props }) => (
-      <div className={cn('divide-y divide-[var(--border)] rounded-lg border border-[var(--border)]', props.className)}>
-        {props.items.map((item) => (
-          <Collapsible key={item.title}>
-            <CollapsibleTrigger className="group flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors">
-              {item.title}
-              <span className="text-[var(--muted-foreground)] transition-transform group-data-[state=open]:rotate-180">&#9660;</span>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="px-4 pb-3 text-sm text-[var(--muted-foreground)]">
-              {item.content}
-            </CollapsibleContent>
-          </Collapsible>
-        ))}
-      </div>
-    ),
-
-    /* ── Avatar ────────────────────────────────────────────────────── */
-    Avatar: ({ props }) => {
-      const sizeMap: Record<string, string> = {
-        sm: 'h-8 w-8 text-xs',
-        md: 'h-10 w-10 text-sm',
-        lg: 'h-14 w-14 text-base',
-      };
-      return (
-        <ShadcnAvatar className={cn(sizeMap[props.size ?? 'md'], props.className)}>
-          {props.src ? (
-            <AvatarImage src={props.src} alt={props.alt ?? ''} />
-          ) : null}
-          <AvatarFallback>{props.fallback ?? '?'}</AvatarFallback>
-        </ShadcnAvatar>
-      );
-    },
 
     /* ── Spacer ────────────────────────────────────────────────────── */
     Spacer: ({ props }) => {
@@ -1063,26 +825,6 @@ export const { registry } = defineRegistry(catalog, {
           {children}
         </div>
       );
-    },
-
-    /* ── Heading ──────────────────────────────────────────────────── */
-    Heading: ({ props }) => {
-      const level = props.level ?? '2';
-      const sizeMap: Record<string, string> = {
-        '1': 'text-4xl font-bold tracking-tight',
-        '2': 'text-3xl font-bold tracking-tight',
-        '3': 'text-2xl font-semibold',
-        '4': 'text-xl font-semibold',
-        '5': 'text-lg font-medium',
-        '6': 'text-base font-medium',
-      };
-      const cls = cn(sizeMap[level], 'text-[var(--foreground)]', props.className);
-      if (level === '1') return <h1 className={cls}>{props.content}</h1>;
-      if (level === '3') return <h3 className={cls}>{props.content}</h3>;
-      if (level === '4') return <h4 className={cls}>{props.content}</h4>;
-      if (level === '5') return <h5 className={cls}>{props.content}</h5>;
-      if (level === '6') return <h6 className={cls}>{props.content}</h6>;
-      return <h2 className={cls}>{props.content}</h2>;
     },
 
     /* ── Paragraph ────────────────────────────────────────────────── */

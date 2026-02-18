@@ -49,7 +49,7 @@ export function WorkspacePage() {
 	const recentSessions = sessions.slice(0, 5);
 	const [prompt, setPrompt] = useState('');
 	const [selectedCommand, setSelectedCommand] = useState('');
-	const [selectedModel, setSelectedModel] = useState('anthropic/claude-sonnet-4-5');
+	const [selectedModel, setSelectedModel] = useState('anthropic/claude-sonnet-4-6');
 
 	// Repo URL input state
 	const [repoUrl, setRepoUrl] = useState('');

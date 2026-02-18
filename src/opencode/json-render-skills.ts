@@ -642,8 +642,9 @@ Sequences and conditionals can be nested — e.g. a conditional's \`then\` can b
 | Alert | message, variant? (info/success/warning/error), title? | Alert block |
 | Link | href, label, external? | Navigation link |
 | Code | language?, content | Code block |
-| Divider | (none) | Visual separator |
+| Separator | orientation? (horizontal/vertical) | Visual separator line |
 | Avatar | src?, alt?, fallback?, size? (sm/md/lg) | Circular avatar image with fallback initials |
+| Carousel | items [] | Horizontally scrollable carousel |
 
 ### Form Components
 
@@ -652,6 +653,11 @@ Sequences and conditionals can be nested — e.g. a conditional's \`then\` can b
 | Form | title? | Form container (uses children) |
 | Input | label, placeholder?, type? (text/email/number/password) | Text input field |
 | Select | label, options [{value,label}] | Dropdown select |
+| Textarea | label, name?, placeholder?, rows?, value? | Multi-line text input |
+| Checkbox | label, name?, checked? | Checkbox input |
+| Radio | label, name?, options [{value, label}], value? | Radio button group |
+| Switch | label, name?, checked? | Toggle switch |
+| Slider | label?, min?, max?, step?, value? | Range slider |
 
 ### Layout Components
 
@@ -664,6 +670,40 @@ Sequences and conditionals can be nested — e.g. a conditional's \`then\` can b
 | Container | maxWidth? (sm/md/lg/xl/full) | Max-width centered wrapper |
 | Grid | columns? (1-4), gap? (sm/md/lg) | Responsive CSS grid layout |
 | Spacer | size? (sm/md/lg/xl) | Controlled vertical spacing |
+
+### Navigation Components
+
+| Component | Key Props | Description |
+|-----------|-----------|-------------|
+| Tabs | tabs [{label, value}], defaultValue?, value? | Tabbed navigation |
+| Collapsible | title, defaultOpen? | Single collapsible section |
+| Pagination | totalPages, page | Page navigation |
+
+### Overlay Components
+
+| Component | Key Props | Description |
+|-----------|-----------|-------------|
+| Dialog | title?, description?, openPath? | Modal dialog (uses children for content) |
+| Drawer | title?, description?, openPath? | Bottom drawer (uses children for content) |
+| Tooltip | content, text? | Hover tooltip (uses children for trigger) |
+| Popover | trigger? | Click-triggered popover (uses children for content) |
+| DropdownMenu | label?, items [{label, value?}] | Dropdown menu |
+
+### Feedback Components
+
+| Component | Key Props | Description |
+|-----------|-----------|-------------|
+| Progress | value, max?, label? | Progress bar |
+| Skeleton | width?, height?, rounded? | Loading placeholder |
+| Spinner | size?, label? | Loading spinner |
+
+### Toggle & Group Components
+
+| Component | Key Props | Description |
+|-----------|-----------|-------------|
+| Toggle | label?, pressed?, variant? | Toggle button |
+| ToggleGroup | items [{label, value}], type? (single/multiple), value? | Group of toggle buttons |
+| ButtonGroup | buttons [{label}], selected? | Group of buttons |
 
 ### Page-Level Components
 
@@ -867,7 +907,7 @@ Column → Chart + Table combination
 For structured text content, articles, or documentation-like layouts:
 
 \`\`\`
-Column → Heading → Paragraph → List → Divider → ...
+Column → Heading → Paragraph → List → Separator → ...
 \`\`\`
 
 ### Landing Page
