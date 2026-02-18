@@ -1,13 +1,29 @@
-import { Plus, Sparkles, Plug, Settings, Star, RefreshCw, Trash2, ChevronRight, ChevronDown, ChevronLeft, LogOut, Moon, Sun, User, Keyboard } from 'lucide-react';
-import { useMemo, useState } from 'react';
-import { useAnalytics } from '@agentuity/react';
-import { useNavigate, useRouterState } from '@tanstack/react-router';
-import { Button } from '../ui/button';
-import { ScrollArea } from '../ui/scroll-area';
-import { Separator } from '../ui/separator';
-import { Badge } from '../ui/badge';
-import { cn } from '../../lib/utils';
-import { AgentuityLogo } from '../ui/AgentuityLogo';
+import {
+  Plus,
+  Sparkles,
+  Plug,
+  Settings,
+  Star,
+  RefreshCw,
+  Trash2,
+  ChevronRight,
+  ChevronDown,
+  ChevronLeft,
+  LogOut,
+  Moon,
+  Sun,
+  User,
+  Keyboard,
+} from "lucide-react";
+import { useMemo, useState } from "react";
+import { useAnalytics } from "@agentuity/react";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { Button } from "../ui/button";
+import { ScrollArea } from "../ui/scroll-area";
+import { Separator } from "../ui/separator";
+import { Badge } from "../ui/badge";
+import { cn } from "../../lib/utils";
+import { AgentuityLogo } from "../ui/AgentuityLogo";
 
 interface Session {
   id: string;
@@ -31,18 +47,18 @@ interface SidebarProps {
   onToggleCollapse?: () => void;
   userEmail?: string;
   userName?: string;
-  theme: 'light' | 'dark';
+  theme: "light" | "dark";
   onToggleTheme: () => void;
   onShowShortcuts?: () => void;
   onSignOut: () => void | Promise<void>;
 }
 
 function getCurrentPage(pathname: string) {
-  if (pathname.startsWith('/skills')) return 'skills';
-  if (pathname.startsWith('/sources')) return 'sources';
-  if (pathname.startsWith('/settings')) return 'settings';
-  if (pathname.startsWith('/profile')) return 'profile';
-  return 'chat';
+  if (pathname.startsWith("/skills")) return "skills";
+  if (pathname.startsWith("/sources")) return "sources";
+  if (pathname.startsWith("/settings")) return "settings";
+  if (pathname.startsWith("/profile")) return "profile";
+  return "chat";
 }
 
 function SessionSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
@@ -52,14 +68,17 @@ function SessionSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
         <div
           key={width}
           className={cn(
-            'flex items-center gap-2 rounded-md py-2 animate-pulse',
-            isCollapsed ? 'justify-center px-2' : 'px-3'
+            "flex items-center gap-2 rounded-md py-2 animate-pulse",
+            isCollapsed ? "justify-center px-2" : "px-3",
           )}
         >
           <div className="h-2 w-2 rounded-full bg-[var(--muted)]" />
           {!isCollapsed && (
             <div className="flex-1">
-              <div className="h-3 rounded bg-[var(--muted)]" style={{ width: `${width}%` }} />
+              <div
+                className="h-3 rounded bg-[var(--muted)]"
+                style={{ width: `${width}%` }}
+              />
             </div>
           )}
         </div>
@@ -68,13 +87,40 @@ function SessionSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
   );
 }
 
+/** Parse a background task session title from JSON metadata to a friendly display string. */
+function parseSessionTitle(title: string | null): string {
+  if (!title) return "Untitled Session";
+  if (!title.startsWith("{")) return title;
+  try {
+    const meta = JSON.parse(title) as {
+      taskId?: string;
+      agent?: string;
+      description?: string;
+    };
+    if (meta.taskId && meta.taskId.startsWith("bg_")) {
+      const agentName = meta.agent?.replace("Agentuity Coder ", "") ?? "Agent";
+      return meta.description
+        ? `🔄 ${agentName}: ${meta.description}`
+        : `🔄 Background · ${agentName}`;
+    }
+    return title;
+  } catch {
+    return title;
+  }
+}
+
 function getStatusColor(status: string) {
   switch (status) {
-    case 'active': return 'bg-green-500';
-    case 'creating': return 'bg-yellow-500 animate-pulse';
-    case 'terminated': return 'bg-gray-500';
-    case 'error': return 'bg-red-500';
-    default: return 'bg-gray-400';
+    case "active":
+      return "bg-green-500";
+    case "creating":
+      return "bg-yellow-500 animate-pulse";
+    case "terminated":
+      return "bg-gray-500";
+    case "error":
+      return "bg-red-500";
+    default:
+      return "bg-gray-400";
   }
 }
 
@@ -103,11 +149,17 @@ export function Sidebar({
   const [showTerminated, setShowTerminated] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const isCollapsed = Boolean(collapsed) && !isMobileOpen;
-  const displayName = userName || userEmail || 'User';
+  const displayName = userName || userEmail || "User";
   const showEmail = Boolean(userName && userEmail);
 
-  const { activeSessions, terminatedFavorites, terminatedRecent, terminatedTotalCount } = useMemo(() => {
-    const isTerminated = (session: Session) => session.status === 'terminated' || session.status === 'error';
+  const {
+    activeSessions,
+    terminatedFavorites,
+    terminatedRecent,
+    terminatedTotalCount,
+  } = useMemo(() => {
+    const isTerminated = (session: Session) =>
+      session.status === "terminated" || session.status === "error";
     const terminated = sessions.filter(isTerminated);
     const favorites = terminated.filter((s) => s.flagged);
     const nonFavorites = terminated.filter((s) => !s.flagged);
@@ -120,59 +172,63 @@ export function Sidebar({
   }, [sessions]);
 
   const handleNewSession = () => {
-    track('sidebar_new_session_clicked');
+    track("sidebar_new_session_clicked");
     onNewSession();
   };
 
   const handleSessionSelect = (id: string) => {
-    track('sidebar_session_selected');
-    navigate({ to: '/session/$sessionId', params: { sessionId: id } });
+    track("sidebar_session_selected");
+    navigate({ to: "/session/$sessionId", params: { sessionId: id } });
   };
 
-  const handleNavigate = (destination: 'skills' | 'sources' | 'settings' | 'profile') => {
-    track('sidebar_navigation', { destination });
+  const handleNavigate = (
+    destination: "skills" | "sources" | "settings" | "profile",
+  ) => {
+    track("sidebar_navigation", { destination });
     navigate({ to: `/${destination}` });
   };
 
   const handleGoHome = () => {
-    navigate({ to: '/' });
+    navigate({ to: "/" });
   };
 
   const renderSessionRow = (session: Session) => (
     <div
       key={session.id}
       className={cn(
-        'group w-full flex items-center gap-2 rounded-md py-2 text-sm transition-colors hover:bg-[var(--accent)]',
-        isCollapsed ? 'justify-center px-2' : 'px-3',
+        "group w-full flex items-center gap-2 rounded-md py-2 text-sm transition-colors hover:bg-[var(--accent)]",
+        isCollapsed ? "justify-center px-2" : "px-3",
         activeSessionId === session.id
-          ? 'bg-[var(--accent)] text-[var(--accent-foreground)]'
-          : 'text-[var(--foreground)]'
+          ? "bg-[var(--accent)] text-[var(--accent-foreground)]"
+          : "text-[var(--foreground)]",
       )}
     >
       <button
         type="button"
         onClick={() => handleSessionSelect(session.id)}
         className={cn(
-          'flex flex-1 items-center gap-2 truncate text-left',
-          isCollapsed && 'justify-center'
+          "flex flex-1 items-center gap-2 truncate text-left",
+          isCollapsed && "justify-center",
         )}
-        title={session.title || 'Untitled Session'}
+        title={parseSessionTitle(session.title)}
       >
-        <div className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`} />
+        <div
+          className={`h-2 w-2 rounded-full ${getStatusColor(session.status)}`}
+        />
         {!isCollapsed && (
           <div className="flex-1 truncate">
-            {session.title || 'Untitled Session'}
+            {parseSessionTitle(session.title)}
           </div>
         )}
       </button>
       {!isCollapsed && (
         <div className="ml-auto flex items-center gap-1">
-          {session.status === 'error' && (
+          {session.status === "error" && (
             <Badge variant="destructive" className="text-[9px] px-1.5 py-0">
               Error
             </Badge>
           )}
-          {session.status === 'error' && onRetrySession && (
+          {session.status === "error" && onRetrySession && (
             <Button
               type="button"
               variant="ghost"
@@ -195,12 +251,16 @@ export function Sidebar({
                 onFlagSession(session.id, !session.flagged);
               }}
               className="shrink-0 p-0.5 rounded hover:bg-[var(--muted)] transition-colors"
-              title={session.flagged ? 'Remove flag' : 'Flag session'}
+              title={session.flagged ? "Remove flag" : "Flag session"}
             >
-              <Star className={`h-3 w-3 ${session.flagged ? 'text-yellow-500 fill-yellow-500' : 'text-[var(--muted-foreground)] opacity-0 group-hover:opacity-100'}`} />
+              <Star
+                className={`h-3 w-3 ${session.flagged ? "text-yellow-500 fill-yellow-500" : "text-[var(--muted-foreground)] opacity-0 group-hover:opacity-100"}`}
+              />
             </button>
           ) : (
-            session.flagged && <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+            session.flagged && (
+              <Star className="h-3 w-3 text-yellow-500 fill-yellow-500" />
+            )
           )}
           {onDeleteSession && (
             <button
@@ -209,8 +269,8 @@ export function Sidebar({
                 e.stopPropagation();
                 const isActive = activeSessionId === session.id;
                 const message = isActive
-                  ? 'Delete this session? You will be redirected to another session.'
-                  : 'Delete this session?';
+                  ? "Delete this session? You will be redirected to another session."
+                  : "Delete this session?";
                 if (window.confirm(message)) {
                   onDeleteSession(session.id);
                 }
@@ -229,23 +289,30 @@ export function Sidebar({
   return (
     <div
       className={cn(
-        'flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-200',
-        isCollapsed ? 'w-14' : 'w-64',
+        "flex h-full flex-col border-r border-[var(--border)] bg-[var(--card)] transition-all duration-200",
+        isCollapsed ? "w-14" : "w-64",
         isMobileOpen
-          ? 'absolute inset-y-0 left-0 z-50 flex md:static md:flex'
-          : 'hidden md:flex',
+          ? "absolute inset-y-0 left-0 z-50 flex md:static md:flex"
+          : "hidden md:flex",
       )}
     >
       <button
         type="button"
         onClick={handleGoHome}
-        className={cn('flex items-center gap-2 px-4 py-3 hover:opacity-80 transition-opacity cursor-pointer', isCollapsed && 'justify-center px-2')}
+        className={cn(
+          "flex items-center gap-2 px-4 py-3 hover:opacity-80 transition-opacity cursor-pointer",
+          isCollapsed && "justify-center px-2",
+        )}
         title="Go to home"
       >
         <AgentuityLogo size={20} className="text-cyan-400" />
-        {!isCollapsed && <span className="logo text-xl font-semibold tracking-tight">Coder</span>}
+        {!isCollapsed && (
+          <span className="logo text-xl font-semibold tracking-tight">
+            Coder
+          </span>
+        )}
       </button>
-      <div className={cn('p-3', isCollapsed && 'px-2')}>
+      <div className={cn("p-3", isCollapsed && "px-2")}>
         {isCollapsed ? (
           <Button
             onClick={handleNewSession}
@@ -266,7 +333,7 @@ export function Sidebar({
 
       <Separator />
 
-      <ScrollArea className={cn('flex-1 p-2', isCollapsed && 'px-1')}>
+      <ScrollArea className={cn("flex-1 p-2", isCollapsed && "px-1")}>
         <div className="space-y-3">
           {isCollapsed ? (
             <div className="space-y-1">
@@ -312,7 +379,10 @@ export function Sidebar({
                           <ChevronRight className="h-3 w-3" />
                         )}
                         Terminated
-                        <Badge variant="secondary" className="ml-auto text-[9px]">
+                        <Badge
+                          variant="secondary"
+                          className="ml-auto text-[9px]"
+                        >
                           {terminatedTotalCount}
                         </Badge>
                       </button>
@@ -343,63 +413,72 @@ export function Sidebar({
         </div>
       </ScrollArea>
 
-      <div className={cn('p-2 space-y-1', isCollapsed && 'px-1')}>
+      <div className={cn("p-2 space-y-1", isCollapsed && "px-1")}>
         <button
           type="button"
-          onClick={() => handleNavigate('skills')}
+          onClick={() => handleNavigate("skills")}
           className={cn(
-            'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
-            currentPage === 'skills' ? 'bg-[var(--accent)]' : '',
-            isCollapsed && 'justify-center px-2'
+            "w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]",
+            currentPage === "skills" ? "bg-[var(--accent)]" : "",
+            isCollapsed && "justify-center px-2",
           )}
           title="Skills"
-          aria-label={isCollapsed ? 'Skills' : undefined}
+          aria-label={isCollapsed ? "Skills" : undefined}
         >
           <Sparkles className="h-4 w-4" />
-          {!isCollapsed && 'Skills'}
+          {!isCollapsed && "Skills"}
         </button>
         <button
           type="button"
-          onClick={() => handleNavigate('sources')}
+          onClick={() => handleNavigate("sources")}
           className={cn(
-            'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
-            currentPage === 'sources' ? 'bg-[var(--accent)]' : '',
-            isCollapsed && 'justify-center px-2'
+            "w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]",
+            currentPage === "sources" ? "bg-[var(--accent)]" : "",
+            isCollapsed && "justify-center px-2",
           )}
           title="Sources"
-          aria-label={isCollapsed ? 'Sources' : undefined}
+          aria-label={isCollapsed ? "Sources" : undefined}
         >
           <Plug className="h-4 w-4" />
-          {!isCollapsed && 'Sources'}
+          {!isCollapsed && "Sources"}
         </button>
         <button
           type="button"
-          onClick={() => handleNavigate('settings')}
+          onClick={() => handleNavigate("settings")}
           className={cn(
-            'w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]',
-            currentPage === 'settings' ? 'bg-[var(--accent)]' : '',
-            isCollapsed && 'justify-center px-2'
+            "w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]",
+            currentPage === "settings" ? "bg-[var(--accent)]" : "",
+            isCollapsed && "justify-center px-2",
           )}
           title="Settings"
-          aria-label={isCollapsed ? 'Settings' : undefined}
+          aria-label={isCollapsed ? "Settings" : undefined}
         >
           <Settings className="h-4 w-4" />
-          {!isCollapsed && 'Settings'}
+          {!isCollapsed && "Settings"}
         </button>
       </div>
       <div className="mt-auto border-t border-[var(--border)]">
-        <div className={cn('flex items-center gap-2 p-3', isCollapsed && 'flex-col p-2')}>
+        <div
+          className={cn(
+            "flex items-center gap-2 p-3",
+            isCollapsed && "flex-col p-2",
+          )}
+        >
           {!isCollapsed && (
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium truncate">{displayName}</p>
-              {showEmail && <p className="text-[10px] text-[var(--muted-foreground)] truncate">{userEmail}</p>}
+              {showEmail && (
+                <p className="text-[10px] text-[var(--muted-foreground)] truncate">
+                  {userEmail}
+                </p>
+              )}
             </div>
           )}
           <button
-            onClick={() => handleNavigate('profile')}
+            onClick={() => handleNavigate("profile")}
             className={cn(
-              'shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]',
-              currentPage === 'profile' && 'text-[var(--foreground)]'
+              "shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]",
+              currentPage === "profile" && "text-[var(--foreground)]",
             )}
             title="Profile"
             aria-label="Profile"
@@ -410,10 +489,16 @@ export function Sidebar({
           <button
             onClick={onToggleTheme}
             className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
-            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={
+              theme === "dark" ? "Switch to light mode" : "Switch to dark mode"
+            }
             type="button"
           >
-            {theme === 'dark' ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            {theme === "dark" ? (
+              <Sun className="h-3.5 w-3.5" />
+            ) : (
+              <Moon className="h-3.5 w-3.5" />
+            )}
           </button>
           {onShowShortcuts && (
             <button
@@ -438,28 +523,48 @@ export function Sidebar({
             onClick={onToggleCollapse}
             className="shrink-0 rounded p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] hover:bg-[var(--accent)]"
             type="button"
-            title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            aria-label={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+            {isCollapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronLeft className="h-3.5 w-3.5" />
+            )}
           </button>
         </div>
       </div>
       {showSignOutConfirm && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center"
-          style={{ backgroundColor: 'color-mix(in oklab, var(--foreground) 50%, transparent)' }}
+          style={{
+            backgroundColor:
+              "color-mix(in oklab, var(--foreground) 50%, transparent)",
+          }}
         >
           <div className="w-full max-w-xs rounded-lg border border-[var(--border)] bg-[var(--card)] p-4 shadow-xl">
-            <h3 className="text-sm font-semibold text-[var(--foreground)]">Sign out?</h3>
+            <h3 className="text-sm font-semibold text-[var(--foreground)]">
+              Sign out?
+            </h3>
             <p className="text-xs text-[var(--muted-foreground)] mt-1">
               Are you sure you want to sign out?
             </p>
             <div className="flex justify-end gap-2 mt-4">
-              <Button variant="outline" size="sm" onClick={() => setShowSignOutConfirm(false)}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSignOutConfirm(false)}
+              >
                 Cancel
               </Button>
-              <Button variant="destructive" size="sm" onClick={() => { setShowSignOutConfirm(false); onSignOut(); }}>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => {
+                  setShowSignOutConfirm(false);
+                  onSignOut();
+                }}
+              >
                 Sign Out
               </Button>
             </div>

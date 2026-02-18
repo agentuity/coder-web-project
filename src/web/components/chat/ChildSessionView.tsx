@@ -15,21 +15,9 @@ import {
   MessageSquare,
 } from "lucide-react";
 import { Badge } from "../ui/badge";
-import { TextPartView } from "./TextPartView";
-import { ToolCallCard } from "./ToolCallCard";
-import type {
-  Message,
-  Part,
-  ReasoningPart,
-  ToolPart,
-} from "../../types/opencode";
+import type { Message, Part } from "../../types/opencode";
 import type { ChildSessionData } from "../../hooks/useChildSessions";
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "../ai-elements/reasoning";
-import { MessageResponse } from "../ai-elements/message";
+import { MessageView } from "./MessageView";
 import { apiFetch } from "../../lib/api";
 
 // ---------------------------------------------------------------------------
@@ -78,6 +66,8 @@ interface ChildSessionViewProps {
   liveGetParts?: (messageID: string) => Part[];
   /** Live session status for this child (from useSessionEvents) */
   liveStatus?: { type: string };
+  /** When true, auto-expand and skip the header/indent styling (used inside a Dialog) */
+  isModal?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -95,19 +85,26 @@ export function ChildSessionView({
   liveMessages,
   liveGetParts,
   liveStatus,
+  isModal = false,
 }: ChildSessionViewProps) {
-  const [isExpanded, setIsExpanded] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(isModal);
   const [isLoading, setIsLoading] = useState(false);
   const [data, setData] = useState<ChildSessionData | null>(
     initialData ?? null,
   );
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch child session data when expanded for the first time
-  useEffect(() => {
-    if (!isExpanded || data || isLoading) return;
+  // Fetch child session data when expanded for the first time.
+  // NOTE: Do NOT use an `isMounted` pattern here — polling-driven re-renders
+  // cause React to unmount/remount this component while reusing the fiber
+  // (refs persist but effect cleanup sets isMounted=false), which drops the
+  // fetch result. React 18 safely ignores setState on unmounted components,
+  // so we always call setData/setIsLoading after fetch completes.
+  const isFetchingRef = useRef(false);
 
-    let isMounted = true;
+  useEffect(() => {
+    if (!isExpanded || data || isFetchingRef.current) return;
+    isFetchingRef.current = true;
 
     const fetchData = async () => {
       setIsLoading(true);
@@ -127,30 +124,25 @@ export function ChildSessionView({
           result = (await res.json()) as ChildSessionData;
         }
 
-        if (isMounted) {
+        if (result) {
           setData(result);
-          if (!result) setError("No data returned");
+        } else {
+          setError("No data returned from server");
         }
       } catch (err) {
-        if (isMounted) {
-          setError(
-            err instanceof Error ? err.message : "Failed to load child session",
-          );
-        }
+        const msg =
+          err instanceof Error ? err.message : "Failed to load child session";
+        setError(msg);
       } finally {
-        if (isMounted) setIsLoading(false);
+        isFetchingRef.current = false;
+        setIsLoading(false);
       }
     };
 
     void fetchData();
-
-    return () => {
-      isMounted = false;
-    };
   }, [
     isExpanded,
     data,
-    isLoading,
     childSessionId,
     parentSessionId,
     archived,
@@ -228,6 +220,73 @@ export function ChildSessionView({
     ? getAgentBadge(agentName)
     : stats?.title || "Sub-agent";
 
+  // -------------------------------------------------------------------------
+  // Shared content (used by both modal and inline modes)
+  // -------------------------------------------------------------------------
+  const renderContent = () => (
+    <>
+      {isLoading && (
+        <div className="flex items-center gap-2 py-4 text-xs text-[var(--muted-foreground)]">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading sub-agent conversation...
+        </div>
+      )}
+
+      {error && (
+        <div className="py-3 text-xs text-red-400">Failed to load: {error}</div>
+      )}
+
+      {!hasLiveData && data && messages.length === 0 && !isLoading && (
+        <div className="py-3 text-xs text-[var(--muted-foreground)]">
+          No messages in this sub-agent session.
+        </div>
+      )}
+
+      {messages.length > 0 && (
+        <div className="space-y-3 py-2">
+          {messages.map((message, msgIndex) => {
+            const parts = getPartsForMessage(message.id);
+            if (parts.length === 0) return null;
+
+            return (
+              <MessageView
+                key={message.id}
+                message={message}
+                parts={parts}
+                renderOptions={{
+                  isStreaming: isLive,
+                  isLastAssistantMessage:
+                    message.role === "assistant" &&
+                    msgIndex === messages.length - 1,
+                  sessionId: parentSessionId,
+                  archived,
+                }}
+                enableChainGrouping
+              />
+            );
+          })}
+          {/* Live streaming indicator */}
+          {isLive && (
+            <div className="flex items-center gap-2 py-1 text-xs text-[var(--muted-foreground)]">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span>Sub-agent is working...</span>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  // -------------------------------------------------------------------------
+  // Modal mode: render content directly (no header, no indent, no height cap)
+  // -------------------------------------------------------------------------
+  if (isModal) {
+    return <div ref={scrollRef}>{renderContent()}</div>;
+  }
+
+  // -------------------------------------------------------------------------
+  // Inline mode: original expand/collapse behaviour
+  // -------------------------------------------------------------------------
   return (
     <div className="mt-2 mb-1">
       {/* Collapsed / Expand header */}
@@ -297,130 +356,7 @@ export function ChildSessionView({
           ref={scrollRef}
           className="ml-2 mt-1 rounded-md border-l-2 border-[var(--border)] pl-3 pb-2 max-h-[600px] overflow-y-auto"
         >
-          {isLoading && (
-            <div className="flex items-center gap-2 py-4 text-xs text-[var(--muted-foreground)]">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              Loading sub-agent conversation...
-            </div>
-          )}
-
-          {error && (
-            <div className="py-3 text-xs text-red-400">
-              Failed to load: {error}
-            </div>
-          )}
-
-          {!hasLiveData && data && messages.length === 0 && !isLoading && (
-            <div className="py-3 text-xs text-[var(--muted-foreground)]">
-              No messages in this sub-agent session.
-            </div>
-          )}
-
-          {messages.length > 0 && (
-            <div className="space-y-3 py-2">
-              {messages.map((message, msgIndex) => {
-                const parts = getPartsForMessage(message.id);
-                if (parts.length === 0) return null;
-
-                // Determine if this is the last assistant message being streamed
-                const isLastAssistant =
-                  isLive &&
-                  message.role === "assistant" &&
-                  msgIndex === messages.length - 1;
-
-                return (
-                  <div key={message.id}>
-                    {/* Agent/role indicator */}
-                    {message.role === "assistant" && (
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Badge
-                          variant="secondary"
-                          className="text-[9px] px-1.5 py-0"
-                        >
-                          {(message as { agent?: string }).agent
-                            ? getAgentBadge(
-                                (message as { agent: string }).agent,
-                              )
-                            : "Assistant"}
-                        </Badge>
-                        {(message as { cost?: number }).cost != null &&
-                          (message as { cost: number }).cost > 0 && (
-                            <span className="text-[9px] text-[var(--muted-foreground)]">
-                              ${(message as { cost: number }).cost.toFixed(4)}
-                            </span>
-                          )}
-                      </div>
-                    )}
-                    {message.role === "user" && (
-                      <div className="flex items-center gap-1.5 mb-1">
-                        <Badge
-                          variant="outline"
-                          className="text-[9px] px-1.5 py-0"
-                        >
-                          User
-                        </Badge>
-                      </div>
-                    )}
-
-                    {/* Render parts */}
-                    {parts.map((part) => {
-                      switch (part.type) {
-                        case "text":
-                          return (
-                            <MessageResponse key={part.id}>
-                              <TextPartView
-                                part={part}
-                                isStreaming={isLastAssistant}
-                              />
-                            </MessageResponse>
-                          );
-                        case "reasoning":
-                          return (
-                            <Reasoning
-                              key={part.id}
-                              defaultOpen={isLastAssistant}
-                              duration={
-                                (part as ReasoningPart).time?.end
-                                  ? Math.max(
-                                      1,
-                                      Math.ceil(
-                                        ((part as ReasoningPart).time.end! -
-                                          (part as ReasoningPart).time.start) /
-                                          1000,
-                                      ),
-                                    )
-                                  : undefined
-                              }
-                            >
-                              <ReasoningTrigger />
-                              <ReasoningContent>
-                                {(part as ReasoningPart).text}
-                              </ReasoningContent>
-                            </Reasoning>
-                          );
-                        case "tool":
-                          return (
-                            <ToolCallCard
-                              key={part.id}
-                              part={part as ToolPart}
-                            />
-                          );
-                        default:
-                          return null;
-                      }
-                    })}
-                  </div>
-                );
-              })}
-              {/* Live streaming indicator */}
-              {isLive && (
-                <div className="flex items-center gap-2 py-1 text-xs text-[var(--muted-foreground)]">
-                  <Loader2 className="h-3 w-3 animate-spin" />
-                  <span>Sub-agent is working...</span>
-                </div>
-              )}
-            </div>
-          )}
+          {renderContent()}
         </div>
       )}
     </div>

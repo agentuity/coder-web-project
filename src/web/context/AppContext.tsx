@@ -3,6 +3,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import {
   createContext,
+  startTransition,
   useCallback,
   useContext,
   useEffect,
@@ -252,7 +253,9 @@ export function AppProvider({
         });
         const s = await res.json();
         if (!aborted) {
-          setSessions(s);
+          startTransition(() => {
+            setSessions(s);
+          });
           setSessionsLoading(false);
         }
       } catch (err) {

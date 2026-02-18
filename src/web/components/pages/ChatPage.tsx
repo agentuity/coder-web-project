@@ -34,13 +34,9 @@ import { GitPanel, useGitStatus } from "../chat/GitPanel";
 import type {
   Message as ChatMessage,
   Part,
-  ReasoningPart,
   ToolPart,
 } from "../../types/opencode";
-import { TextPartView } from "../chat/TextPartView";
-import { ToolCallCard } from "../chat/ToolCallCard";
-import { FilePartView } from "../chat/FilePartView";
-import { SubtaskView } from "../chat/SubtaskView";
+import { MessageView } from "../chat/MessageView";
 import { PermissionCard } from "../chat/PermissionCard";
 import { QuestionCard } from "../chat/QuestionCard";
 import { ContextIndicator } from "../chat/ContextIndicator";
@@ -54,16 +50,13 @@ import {
   ConversationEmptyState,
   ConversationScrollButton,
 } from "../ai-elements/conversation";
-import { ChainOfThought } from "../ai-elements/chain-of-thought";
 import { Plan } from "../ai-elements/plan";
-import { AgentDisplay } from "../ai-elements/agent";
+
 import {
   Message,
   MessageActions,
   MessageAction,
   MessageContent,
-  MessageResponse,
-  MessageToolbar,
 } from "../ai-elements/message";
 import {
   PromptInput,
@@ -72,11 +65,7 @@ import {
   PromptInputSubmit,
   PromptInputTextarea,
 } from "../ai-elements/prompt-input";
-import {
-  Reasoning,
-  ReasoningContent,
-  ReasoningTrigger,
-} from "../ai-elements/reasoning";
+
 import { Loader } from "../ai-elements/loader";
 import { useToast } from "../ui/toast";
 import { useFileTabs } from "../../hooks/useFileTabs";
@@ -909,7 +898,7 @@ export function ChatPage({
   // Child sessions for sub-agent inspection
   const { children: childSessionsList, fetchChildMessages } = useChildSessions(
     sessionId,
-    { archived: isArchivedSession },
+    { archived: isArchivedSession, sessionStatus: session.status },
   );
 
   useEffect(() => {
@@ -1478,254 +1467,10 @@ export function ChatPage({
     return sources;
   }, []);
 
-  const renderReasoning = useCallback(
-    (part: ReasoningPart, message: ChatMessage) => {
-      const duration = part.time.end
-        ? Math.max(1, Math.ceil((part.time.end - part.time.start) / 1000))
-        : undefined;
-      const shouldStream =
-        isStreaming && message.id === lastAssistantMessage?.id;
-      return (
-        <Reasoning
-          defaultOpen={shouldStream}
-          duration={duration}
-          isStreaming={shouldStream}
-          key={part.id}
-        >
-          <ReasoningTrigger />
-          <ReasoningContent>{part.text}</ReasoningContent>
-        </Reasoning>
-      );
-    },
-    [isStreaming, lastAssistantMessage],
-  );
-
-  type ChainGroup = { type: "chain"; filePath: string; parts: ToolPart[] };
-  type CurrentChain = {
-    filePath: string;
-    parts: ToolPart[];
-    startsWithRead: boolean;
-    hasWriteOrEdit: boolean;
-  };
-
-  const extractFilePath = useCallback((part: ToolPart): string | null => {
-    const input = part.state?.input;
-    if (!input) return null;
-    try {
-      const parsed = typeof input === "string" ? JSON.parse(input) : input;
-      const candidate = parsed as {
-        filePath?: string;
-        path?: string;
-        file?: string;
-      };
-      return candidate.filePath || candidate.path || candidate.file || null;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  const isReadTool = useCallback((part: ToolPart): boolean => {
-    const input = part.state?.input;
-    if (!input || typeof input !== "object") return false;
-    return (
-      typeof (input as { filePath?: unknown }).filePath === "string" &&
-      typeof (input as { content?: unknown }).content !== "string" &&
-      typeof (input as { oldString?: unknown }).oldString !== "string" &&
-      typeof (input as { command?: unknown }).command !== "string"
-    );
-  }, []);
-
-  const isWriteOrEditTool = useCallback((part: ToolPart): boolean => {
-    const input = part.state?.input;
-    if (!input || typeof input !== "object") return false;
-    const hasEdit =
-      typeof (input as { oldString?: unknown }).oldString === "string" &&
-      typeof (input as { newString?: unknown }).newString === "string";
-    const hasWrite =
-      typeof (input as { content?: unknown }).content === "string";
-    return hasEdit || hasWrite;
-  }, []);
-
-  const groupPartsIntoChains = useCallback(
-    (parts: Part[]): (Part | ChainGroup)[] => {
-      const groups: (Part | ChainGroup)[] = [];
-      let currentChain: CurrentChain | null = null;
-
-      const flushChain = () => {
-        if (!currentChain) return;
-        const shouldChain =
-          currentChain.parts.length > 1 &&
-          currentChain.startsWithRead &&
-          currentChain.hasWriteOrEdit;
-        if (shouldChain) {
-          groups.push({
-            type: "chain",
-            filePath: currentChain.filePath,
-            parts: currentChain.parts,
-          });
-        } else {
-          groups.push(...currentChain.parts);
-        }
-        currentChain = null;
-      };
-
-      for (const part of parts) {
-        if (part.type === "tool") {
-          const filePath = extractFilePath(part);
-          if (filePath) {
-            if (currentChain && currentChain.filePath === filePath) {
-              currentChain.parts.push(part);
-              if (isWriteOrEditTool(part)) currentChain.hasWriteOrEdit = true;
-            } else {
-              flushChain();
-              currentChain = {
-                filePath,
-                parts: [part],
-                startsWithRead: isReadTool(part),
-                hasWriteOrEdit: isWriteOrEditTool(part),
-              };
-            }
-            continue;
-          }
-        }
-        flushChain();
-        groups.push(part);
-      }
-
-      flushChain();
-      return groups;
-    },
-    [extractFilePath, isReadTool, isWriteOrEditTool],
-  );
-
-  const renderPart = useCallback(
-    (part: Part, message: ChatMessage) => {
-      switch (part.type) {
-        case "text":
-          return (
-            <MessageResponse key={part.id}>
-              <TextPartView
-                part={part}
-                isStreaming={
-                  isStreaming && message.id === lastAssistantMessage?.id
-                }
-              />
-            </MessageResponse>
-          );
-        case "reasoning":
-          return renderReasoning(part, message);
-        case "tool":
-          return (
-            <ToolCallCard
-              key={part.id}
-              part={part}
-              onAddComment={handleAddComment}
-              getDiffAnnotations={getDiffAnnotations}
-              getFileComments={getFileComments}
-              sources={
-                message.role === "assistant" ? getSourcesForToolPart(part) : []
-              }
-              sessionId={sessionId}
-              archived={isArchivedSession}
-              childSessions={childSessionsList}
-              fetchChildData={fetchChildMessages}
-              getChildMessages={getChildMessages}
-              getChildPartsForMessage={getChildPartsForMessage}
-              getChildStatus={getChildStatus}
-              liveChildSessionIds={liveChildSessionIds}
-            />
-          );
-        case "file":
-          return (
-            <FilePartView key={part.id} part={part} sessionId={sessionId} />
-          );
-        case "subtask":
-          return <SubtaskView key={part.id} part={part} />;
-        case "agent":
-          return <AgentDisplay key={part.id} name={part.name} />;
-        case "step-finish":
-          return null;
-        case "patch":
-          return (
-            <div
-              key={part.id}
-              className="rounded-lg border border-[var(--border)] px-3 py-2"
-            >
-              <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-                <span>Files changed ({part.files.length})</span>
-              </div>
-              <div className="mt-1 space-y-0.5">
-                {part.files.map((file) => (
-                  <div
-                    key={file}
-                    className="text-xs font-mono text-[var(--foreground)]"
-                  >
-                    {file}
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        case "snapshot":
-          return (
-            <div
-              key={part.id}
-              className="text-[10px] italic text-[var(--muted-foreground)]"
-            >
-              {"📸"} Context snapshot saved
-            </div>
-          );
-        case "compaction":
-          return (
-            <div
-              key={part.id}
-              className="text-[10px] italic text-[var(--muted-foreground)]"
-            >
-              {"🗜️"} Context compacted{part.auto ? " (auto)" : ""}
-            </div>
-          );
-        case "retry":
-          return (
-            <div
-              key={part.id}
-              className="flex items-center gap-2 text-xs text-yellow-500"
-            >
-              <span>
-                Retry attempt {part.attempt}:{" "}
-                {part.error.message || part.error.type}
-              </span>
-            </div>
-          );
-        case "step-start":
-          return null;
-        default:
-          return null;
-      }
-    },
-    [
-      isStreaming,
-      lastAssistantMessage,
-      renderReasoning,
-      handleAddComment,
-      getDiffAnnotations,
-      getFileComments,
-      getSourcesForToolPart,
-      sessionId,
-      isArchivedSession,
-      childSessionsList,
-      fetchChildMessages,
-      getChildMessages,
-      getChildPartsForMessage,
-      getChildStatus,
-      liveChildSessionIds,
-    ],
-  );
-
   const renderedMessages = useMemo(() => {
     if (displayMessages.length === 0) return null;
     return displayMessages.map((message, msgIndex) => {
       const parts = getDisplayParts(message.id);
-      const agent = "agent" in message ? message.agent : undefined;
       const errorInfo = "error" in message ? message.error : undefined;
       const isAfterRevertPoint =
         isGitRepo &&
@@ -1738,56 +1483,30 @@ export function ChatPage({
         })();
 
       return (
-        <div
+        <MessageView
           key={message.id}
-          className={isAfterRevertPoint ? "opacity-30 pointer-events-none" : ""}
-        >
-          <Message from={message.role === "user" ? "user" : "assistant"}>
-            <MessageContent>
-              {agent && (
-                <div className="text-[10px] font-medium uppercase tracking-wider text-[var(--muted-foreground)]">
-                  {agent}
-                </div>
-              )}
-              {groupPartsIntoChains(parts).map((part) => {
-                if (part.type === "chain") {
-                  return (
-                    <ChainOfThought
-                      key={`chain-${part.filePath}-${part.parts[0]?.id ?? "start"}`}
-                      filePath={part.filePath}
-                      stepCount={part.parts.length}
-                    >
-                      {part.parts.map((chainPart) =>
-                        renderPart(chainPart, message),
-                      )}
-                    </ChainOfThought>
-                  );
-                }
-                return renderPart(part, message);
-              })}
-              {errorInfo &&
-                (() => {
-                  const errorText = errorInfo.message || errorInfo.type || "";
-                  const isAbort =
-                    !errorText ||
-                    /abort/i.test(errorText) ||
-                    /abort/i.test(errorInfo.type || "");
-                  if (isAbort) {
-                    return (
-                      <div className="rounded-lg border border-zinc-600/30 bg-zinc-700/10 px-3 py-2 text-sm text-zinc-400">
-                        Response stopped
-                      </div>
-                    );
-                  }
-                  return (
-                    <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-400">
-                      Error: {errorText}
-                    </div>
-                  );
-                })()}
-            </MessageContent>
-            {message.role === "assistant" && (
-              <MessageToolbar>
+          message={message}
+          parts={parts}
+          renderOptions={{
+            isStreaming,
+            isLastAssistantMessage: message.id === lastAssistantMessage?.id,
+            onAddComment: handleAddComment,
+            getDiffAnnotations,
+            getFileComments,
+            getSourcesForToolPart,
+            sessionId,
+            archived: isArchivedSession,
+            childSessions: childSessionsList,
+            fetchChildData: fetchChildMessages,
+            getChildMessages,
+            getChildPartsForMessage,
+            getChildStatus,
+            liveChildSessionIds,
+          }}
+          enableChainGrouping
+          toolbar={
+            message.role === "assistant" ? (
+              <>
                 <ContextIndicator
                   tokens={message.tokens}
                   cost={message.cost}
@@ -1814,10 +1533,20 @@ export function ChatPage({
                     <Copy className="h-3.5 w-3.5" />
                   </MessageAction>
                 </MessageActions>
-              </MessageToolbar>
-            )}
-          </Message>
-        </div>
+              </>
+            ) : undefined
+          }
+          errorInfo={
+            errorInfo as
+              | {
+                  message?: string;
+                  type?: string;
+                  data?: Record<string, unknown>;
+                }
+              | undefined
+          }
+          className={isAfterRevertPoint ? "opacity-30 pointer-events-none" : ""}
+        />
       );
     });
   }, [
@@ -1825,8 +1554,20 @@ export function ChatPage({
     getDisplayParts,
     isGitRepo,
     revertState,
-    groupPartsIntoChains,
-    renderPart,
+    isStreaming,
+    lastAssistantMessage,
+    handleAddComment,
+    getDiffAnnotations,
+    getFileComments,
+    getSourcesForToolPart,
+    sessionId,
+    isArchivedSession,
+    childSessionsList,
+    fetchChildMessages,
+    getChildMessages,
+    getChildPartsForMessage,
+    getChildStatus,
+    liveChildSessionIds,
     copyMessage,
     handleRevert,
   ]);

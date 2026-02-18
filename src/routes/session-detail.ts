@@ -726,62 +726,221 @@ api.get("/:id/children", async (c) => {
   c.var.session.metadata.sessionDbId = session.id;
 
   if (!session.sandboxId) {
-    return c.json({ error: "Session has no active sandbox" }, 400);
+    // Return 503 (retryable) if session is still initializing, 400 if truly invalid
+    const status = session.status === "creating" ? 503 : 400;
+    return c.json(
+      {
+        error:
+          session.status === "creating"
+            ? "Session sandbox is still initializing"
+            : "Session has no active sandbox",
+      },
+      status,
+    );
   }
 
-  // Download the SQLite DB from the sandbox once, extract all child data, then clean up
-  const { sandboxReadFile } = await import("@agentuity/server");
-  const { OpenCodeDBReader } = await import("../lib/sqlite");
-  const { unlink } = await import("node:fs/promises");
+  // Query SQLite inside the sandbox via sandboxExecute (no file download needed)
+  const { sandboxExecute } = await import("@agentuity/server");
 
-  const OPENCODE_DB_PATH = "/home/agentuity/.local/share/opencode/opencode.db";
-  const tmpPath = `/tmp/live-children-${session.id}-${Date.now()}.db`;
+  const CHILDREN_QUERY_SCRIPT = `
+try {
+  const { Database } = require('bun:sqlite');
+  const fs = require('fs');
+  const dbPath = '/home/agentuity/.local/share/opencode/opencode.db';
+
+  // Check if DB exists
+  if (!fs.existsSync(dbPath)) {
+    console.log(JSON.stringify({ children: [], debug: { error: 'DB not found', path: dbPath } }));
+    process.exit(0);
+  }
+
+  const db = new Database(dbPath, { readonly: true });
+
+  // Check what tables exist
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
+
+  // Get total session count and check for parent_id column
+  let totalSessions = 0;
+  let sessionsWithParent = 0;
+  let allSessionIds = [];
+
+  if (tables.includes('session')) {
+    // Check actual columns in session table
+    const tableInfo = db.prepare("PRAGMA table_info(session)").all();
+    const columnNames = tableInfo.map(c => c.name);
+
+    let partColumns = [];
+    if (tables.includes('part')) {
+      const partInfo = db.prepare("PRAGMA table_info(part)").all();
+      partColumns = partInfo.map(c => c.name);
+    }
+
+    totalSessions = db.prepare('SELECT COUNT(*) as cnt FROM session').get()?.cnt || 0;
+
+    if (columnNames.includes('parent_id')) {
+      sessionsWithParent = db.prepare('SELECT COUNT(*) as cnt FROM session WHERE parent_id IS NOT NULL').get()?.cnt || 0;
+      allSessionIds = db.prepare('SELECT id, parent_id, title FROM session').all();
+    }
+
+    const sessions = sessionsWithParent > 0
+      ? db.prepare(\`
+          SELECT id, parent_id, title, slug, directory, version, time_created, time_updated
+          FROM session WHERE parent_id IS NOT NULL
+        \`).all()
+      : [];
+
+    const children = sessions.map(s => {
+      let cost = { message_count: 0, total_tokens: 0, total_cost: 0 };
+      try {
+        // Determine correct content column name
+        const contentCol = partColumns.includes('content') ? 'content' :
+                           partColumns.includes('data') ? 'data' : null;
+
+        if (contentCol && tables.includes('message') && tables.includes('part')) {
+          cost = db.prepare(\`
+            SELECT
+              COUNT(DISTINCT m.id) as message_count,
+              COALESCE(SUM(CASE WHEN json_valid(p.\${contentCol}) THEN
+                COALESCE(json_extract(p.\${contentCol}, '$.usage.inputTokens'), 0) +
+                COALESCE(json_extract(p.\${contentCol}, '$.usage.outputTokens'), 0)
+              ELSE 0 END), 0) as total_tokens,
+              COALESCE(SUM(CASE WHEN json_valid(p.\${contentCol}) THEN
+                COALESCE(json_extract(p.\${contentCol}, '$.cost'), 0)
+              ELSE 0 END), 0) as total_cost
+            FROM message m
+            LEFT JOIN part p ON p.message_id = m.id
+            WHERE m.session_id = ?
+          \`).get(s.id) || cost;
+        } else {
+          // Fallback: just count messages
+          const msgCount = db.prepare('SELECT COUNT(*) as cnt FROM message WHERE session_id = ?').get(s.id);
+          cost = { message_count: msgCount?.cnt || 0, total_tokens: 0, total_cost: 0 };
+        }
+      } catch (costErr) {
+        // Cost query failed — still return the session with zero cost
+        try {
+          const msgCount = db.prepare('SELECT COUNT(*) as cnt FROM message WHERE session_id = ?').get(s.id);
+          cost = { message_count: msgCount?.cnt || 0, total_tokens: 0, total_cost: 0 };
+        } catch {}
+      }
+      return {
+        id: s.id,
+        opencodeSessionId: s.id,
+        parentSessionId: s.parent_id,
+        title: s.title,
+        totalCost: cost.total_cost || 0,
+        totalTokens: cost.total_tokens || 0,
+        messageCount: cost.message_count || 0,
+        timeCreated: s.time_created,
+        metadata: {
+          slug: s.slug,
+          directory: s.directory,
+          version: s.version,
+        },
+      };
+    });
+
+    db.close();
+    console.log(JSON.stringify({
+      children,
+      debug: {
+        tables,
+        columnNames,
+        partColumns,
+        totalSessions,
+        sessionsWithParent,
+        allSessionIds: allSessionIds.slice(0, 20),
+      }
+    }));
+  } else {
+    db.close();
+    console.log(JSON.stringify({ children: [], debug: { error: 'No session table', tables } }));
+  }
+} catch (e) {
+  console.error(e?.message || String(e));
+  console.log(JSON.stringify({ children: [], debug: { error: e?.message || String(e) } }));
+  process.exit(0);
+}
+`.trim();
 
   try {
     const apiClient = (c.var.sandbox as any).client;
-    const stream = await sandboxReadFile(apiClient, {
-      sandboxId: session.sandboxId,
-      path: OPENCODE_DB_PATH,
-    });
+    const execution = await sandboxExecute(
+      apiClient as Parameters<typeof sandboxExecute>[0],
+      {
+        sandboxId: session.sandboxId,
+        options: {
+          command: ["bun", "-e", CHILDREN_QUERY_SCRIPT],
+          timeout: "30s",
+        },
+      },
+    );
 
-    await Bun.write(tmpPath, new Response(stream));
-
-    const reader = new OpenCodeDBReader({ dbPath: tmpPath });
-    if (!reader.open()) {
-      c.var.logger.warn("Failed to open sandbox SQLite", {
-        sessionId: session.id,
-      });
-      return c.json({ children: [], warning: "Sandbox database unavailable" });
+    let stdout = "";
+    if (execution.stdoutStreamUrl) {
+      const res = await fetch(execution.stdoutStreamUrl);
+      stdout = await res.text();
     }
 
-    try {
-      // Find all sessions with a parent_id (i.e. child sessions)
-      const allSessions = reader.getAllSessions();
-      const childSessions = allSessions.filter((s) => s.parentId);
+    let stderr = "";
+    if (execution.stderrStreamUrl) {
+      const res = await fetch(execution.stderrStreamUrl);
+      stderr = await res.text();
+    }
 
-      const children = childSessions.map((child) => {
-        const cost = reader.getSessionCost(child.id);
-        return {
-          id: child.id,
-          opencodeSessionId: child.id,
-          parentSessionId: child.parentId,
-          title: child.title,
-          totalCost: cost.totalCost,
-          totalTokens: cost.totalTokens,
-          messageCount: cost.messageCount,
-          timeCreated: child.timeCreated,
-          metadata: {
-            slug: child.slug,
-            directory: child.directory,
-            version: child.version,
-          },
+    const exitCode =
+      typeof execution.exitCode === "number" ? execution.exitCode : 0;
+
+    if (exitCode !== 0 || !stdout.trim()) {
+      // Try to parse stdout even on error (script may have output JSON before failing)
+      let parsed = null;
+      try {
+        if (stdout.trim()) {
+          parsed = JSON.parse(stdout.trim());
+        }
+      } catch {}
+
+      c.var.logger.warn(
+        "sandboxExecute for children query failed or returned no data",
+        {
+          sessionId: session.id,
+          exitCode,
+          stderr: stderr.slice(0, 500),
+          stdout: stdout.slice(0, 200),
+        },
+      );
+      return c.json({
+        children: parsed?.children || [],
+        warning: "Live child sessions unavailable",
+      });
+    }
+
+    const data = JSON.parse(stdout.trim()) as {
+      children: Array<{
+        id: string;
+        opencodeSessionId: string;
+        parentSessionId: string;
+        title: string;
+        totalCost: number;
+        totalTokens: number;
+        messageCount: number;
+        timeCreated: number;
+        metadata: {
+          slug: string;
+          directory: string;
+          version: string;
         };
-      });
+      }>;
+      debug?: Record<string, unknown>;
+    };
 
-      return c.json({ children });
-    } finally {
-      reader.close();
+    if (data.debug) {
+      c.var.logger.debug("Children query diagnostics", data.debug);
     }
+
+    return c.json({
+      children: data.children,
+    });
   } catch (error) {
     c.var.logger.debug(
       "Live child sessions unavailable (sandbox may not have OpenCode SQLite DB)",
@@ -789,23 +948,264 @@ api.get("/:id/children", async (c) => {
         sessionId: session.id,
       },
     );
-    return c.json({ children: [], warning: "Live child sessions unavailable" });
-  } finally {
-    try {
-      await unlink(tmpPath);
-    } catch {
-      // Best-effort cleanup
+    return c.json({
+      children: [],
+      warning: "Live child sessions unavailable",
+    });
+  }
+});
+
+// GET /api/sessions/:id/children/:childId — get full child session data from running sandbox SQLite
+api.get("/:id/children/:childId", async (c) => {
+  const user = c.get("user")!;
+  const [session] = await db
+    .select()
+    .from(chatSessions)
+    .where(
+      and(
+        eq(chatSessions.id, c.req.param("id")),
+        eq(chatSessions.createdBy, user.id),
+      ),
+    );
+  if (!session) return c.json({ error: "Session not found" }, 404);
+
+  c.var.session.metadata.action = "get-live-child-detail";
+  c.var.session.metadata.sessionDbId = session.id;
+
+  const childId = c.req.param("childId");
+
+  if (!session.sandboxId) {
+    const status = session.status === "creating" ? 503 : 400;
+    return c.json(
+      {
+        error:
+          session.status === "creating"
+            ? "Session sandbox is still initializing"
+            : "Session has no active sandbox",
+      },
+      status,
+    );
+  }
+
+  const { sandboxExecute } = await import("@agentuity/server");
+
+  const CHILD_DETAIL_SCRIPT = `
+try {
+  const { Database } = require('bun:sqlite');
+  const fs = require('fs');
+  const dbPath = '/home/agentuity/.local/share/opencode/opencode.db';
+  const childId = ${JSON.stringify(childId)};
+
+  if (!fs.existsSync(dbPath)) {
+    console.log(JSON.stringify({ error: 'DB not found' }));
+    process.exit(0);
+  }
+
+  const db = new Database(dbPath, { readonly: true });
+
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(t => t.name);
+
+  if (!tables.includes('session')) {
+    db.close();
+    console.log(JSON.stringify({ error: 'No session table' }));
+    process.exit(0);
+  }
+
+  // Auto-detect column names
+  const sessionInfo = db.prepare("PRAGMA table_info(session)").all();
+  const sessionCols = sessionInfo.map(c => c.name);
+
+  let partColumns = [];
+  if (tables.includes('part')) {
+    const partInfo = db.prepare("PRAGMA table_info(part)").all();
+    partColumns = partInfo.map(c => c.name);
+  }
+
+  let messageColumns = [];
+  if (tables.includes('message')) {
+    const msgInfo = db.prepare("PRAGMA table_info(message)").all();
+    messageColumns = msgInfo.map(c => c.name);
+  }
+
+  // Get the child session
+  const childSession = db.prepare('SELECT * FROM session WHERE id = ?').get(childId);
+  if (!childSession) {
+    db.close();
+    console.log(JSON.stringify({ error: 'Child session not found' }));
+    process.exit(0);
+  }
+
+  // Determine content column for parts (data vs content)
+  const contentCol = partColumns.includes('content') ? 'content' :
+                     partColumns.includes('data') ? 'data' : null;
+
+  // Calculate cost (same logic as children list endpoint)
+  let cost = { message_count: 0, total_tokens: 0, total_cost: 0 };
+  try {
+    if (contentCol && tables.includes('message') && tables.includes('part')) {
+      cost = db.prepare(\`
+        SELECT
+          COUNT(DISTINCT m.id) as message_count,
+          COALESCE(SUM(CASE WHEN json_valid(p.\${contentCol}) THEN
+            COALESCE(json_extract(p.\${contentCol}, '$.usage.inputTokens'), 0) +
+            COALESCE(json_extract(p.\${contentCol}, '$.usage.outputTokens'), 0)
+          ELSE 0 END), 0) as total_tokens,
+          COALESCE(SUM(CASE WHEN json_valid(p.\${contentCol}) THEN
+            COALESCE(json_extract(p.\${contentCol}, '$.cost'), 0)
+          ELSE 0 END), 0) as total_cost
+        FROM message m
+        LEFT JOIN part p ON p.message_id = m.id
+        WHERE m.session_id = ?
+      \`).get(childId) || cost;
+    } else {
+      const msgCount = db.prepare('SELECT COUNT(*) as cnt FROM message WHERE session_id = ?').get(childId);
+      cost = { message_count: msgCount?.cnt || 0, total_tokens: 0, total_cost: 0 };
     }
+  } catch (costErr) {
     try {
-      await unlink(`${tmpPath}-wal`);
-    } catch {
-      // Best-effort cleanup
-    }
+      const msgCount = db.prepare('SELECT COUNT(*) as cnt FROM message WHERE session_id = ?').get(childId);
+      cost = { message_count: msgCount?.cnt || 0, total_tokens: 0, total_cost: 0 };
+    } catch {}
+  }
+
+  // Build session summary
+  const sessionData = {
+    id: childSession.id,
+    opencodeSessionId: childSession.id,
+    parentSessionId: childSession.parent_id || null,
+    title: childSession.title || null,
+    totalCost: cost.total_cost || 0,
+    totalTokens: cost.total_tokens || 0,
+    messageCount: cost.message_count || 0,
+    timeCreated: childSession.time_created || null,
+    metadata: {
+      slug: childSession.slug || null,
+      directory: childSession.directory || null,
+      version: childSession.version || null,
+    },
+  };
+
+  // Get messages
+  const msgDataCol = messageColumns.includes('data') ? 'data' :
+                     messageColumns.includes('content') ? 'content' : null;
+  let messages = [];
+  if (tables.includes('message')) {
+    const rawMessages = db.prepare('SELECT * FROM message WHERE session_id = ? ORDER BY rowid').all(childId);
+    messages = rawMessages.map(row => {
+      if (msgDataCol && row[msgDataCol]) {
+        try {
+          const parsed = JSON.parse(row[msgDataCol]);
+          return { ...parsed, id: row.id, sessionID: childId };
+        } catch {}
+      }
+      // Fallback: build from individual columns
+      const msg = { id: row.id, sessionID: childId };
+      if (row.role !== undefined) msg.role = row.role;
+      if (row.time_created !== undefined) msg.createdAt = row.time_created;
+      return msg;
+    });
+  }
+
+  // Get parts
+  let parts = [];
+  if (tables.includes('part') && contentCol) {
+    const rawParts = db.prepare('SELECT * FROM part WHERE session_id = ? ORDER BY rowid').all(childId);
+    parts = rawParts.map(row => {
+      let parsed = {};
+      if (row[contentCol]) {
+        try {
+          parsed = JSON.parse(row[contentCol]);
+        } catch {}
+      }
+      return { ...parsed, id: row.id, sessionID: childId, messageID: row.message_id || '' };
+    });
+  }
+
+  // Get todos (if table exists)
+  let todos = [];
+  if (tables.includes('todo')) {
     try {
-      await unlink(`${tmpPath}-shm`);
-    } catch {
-      // Best-effort cleanup
+      const rawTodos = db.prepare('SELECT * FROM todo WHERE session_id = ? ORDER BY rowid').all(childId);
+      todos = rawTodos.map(row => ({
+        id: row.id,
+        content: row.content || '',
+        status: row.status || '',
+        priority: row.priority || '',
+      }));
+    } catch {}
+  }
+
+  db.close();
+  console.log(JSON.stringify({ session: sessionData, messages, parts, todos }));
+} catch (e) {
+  console.error(e?.message || String(e));
+  console.log(JSON.stringify({ error: e?.message || String(e) }));
+  process.exit(0);
+}
+`.trim();
+
+  try {
+    const apiClient = (c.var.sandbox as any).client;
+    const execution = await sandboxExecute(
+      apiClient as Parameters<typeof sandboxExecute>[0],
+      {
+        sandboxId: session.sandboxId,
+        options: {
+          command: ["bun", "-e", CHILD_DETAIL_SCRIPT],
+          timeout: "30s",
+        },
+      },
+    );
+
+    let stdout = "";
+    if (execution.stdoutStreamUrl) {
+      const res = await fetch(execution.stdoutStreamUrl);
+      stdout = await res.text();
     }
+
+    let stderr = "";
+    if (execution.stderrStreamUrl) {
+      const res = await fetch(execution.stderrStreamUrl);
+      stderr = await res.text();
+    }
+
+    const exitCode =
+      typeof execution.exitCode === "number" ? execution.exitCode : 0;
+
+    if (exitCode !== 0 || !stdout.trim()) {
+      c.var.logger.warn(
+        "sandboxExecute for child detail query failed or returned no data",
+        {
+          sessionId: session.id,
+          childId,
+          exitCode,
+          stderr: stderr.slice(0, 500),
+          stdout: stdout.slice(0, 200),
+        },
+      );
+      return c.json({ error: "Failed to fetch child session data" }, 503);
+    }
+
+    const data = JSON.parse(stdout.trim());
+
+    if (data.error) {
+      const status = data.error === "Child session not found" ? 404 : 500;
+      return c.json({ error: data.error }, status);
+    }
+
+    return c.json(data);
+  } catch (error) {
+    c.var.logger.warn(
+      "Live child session detail unavailable (sandbox may not have OpenCode SQLite DB)",
+      {
+        sessionId: session.id,
+        childId,
+      },
+    );
+    return c.json(
+      { error: "Failed to fetch child session data from sandbox" },
+      503,
+    );
   }
 });
 

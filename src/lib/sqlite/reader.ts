@@ -337,14 +337,14 @@ export class OpenCodeDBReader {
       // busy_timeout is safe on both readonly and readwrite connections.
       this.db.run("PRAGMA busy_timeout = 3000");
     } catch (error) {
-      console.warn("[OpenCodeDBReader] Failed to open database", error);
+      console.debug("[OpenCodeDBReader] Failed to open database", error);
       this.available = false;
       this.db = null;
       return false;
     }
 
     if (this.config.enableSchemaValidation && !this.validateSchema()) {
-      console.warn("[OpenCodeDBReader] Required tables missing in database");
+      console.debug("[OpenCodeDBReader] Required tables missing in database");
       this.close();
       this.available = false;
       return false;

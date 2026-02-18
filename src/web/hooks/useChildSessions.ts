@@ -34,6 +34,7 @@ export interface ChildSessionData {
 
 interface UseChildSessionsOptions {
   archived?: boolean;
+  sessionStatus?: string;
 }
 
 export function useChildSessions(
@@ -43,6 +44,8 @@ export function useChildSessions(
   const [children, setChildren] = useState<ChildSessionSummary[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Incrementing this forces the fetch effect to re-run after hasFetched is reset
+  const [retryCounter, setRetryCounter] = useState(0);
 
   // Cache child message data by child session ID to avoid re-fetching
   const childDataCache = useRef<Map<string, ChildSessionData>>(new Map());
@@ -52,6 +55,7 @@ export function useChildSessions(
   const lastArchivedMode = useRef<boolean | undefined>(undefined);
 
   const archived = options?.archived ?? false;
+  const sessionStatus = options?.sessionStatus;
 
   // Reset cache when sessionId or archived mode changes
   if (
@@ -64,6 +68,18 @@ export function useChildSessions(
     childDataCache.current.clear();
   }
 
+  // Re-fetch children when session transitions to "active" and we have no data
+  // biome-ignore lint/correctness/useExhaustiveDependencies: children.length is intentionally read as snapshot, not reactive dep
+  useEffect(() => {
+    if (sessionStatus === "active" && hasFetched.current) {
+      if (children.length === 0) {
+        hasFetched.current = false;
+        setRetryCounter((c) => c + 1);
+      }
+    }
+  }, [sessionStatus]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: retryCounter triggers re-fetch after hasFetched ref is reset
   useEffect(() => {
     if (!sessionId || hasFetched.current) return;
 
@@ -102,7 +118,7 @@ export function useChildSessions(
       isMounted = false;
       controller.abort();
     };
-  }, [sessionId, archived]);
+  }, [sessionId, archived, retryCounter]);
 
   /**
    * Fetch full messages/parts for a specific child session.
@@ -125,11 +141,42 @@ export function useChildSessions(
         // Cache the result
         childDataCache.current.set(childId, data);
         return data;
-      } catch {
+      } catch (err) {
+        // If archived endpoint fails, try live endpoint as fallback
+        // (child session data may still be accessible from the running sandbox)
+        if (archived) {
+          // Find the opencodeSessionId for this child (needed for live SQLite lookup)
+          const child = children.find((c) => c.id === childId);
+          const liveChildId = child?.opencodeSessionId ?? childId;
+          const liveUrl = `/api/sessions/${sessionId}/children/${liveChildId}`;
+          try {
+            const liveRes = await apiFetch(liveUrl);
+            const liveData = (await liveRes.json()) as ChildSessionData;
+            childDataCache.current.set(childId, liveData);
+            return liveData;
+          } catch (liveErr) {
+            console.warn(
+              "[useChildSessions] fetchChildMessages failed (both archived and live):",
+              {
+                childId,
+                liveChildId,
+                archivedError: err instanceof Error ? err.message : String(err),
+                liveError:
+                  liveErr instanceof Error ? liveErr.message : String(liveErr),
+              },
+            );
+            return null;
+          }
+        }
+        console.warn("[useChildSessions] fetchChildMessages failed:", {
+          childId,
+          url,
+          error: err instanceof Error ? err.message : String(err),
+        });
         return null;
       }
     },
-    [sessionId, archived],
+    [sessionId, archived, children],
   );
 
   return { children, isLoading, error, fetchChildMessages };
