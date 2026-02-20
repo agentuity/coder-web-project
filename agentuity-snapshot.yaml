@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://agentuity.dev/schema/cli/v1/agentuity-snapshot.json
+#
+# Agentuity Snapshot Build File
+# =============================
+# OpenCode runtime + Chromium + Chrome DevTools MCP.
+# Build: agentuity cloud sandbox snapshot build . --env ANTHROPIC_API_KEY=...
+#
+
+version: 1
+runtime: opencode:latest
+name: opencode-chromium
+description: OpenCode with Chromium and Chrome DevTools MCP
+
+# Chromium (pulls in all needed libs as transitive deps)
+dependencies:
+  - chromium
+  - fonts-liberation
+
+# OpenCode config with Chrome DevTools MCP
+files:
+  - .config/opencode/opencode.json
+
+env:
+  PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
+  PUPPETEER_EXECUTABLE_PATH: /usr/bin/chromium
+  CHROME_PATH: /usr/bin/chromium
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}

@@ -17,6 +17,7 @@ import { SettingsPage } from './components/pages/SettingsPage';
 import { SharedSessionPage } from './components/pages/SharedSessionPage';
 import { SkillsPage } from './components/pages/SkillsPage';
 import { SourcesPage } from './components/pages/SourcesPage';
+import { WebhooksPage } from './components/pages/WebhooksPage';
 import { WorkspacePage } from './components/pages/WorkspacePage';
 import { ToastProvider } from './components/ui/toast';
 import { AppProvider, useAppContext } from './context/AppContext';
@@ -110,6 +111,18 @@ function SourcesRoute() {
   return <SourcesPage workspaceId={workspaceId} />;
 }
 
+function WebhooksRoute() {
+  const { workspaceId } = useAppContext();
+  if (!workspaceId) {
+    return (
+      <div className="p-6">
+        <div className="text-sm text-[var(--muted-foreground)]">Loading workspace...</div>
+      </div>
+    );
+  }
+  return <WebhooksPage workspaceId={workspaceId} />;
+}
+
 function SettingsRoute() {
   const { workspaceId, handleWorkspaceChange } = useAppContext();
   if (!workspaceId) {
@@ -157,6 +170,12 @@ const sourcesRoute = createRoute({
   component: SourcesRoute,
 });
 
+const webhooksRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/webhooks',
+  component: WebhooksRoute,
+});
+
 const profileRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/profile',
@@ -182,6 +201,7 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
   skillsRoute,
   sourcesRoute,
+  webhooksRoute,
   profileRoute,
   profileParamRoute,
   sharedRoute,

@@ -64,6 +64,13 @@
       "when": 1771200000000,
       "tag": "0008_proactive_archive_sync",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1771537243914,
+      "tag": "0009_opposite_sasquatch",
+      "breakpoints": true
     }
   ]
 }

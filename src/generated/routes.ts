@@ -49,11 +49,491 @@ declare module '@agentuity/frontend' {
 				stream: false;
 				params: never;
 			};
+	'GET /api/github/repos': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/github/repos/:owner/:repo/branches': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { owner: string; repo: string };
+			};
+	'GET /api/github/status': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
 	'GET /api/me': {
 				inputSchema: never;
 				outputSchema: never;
 				stream: false;
 				params: never;
+			};
+	'GET /api/sessions/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'PATCH /api/sessions/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'DELETE /api/sessions/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/abort': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/archive': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/archive/children': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/archive/children/:childId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; childId: string };
+			};
+	'GET /api/sessions/:id/children': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/children/:childId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; childId: string };
+			};
+	'GET /api/sessions/:id/diff': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/download': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/files': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/files/content': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'PUT /api/sessions/:id/files/content': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/files/image': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/fork': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/branch': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/checkout': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/commit': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/create-repo': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/github/diff': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/github/diff-file': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/init': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/github/log': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/pr': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/push': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/github/status': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/mcp/:name/connect': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; name: string };
+			};
+	'POST /api/sessions/:id/mcp/:name/disconnect': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; name: string };
+			};
+	'GET /api/sessions/:id/mcp/status': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/messages': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/messages': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/password': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/permissions/:reqId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; reqId: string };
+			};
+	'POST /api/sessions/:id/questions/:reqId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; reqId: string };
+			};
+	'POST /api/sessions/:id/retry': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/revert': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/share': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/snapshot': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/unrevert': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/shared/:streamId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { streamId: string };
+			};
+	'GET /api/user/github': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'PUT /api/user/github': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'DELETE /api/user/github': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/user/settings': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'PUT /api/user/settings': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/user/voice': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'PUT /api/user/voice': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/voice/condense': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/voice/narrate': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/voice/speech': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/voice/transcribe': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/webhooks/:id/trigger': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/workspaces': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/workspaces': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/workspaces/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'PATCH /api/workspaces/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'DELETE /api/workspaces/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/workspaces/:wid/sessions': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/sessions': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/settings/env': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'PUT /api/workspaces/:wid/settings/env': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'POST /api/workspaces/:wid/skills': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/skills': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'PATCH /api/workspaces/:wid/skills/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'DELETE /api/workspaces/:wid/skills/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'GET /api/workspaces/:wid/skills/search': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/snapshots': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'DELETE /api/workspaces/:wid/snapshots/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'POST /api/workspaces/:wid/sources': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/sources': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'PATCH /api/workspaces/:wid/sources/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'DELETE /api/workspaces/:wid/sources/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'POST /api/workspaces/:wid/webhooks': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/webhooks': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'PATCH /api/workspaces/:wid/webhooks/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'DELETE /api/workspaces/:wid/webhooks/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
 			};
 	}
 	
@@ -72,7 +552,12 @@ declare module '@agentuity/frontend' {
 	 * Maps SSE route paths to their schemas
 	 */
 	export interface SSERouteRegistry {
-
+	'/api/sessions/:id/events': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
 	}
 
 	/**
@@ -98,11 +583,491 @@ declare module '@agentuity/frontend' {
 			 */
 			get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
 		};
+		github: {
+			repos: {
+				/**
+				 * Route: GET /api/github/repos
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				owner: {
+					repo: {
+						branches: {
+							/**
+							 * Route: GET /api/github/repos/:owner/:repo/branches
+							 */
+							get: { input: never; output: never; type: 'api'; params: { owner: string; repo: string }; paramsTuple: [string, string] };
+						};
+					};
+				};
+			};
+			status: {
+				/**
+				 * Route: GET /api/github/status
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+		};
 		me: {
 			/**
 			 * Route: GET /api/me
 			 */
 			get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+		};
+		sessions: {
+			id: {
+				abort: {
+					/**
+					 * Route: POST /api/sessions/:id/abort
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				archive: {
+					children: {
+						childId: {
+							/**
+							 * Route: GET /api/sessions/:id/archive/children/:childId
+							 */
+							get: { input: never; output: never; type: 'api'; params: { id: string; childId: string }; paramsTuple: [string, string] };
+						};
+						/**
+						 * Route: GET /api/sessions/:id/archive/children
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					/**
+					 * Route: GET /api/sessions/:id/archive
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				children: {
+					childId: {
+						/**
+						 * Route: GET /api/sessions/:id/children/:childId
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string; childId: string }; paramsTuple: [string, string] };
+					};
+					/**
+					 * Route: GET /api/sessions/:id/children
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				/**
+				 * Route: DELETE /api/sessions/:id
+				 */
+				delete: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				diff: {
+					/**
+					 * Route: GET /api/sessions/:id/diff
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				download: {
+					/**
+					 * Route: GET /api/sessions/:id/download
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				events: {
+					/**
+					 * Route: GET /api/sessions/:id/events
+					 */
+					eventstream: { input: never; output: never; type: 'sse'; params: { id: string }; paramsTuple: [string] };
+				};
+				files: {
+					content: {
+						/**
+						 * Route: GET /api/sessions/:id/files/content
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+						/**
+						 * Route: PUT /api/sessions/:id/files/content
+						 */
+						put: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					/**
+					 * Route: GET /api/sessions/:id/files
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					image: {
+						/**
+						 * Route: GET /api/sessions/:id/files/image
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+				};
+				fork: {
+					/**
+					 * Route: POST /api/sessions/:id/fork
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				/**
+				 * Route: GET /api/sessions/:id
+				 */
+				get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				github: {
+					branch: {
+						/**
+						 * Route: POST /api/sessions/:id/github/branch
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					checkout: {
+						/**
+						 * Route: POST /api/sessions/:id/github/checkout
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					commit: {
+						/**
+						 * Route: POST /api/sessions/:id/github/commit
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					createRepo: {
+						/**
+						 * Route: POST /api/sessions/:id/github/create-repo
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					diff: {
+						/**
+						 * Route: GET /api/sessions/:id/github/diff
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					diffFile: {
+						/**
+						 * Route: GET /api/sessions/:id/github/diff-file
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					init: {
+						/**
+						 * Route: POST /api/sessions/:id/github/init
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					log: {
+						/**
+						 * Route: GET /api/sessions/:id/github/log
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					pr: {
+						/**
+						 * Route: POST /api/sessions/:id/github/pr
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					push: {
+						/**
+						 * Route: POST /api/sessions/:id/github/push
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					status: {
+						/**
+						 * Route: GET /api/sessions/:id/github/status
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+				};
+				mcp: {
+					name: {
+						connect: {
+							/**
+							 * Route: POST /api/sessions/:id/mcp/:name/connect
+							 */
+							post: { input: never; output: never; type: 'api'; params: { id: string; name: string }; paramsTuple: [string, string] };
+						};
+						disconnect: {
+							/**
+							 * Route: POST /api/sessions/:id/mcp/:name/disconnect
+							 */
+							post: { input: never; output: never; type: 'api'; params: { id: string; name: string }; paramsTuple: [string, string] };
+						};
+					};
+					status: {
+						/**
+						 * Route: GET /api/sessions/:id/mcp/status
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+				};
+				messages: {
+					/**
+					 * Route: GET /api/sessions/:id/messages
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					/**
+					 * Route: POST /api/sessions/:id/messages
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				password: {
+					/**
+					 * Route: GET /api/sessions/:id/password
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				/**
+				 * Route: PATCH /api/sessions/:id
+				 */
+				patch: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				permissions: {
+					reqId: {
+						/**
+						 * Route: POST /api/sessions/:id/permissions/:reqId
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string; reqId: string }; paramsTuple: [string, string] };
+					};
+				};
+				questions: {
+					reqId: {
+						/**
+						 * Route: POST /api/sessions/:id/questions/:reqId
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string; reqId: string }; paramsTuple: [string, string] };
+					};
+				};
+				retry: {
+					/**
+					 * Route: POST /api/sessions/:id/retry
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				revert: {
+					/**
+					 * Route: POST /api/sessions/:id/revert
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				share: {
+					/**
+					 * Route: POST /api/sessions/:id/share
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				snapshot: {
+					/**
+					 * Route: POST /api/sessions/:id/snapshot
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				unrevert: {
+					/**
+					 * Route: POST /api/sessions/:id/unrevert
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+			};
+		};
+		shared: {
+			streamId: {
+				/**
+				 * Route: GET /api/shared/:streamId
+				 */
+				get: { input: never; output: never; type: 'api'; params: { streamId: string }; paramsTuple: [string] };
+			};
+		};
+		user: {
+			github: {
+				/**
+				 * Route: DELETE /api/user/github
+				 */
+				delete: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				/**
+				 * Route: GET /api/user/github
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				/**
+				 * Route: PUT /api/user/github
+				 */
+				put: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			settings: {
+				/**
+				 * Route: GET /api/user/settings
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				/**
+				 * Route: PUT /api/user/settings
+				 */
+				put: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			voice: {
+				/**
+				 * Route: GET /api/user/voice
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				/**
+				 * Route: PUT /api/user/voice
+				 */
+				put: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+		};
+		voice: {
+			condense: {
+				/**
+				 * Route: POST /api/voice/condense
+				 */
+				post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			narrate: {
+				/**
+				 * Route: POST /api/voice/narrate
+				 */
+				post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			speech: {
+				/**
+				 * Route: POST /api/voice/speech
+				 */
+				post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			transcribe: {
+				/**
+				 * Route: POST /api/voice/transcribe
+				 */
+				post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+		};
+		webhooks: {
+			id: {
+				trigger: {
+					/**
+					 * Route: POST /api/webhooks/:id/trigger
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+			};
+		};
+		workspaces: {
+			/**
+			 * Route: GET /api/workspaces
+			 */
+			get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			id: {
+				/**
+				 * Route: DELETE /api/workspaces/:id
+				 */
+				delete: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				/**
+				 * Route: GET /api/workspaces/:id
+				 */
+				get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				/**
+				 * Route: PATCH /api/workspaces/:id
+				 */
+				patch: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+			};
+			/**
+			 * Route: POST /api/workspaces
+			 */
+			post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			wid: {
+				sessions: {
+					/**
+					 * Route: GET /api/workspaces/:wid/sessions
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					/**
+					 * Route: POST /api/workspaces/:wid/sessions
+					 */
+					post: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+				};
+				settings: {
+					env: {
+						/**
+						 * Route: GET /api/workspaces/:wid/settings/env
+						 */
+						get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+						/**
+						 * Route: PUT /api/workspaces/:wid/settings/env
+						 */
+						put: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					};
+				};
+				skills: {
+					/**
+					 * Route: GET /api/workspaces/:wid/skills
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					id: {
+						/**
+						 * Route: DELETE /api/workspaces/:wid/skills/:id
+						 */
+						delete: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+						/**
+						 * Route: PATCH /api/workspaces/:wid/skills/:id
+						 */
+						patch: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+					};
+					/**
+					 * Route: POST /api/workspaces/:wid/skills
+					 */
+					post: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					search: {
+						/**
+						 * Route: GET /api/workspaces/:wid/skills/search
+						 */
+						get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					};
+				};
+				snapshots: {
+					/**
+					 * Route: GET /api/workspaces/:wid/snapshots
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					id: {
+						/**
+						 * Route: DELETE /api/workspaces/:wid/snapshots/:id
+						 */
+						delete: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+					};
+				};
+				sources: {
+					/**
+					 * Route: GET /api/workspaces/:wid/sources
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					id: {
+						/**
+						 * Route: DELETE /api/workspaces/:wid/sources/:id
+						 */
+						delete: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+						/**
+						 * Route: PATCH /api/workspaces/:wid/sources/:id
+						 */
+						patch: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+					};
+					/**
+					 * Route: POST /api/workspaces/:wid/sources
+					 */
+					post: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+				};
+				webhooks: {
+					/**
+					 * Route: GET /api/workspaces/:wid/webhooks
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					id: {
+						/**
+						 * Route: DELETE /api/workspaces/:wid/webhooks/:id
+						 */
+						delete: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+						/**
+						 * Route: PATCH /api/workspaces/:wid/webhooks/:id
+						 */
+						patch: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+					};
+					/**
+					 * Route: POST /api/workspaces/:wid/webhooks
+					 */
+					post: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+				};
+			};
 		};
 	}
 }
@@ -129,18 +1094,503 @@ declare module '@agentuity/react' {
 				stream: false;
 				params: never;
 			};
+	'GET /api/github/repos': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/github/repos/:owner/:repo/branches': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { owner: string; repo: string };
+			};
+	'GET /api/github/status': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
 	'GET /api/me': {
 				inputSchema: never;
 				outputSchema: never;
 				stream: false;
 				params: never;
 			};
+	'GET /api/sessions/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'PATCH /api/sessions/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'DELETE /api/sessions/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/abort': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/archive': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/archive/children': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/archive/children/:childId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; childId: string };
+			};
+	'GET /api/sessions/:id/children': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/children/:childId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; childId: string };
+			};
+	'GET /api/sessions/:id/diff': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/download': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/files': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/files/content': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'PUT /api/sessions/:id/files/content': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/files/image': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/fork': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/branch': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/checkout': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/commit': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/create-repo': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/github/diff': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/github/diff-file': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/init': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/github/log': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/pr': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/github/push': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/github/status': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/mcp/:name/connect': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; name: string };
+			};
+	'POST /api/sessions/:id/mcp/:name/disconnect': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; name: string };
+			};
+	'GET /api/sessions/:id/mcp/status': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/messages': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/messages': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/sessions/:id/password': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/permissions/:reqId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; reqId: string };
+			};
+	'POST /api/sessions/:id/questions/:reqId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string; reqId: string };
+			};
+	'POST /api/sessions/:id/retry': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/revert': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/share': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/snapshot': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/sessions/:id/unrevert': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'GET /api/shared/:streamId': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { streamId: string };
+			};
+	'GET /api/user/github': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'PUT /api/user/github': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'DELETE /api/user/github': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/user/settings': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'PUT /api/user/settings': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/user/voice': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'PUT /api/user/voice': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/voice/condense': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/voice/narrate': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/voice/speech': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/voice/transcribe': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'POST /api/webhooks/:id/trigger': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/workspaces': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/workspaces': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: never;
+			};
+	'GET /api/workspaces/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'PATCH /api/workspaces/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'DELETE /api/workspaces/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
+	'POST /api/workspaces/:wid/sessions': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/sessions': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/settings/env': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'PUT /api/workspaces/:wid/settings/env': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'POST /api/workspaces/:wid/skills': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/skills': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'PATCH /api/workspaces/:wid/skills/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'DELETE /api/workspaces/:wid/skills/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'GET /api/workspaces/:wid/skills/search': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/snapshots': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'DELETE /api/workspaces/:wid/snapshots/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'POST /api/workspaces/:wid/sources': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/sources': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'PATCH /api/workspaces/:wid/sources/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'DELETE /api/workspaces/:wid/sources/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'POST /api/workspaces/:wid/webhooks': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'GET /api/workspaces/:wid/webhooks': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string };
+			};
+	'PATCH /api/workspaces/:wid/webhooks/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
+	'DELETE /api/workspaces/:wid/webhooks/:id': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { wid: string; id: string };
+			};
 	}
 	export interface WebSocketRouteRegistry {
 
 	}
 	export interface SSERouteRegistry {
-
+	'/api/sessions/:id/events': {
+				inputSchema: never;
+				outputSchema: never;
+				stream: false;
+				params: { id: string };
+			};
 	}
 	export interface RPCRouteRegistry {
 		auth: {
@@ -159,11 +1609,491 @@ declare module '@agentuity/react' {
 			 */
 			get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
 		};
+		github: {
+			repos: {
+				/**
+				 * Route: GET /api/github/repos
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				owner: {
+					repo: {
+						branches: {
+							/**
+							 * Route: GET /api/github/repos/:owner/:repo/branches
+							 */
+							get: { input: never; output: never; type: 'api'; params: { owner: string; repo: string }; paramsTuple: [string, string] };
+						};
+					};
+				};
+			};
+			status: {
+				/**
+				 * Route: GET /api/github/status
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+		};
 		me: {
 			/**
 			 * Route: GET /api/me
 			 */
 			get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+		};
+		sessions: {
+			id: {
+				abort: {
+					/**
+					 * Route: POST /api/sessions/:id/abort
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				archive: {
+					children: {
+						childId: {
+							/**
+							 * Route: GET /api/sessions/:id/archive/children/:childId
+							 */
+							get: { input: never; output: never; type: 'api'; params: { id: string; childId: string }; paramsTuple: [string, string] };
+						};
+						/**
+						 * Route: GET /api/sessions/:id/archive/children
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					/**
+					 * Route: GET /api/sessions/:id/archive
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				children: {
+					childId: {
+						/**
+						 * Route: GET /api/sessions/:id/children/:childId
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string; childId: string }; paramsTuple: [string, string] };
+					};
+					/**
+					 * Route: GET /api/sessions/:id/children
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				/**
+				 * Route: DELETE /api/sessions/:id
+				 */
+				delete: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				diff: {
+					/**
+					 * Route: GET /api/sessions/:id/diff
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				download: {
+					/**
+					 * Route: GET /api/sessions/:id/download
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				events: {
+					/**
+					 * Route: GET /api/sessions/:id/events
+					 */
+					eventstream: { input: never; output: never; type: 'sse'; params: { id: string }; paramsTuple: [string] };
+				};
+				files: {
+					content: {
+						/**
+						 * Route: GET /api/sessions/:id/files/content
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+						/**
+						 * Route: PUT /api/sessions/:id/files/content
+						 */
+						put: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					/**
+					 * Route: GET /api/sessions/:id/files
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					image: {
+						/**
+						 * Route: GET /api/sessions/:id/files/image
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+				};
+				fork: {
+					/**
+					 * Route: POST /api/sessions/:id/fork
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				/**
+				 * Route: GET /api/sessions/:id
+				 */
+				get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				github: {
+					branch: {
+						/**
+						 * Route: POST /api/sessions/:id/github/branch
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					checkout: {
+						/**
+						 * Route: POST /api/sessions/:id/github/checkout
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					commit: {
+						/**
+						 * Route: POST /api/sessions/:id/github/commit
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					createRepo: {
+						/**
+						 * Route: POST /api/sessions/:id/github/create-repo
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					diff: {
+						/**
+						 * Route: GET /api/sessions/:id/github/diff
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					diffFile: {
+						/**
+						 * Route: GET /api/sessions/:id/github/diff-file
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					init: {
+						/**
+						 * Route: POST /api/sessions/:id/github/init
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					log: {
+						/**
+						 * Route: GET /api/sessions/:id/github/log
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					pr: {
+						/**
+						 * Route: POST /api/sessions/:id/github/pr
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					push: {
+						/**
+						 * Route: POST /api/sessions/:id/github/push
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+					status: {
+						/**
+						 * Route: GET /api/sessions/:id/github/status
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+				};
+				mcp: {
+					name: {
+						connect: {
+							/**
+							 * Route: POST /api/sessions/:id/mcp/:name/connect
+							 */
+							post: { input: never; output: never; type: 'api'; params: { id: string; name: string }; paramsTuple: [string, string] };
+						};
+						disconnect: {
+							/**
+							 * Route: POST /api/sessions/:id/mcp/:name/disconnect
+							 */
+							post: { input: never; output: never; type: 'api'; params: { id: string; name: string }; paramsTuple: [string, string] };
+						};
+					};
+					status: {
+						/**
+						 * Route: GET /api/sessions/:id/mcp/status
+						 */
+						get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					};
+				};
+				messages: {
+					/**
+					 * Route: GET /api/sessions/:id/messages
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+					/**
+					 * Route: POST /api/sessions/:id/messages
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				password: {
+					/**
+					 * Route: GET /api/sessions/:id/password
+					 */
+					get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				/**
+				 * Route: PATCH /api/sessions/:id
+				 */
+				patch: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				permissions: {
+					reqId: {
+						/**
+						 * Route: POST /api/sessions/:id/permissions/:reqId
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string; reqId: string }; paramsTuple: [string, string] };
+					};
+				};
+				questions: {
+					reqId: {
+						/**
+						 * Route: POST /api/sessions/:id/questions/:reqId
+						 */
+						post: { input: never; output: never; type: 'api'; params: { id: string; reqId: string }; paramsTuple: [string, string] };
+					};
+				};
+				retry: {
+					/**
+					 * Route: POST /api/sessions/:id/retry
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				revert: {
+					/**
+					 * Route: POST /api/sessions/:id/revert
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				share: {
+					/**
+					 * Route: POST /api/sessions/:id/share
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				snapshot: {
+					/**
+					 * Route: POST /api/sessions/:id/snapshot
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+				unrevert: {
+					/**
+					 * Route: POST /api/sessions/:id/unrevert
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+			};
+		};
+		shared: {
+			streamId: {
+				/**
+				 * Route: GET /api/shared/:streamId
+				 */
+				get: { input: never; output: never; type: 'api'; params: { streamId: string }; paramsTuple: [string] };
+			};
+		};
+		user: {
+			github: {
+				/**
+				 * Route: DELETE /api/user/github
+				 */
+				delete: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				/**
+				 * Route: GET /api/user/github
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				/**
+				 * Route: PUT /api/user/github
+				 */
+				put: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			settings: {
+				/**
+				 * Route: GET /api/user/settings
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				/**
+				 * Route: PUT /api/user/settings
+				 */
+				put: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			voice: {
+				/**
+				 * Route: GET /api/user/voice
+				 */
+				get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+				/**
+				 * Route: PUT /api/user/voice
+				 */
+				put: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+		};
+		voice: {
+			condense: {
+				/**
+				 * Route: POST /api/voice/condense
+				 */
+				post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			narrate: {
+				/**
+				 * Route: POST /api/voice/narrate
+				 */
+				post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			speech: {
+				/**
+				 * Route: POST /api/voice/speech
+				 */
+				post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+			transcribe: {
+				/**
+				 * Route: POST /api/voice/transcribe
+				 */
+				post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			};
+		};
+		webhooks: {
+			id: {
+				trigger: {
+					/**
+					 * Route: POST /api/webhooks/:id/trigger
+					 */
+					post: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				};
+			};
+		};
+		workspaces: {
+			/**
+			 * Route: GET /api/workspaces
+			 */
+			get: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			id: {
+				/**
+				 * Route: DELETE /api/workspaces/:id
+				 */
+				delete: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				/**
+				 * Route: GET /api/workspaces/:id
+				 */
+				get: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+				/**
+				 * Route: PATCH /api/workspaces/:id
+				 */
+				patch: { input: never; output: never; type: 'api'; params: { id: string }; paramsTuple: [string] };
+			};
+			/**
+			 * Route: POST /api/workspaces
+			 */
+			post: { input: never; output: never; type: 'api'; params: never; paramsTuple: [] };
+			wid: {
+				sessions: {
+					/**
+					 * Route: GET /api/workspaces/:wid/sessions
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					/**
+					 * Route: POST /api/workspaces/:wid/sessions
+					 */
+					post: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+				};
+				settings: {
+					env: {
+						/**
+						 * Route: GET /api/workspaces/:wid/settings/env
+						 */
+						get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+						/**
+						 * Route: PUT /api/workspaces/:wid/settings/env
+						 */
+						put: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					};
+				};
+				skills: {
+					/**
+					 * Route: GET /api/workspaces/:wid/skills
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					id: {
+						/**
+						 * Route: DELETE /api/workspaces/:wid/skills/:id
+						 */
+						delete: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+						/**
+						 * Route: PATCH /api/workspaces/:wid/skills/:id
+						 */
+						patch: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+					};
+					/**
+					 * Route: POST /api/workspaces/:wid/skills
+					 */
+					post: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					search: {
+						/**
+						 * Route: GET /api/workspaces/:wid/skills/search
+						 */
+						get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					};
+				};
+				snapshots: {
+					/**
+					 * Route: GET /api/workspaces/:wid/snapshots
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					id: {
+						/**
+						 * Route: DELETE /api/workspaces/:wid/snapshots/:id
+						 */
+						delete: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+					};
+				};
+				sources: {
+					/**
+					 * Route: GET /api/workspaces/:wid/sources
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					id: {
+						/**
+						 * Route: DELETE /api/workspaces/:wid/sources/:id
+						 */
+						delete: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+						/**
+						 * Route: PATCH /api/workspaces/:wid/sources/:id
+						 */
+						patch: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+					};
+					/**
+					 * Route: POST /api/workspaces/:wid/sources
+					 */
+					post: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+				};
+				webhooks: {
+					/**
+					 * Route: GET /api/workspaces/:wid/webhooks
+					 */
+					get: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+					id: {
+						/**
+						 * Route: DELETE /api/workspaces/:wid/webhooks/:id
+						 */
+						delete: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+						/**
+						 * Route: PATCH /api/workspaces/:wid/webhooks/:id
+						 */
+						patch: { input: never; output: never; type: 'api'; params: { wid: string; id: string }; paramsTuple: [string, string] };
+					};
+					/**
+					 * Route: POST /api/workspaces/:wid/webhooks
+					 */
+					post: { input: never; output: never; type: 'api'; params: { wid: string }; paramsTuple: [string] };
+				};
+			};
 		};
 	}
 }
@@ -190,10 +2120,702 @@ const _rpcRouteMetadata = {
 						"path": "/api/auth-methods"
 				}
 		},
+		"github": {
+				"repos": {
+						"get": {
+								"type": "api",
+								"path": "/api/github/repos"
+						},
+						"owner": {
+								"repo": {
+										"branches": {
+												"get": {
+														"type": "api",
+														"path": "/api/github/repos/:owner/:repo/branches",
+														"pathParams": [
+																"owner",
+																"repo"
+														]
+												}
+										}
+								}
+						}
+				},
+				"status": {
+						"get": {
+								"type": "api",
+								"path": "/api/github/status"
+						}
+				}
+		},
 		"me": {
 				"get": {
 						"type": "api",
 						"path": "/api/me"
+				}
+		},
+		"sessions": {
+				"id": {
+						"abort": {
+								"post": {
+										"type": "api",
+										"path": "/api/sessions/:id/abort",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"archive": {
+								"children": {
+										"childId": {
+												"get": {
+														"type": "api",
+														"path": "/api/sessions/:id/archive/children/:childId",
+														"pathParams": [
+																"id",
+																"childId"
+														]
+												}
+										},
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/archive/children",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"get": {
+										"type": "api",
+										"path": "/api/sessions/:id/archive",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"children": {
+								"childId": {
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/children/:childId",
+												"pathParams": [
+														"id",
+														"childId"
+												]
+										}
+								},
+								"get": {
+										"type": "api",
+										"path": "/api/sessions/:id/children",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"delete": {
+								"type": "api",
+								"path": "/api/sessions/:id",
+								"pathParams": [
+										"id"
+								]
+						},
+						"diff": {
+								"get": {
+										"type": "api",
+										"path": "/api/sessions/:id/diff",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"download": {
+								"get": {
+										"type": "api",
+										"path": "/api/sessions/:id/download",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"events": {
+								"eventstream": {
+										"type": "sse",
+										"path": "/api/sessions/:id/events",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"files": {
+								"content": {
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/files/content",
+												"pathParams": [
+														"id"
+												]
+										},
+										"put": {
+												"type": "api",
+												"path": "/api/sessions/:id/files/content",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"get": {
+										"type": "api",
+										"path": "/api/sessions/:id/files",
+										"pathParams": [
+												"id"
+										]
+								},
+								"image": {
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/files/image",
+												"pathParams": [
+														"id"
+												]
+										}
+								}
+						},
+						"fork": {
+								"post": {
+										"type": "api",
+										"path": "/api/sessions/:id/fork",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"get": {
+								"type": "api",
+								"path": "/api/sessions/:id",
+								"pathParams": [
+										"id"
+								]
+						},
+						"github": {
+								"branch": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/branch",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"checkout": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/checkout",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"commit": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/commit",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"createRepo": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/create-repo",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"diff": {
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/diff",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"diffFile": {
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/diff-file",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"init": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/init",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"log": {
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/log",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"pr": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/pr",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"push": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/push",
+												"pathParams": [
+														"id"
+												]
+										}
+								},
+								"status": {
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/github/status",
+												"pathParams": [
+														"id"
+												]
+										}
+								}
+						},
+						"mcp": {
+								"name": {
+										"connect": {
+												"post": {
+														"type": "api",
+														"path": "/api/sessions/:id/mcp/:name/connect",
+														"pathParams": [
+																"id",
+																"name"
+														]
+												}
+										},
+										"disconnect": {
+												"post": {
+														"type": "api",
+														"path": "/api/sessions/:id/mcp/:name/disconnect",
+														"pathParams": [
+																"id",
+																"name"
+														]
+												}
+										}
+								},
+								"status": {
+										"get": {
+												"type": "api",
+												"path": "/api/sessions/:id/mcp/status",
+												"pathParams": [
+														"id"
+												]
+										}
+								}
+						},
+						"messages": {
+								"get": {
+										"type": "api",
+										"path": "/api/sessions/:id/messages",
+										"pathParams": [
+												"id"
+										]
+								},
+								"post": {
+										"type": "api",
+										"path": "/api/sessions/:id/messages",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"password": {
+								"get": {
+										"type": "api",
+										"path": "/api/sessions/:id/password",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"patch": {
+								"type": "api",
+								"path": "/api/sessions/:id",
+								"pathParams": [
+										"id"
+								]
+						},
+						"permissions": {
+								"reqId": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/permissions/:reqId",
+												"pathParams": [
+														"id",
+														"reqId"
+												]
+										}
+								}
+						},
+						"questions": {
+								"reqId": {
+										"post": {
+												"type": "api",
+												"path": "/api/sessions/:id/questions/:reqId",
+												"pathParams": [
+														"id",
+														"reqId"
+												]
+										}
+								}
+						},
+						"retry": {
+								"post": {
+										"type": "api",
+										"path": "/api/sessions/:id/retry",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"revert": {
+								"post": {
+										"type": "api",
+										"path": "/api/sessions/:id/revert",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"share": {
+								"post": {
+										"type": "api",
+										"path": "/api/sessions/:id/share",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"snapshot": {
+								"post": {
+										"type": "api",
+										"path": "/api/sessions/:id/snapshot",
+										"pathParams": [
+												"id"
+										]
+								}
+						},
+						"unrevert": {
+								"post": {
+										"type": "api",
+										"path": "/api/sessions/:id/unrevert",
+										"pathParams": [
+												"id"
+										]
+								}
+						}
+				}
+		},
+		"shared": {
+				"streamId": {
+						"get": {
+								"type": "api",
+								"path": "/api/shared/:streamId",
+								"pathParams": [
+										"streamId"
+								]
+						}
+				}
+		},
+		"user": {
+				"github": {
+						"delete": {
+								"type": "api",
+								"path": "/api/user/github"
+						},
+						"get": {
+								"type": "api",
+								"path": "/api/user/github"
+						},
+						"put": {
+								"type": "api",
+								"path": "/api/user/github"
+						}
+				},
+				"settings": {
+						"get": {
+								"type": "api",
+								"path": "/api/user/settings"
+						},
+						"put": {
+								"type": "api",
+								"path": "/api/user/settings"
+						}
+				},
+				"voice": {
+						"get": {
+								"type": "api",
+								"path": "/api/user/voice"
+						},
+						"put": {
+								"type": "api",
+								"path": "/api/user/voice"
+						}
+				}
+		},
+		"voice": {
+				"condense": {
+						"post": {
+								"type": "api",
+								"path": "/api/voice/condense"
+						}
+				},
+				"narrate": {
+						"post": {
+								"type": "api",
+								"path": "/api/voice/narrate"
+						}
+				},
+				"speech": {
+						"post": {
+								"type": "api",
+								"path": "/api/voice/speech"
+						}
+				},
+				"transcribe": {
+						"post": {
+								"type": "api",
+								"path": "/api/voice/transcribe"
+						}
+				}
+		},
+		"webhooks": {
+				"id": {
+						"trigger": {
+								"post": {
+										"type": "api",
+										"path": "/api/webhooks/:id/trigger",
+										"pathParams": [
+												"id"
+										]
+								}
+						}
+				}
+		},
+		"workspaces": {
+				"get": {
+						"type": "api",
+						"path": "/api/workspaces"
+				},
+				"id": {
+						"delete": {
+								"type": "api",
+								"path": "/api/workspaces/:id",
+								"pathParams": [
+										"id"
+								]
+						},
+						"get": {
+								"type": "api",
+								"path": "/api/workspaces/:id",
+								"pathParams": [
+										"id"
+								]
+						},
+						"patch": {
+								"type": "api",
+								"path": "/api/workspaces/:id",
+								"pathParams": [
+										"id"
+								]
+						}
+				},
+				"post": {
+						"type": "api",
+						"path": "/api/workspaces"
+				},
+				"wid": {
+						"sessions": {
+								"get": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/sessions",
+										"pathParams": [
+												"wid"
+										]
+								},
+								"post": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/sessions",
+										"pathParams": [
+												"wid"
+										]
+								}
+						},
+						"settings": {
+								"env": {
+										"get": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/settings/env",
+												"pathParams": [
+														"wid"
+												]
+										},
+										"put": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/settings/env",
+												"pathParams": [
+														"wid"
+												]
+										}
+								}
+						},
+						"skills": {
+								"get": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/skills",
+										"pathParams": [
+												"wid"
+										]
+								},
+								"id": {
+										"delete": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/skills/:id",
+												"pathParams": [
+														"wid",
+														"id"
+												]
+										},
+										"patch": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/skills/:id",
+												"pathParams": [
+														"wid",
+														"id"
+												]
+										}
+								},
+								"post": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/skills",
+										"pathParams": [
+												"wid"
+										]
+								},
+								"search": {
+										"get": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/skills/search",
+												"pathParams": [
+														"wid"
+												]
+										}
+								}
+						},
+						"snapshots": {
+								"get": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/snapshots",
+										"pathParams": [
+												"wid"
+										]
+								},
+								"id": {
+										"delete": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/snapshots/:id",
+												"pathParams": [
+														"wid",
+														"id"
+												]
+										}
+								}
+						},
+						"sources": {
+								"get": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/sources",
+										"pathParams": [
+												"wid"
+										]
+								},
+								"id": {
+										"delete": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/sources/:id",
+												"pathParams": [
+														"wid",
+														"id"
+												]
+										},
+										"patch": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/sources/:id",
+												"pathParams": [
+														"wid",
+														"id"
+												]
+										}
+								},
+								"post": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/sources",
+										"pathParams": [
+												"wid"
+										]
+								}
+						},
+						"webhooks": {
+								"get": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/webhooks",
+										"pathParams": [
+												"wid"
+										]
+								},
+								"id": {
+										"delete": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/webhooks/:id",
+												"pathParams": [
+														"wid",
+														"id"
+												]
+										},
+										"patch": {
+												"type": "api",
+												"path": "/api/workspaces/:wid/webhooks/:id",
+												"pathParams": [
+														"wid",
+														"id"
+												]
+										}
+								},
+								"post": {
+										"type": "api",
+										"path": "/api/workspaces/:wid/webhooks",
+										"pathParams": [
+												"wid"
+										]
+								}
+						}
 				}
 		}
 } as const;

@@ -88,6 +88,7 @@ export interface ToolStateCompleted {
 	title: string;
 	metadata: Record<string, unknown>;
 	time: { start: number; end: number };
+	attachments?: FilePart[];
 }
 
 export interface ToolStateError {

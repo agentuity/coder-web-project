@@ -15,6 +15,7 @@ export default defineConfig({
     "sources",
     "user_settings",
     "sandbox_snapshots",
+    "webhooks",
     "archived_sessions",
     "archived_messages",
     "archived_parts",
