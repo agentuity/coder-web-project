@@ -6,7 +6,10 @@ import { JSON_RENDER_CORE_SKILL, JSON_RENDER_REACT_SKILL, UI_SPEC_INSTRUCTIONS }
 import { randomBytes } from 'node:crypto';
 
 const OPENCODE_PORT = 4096;
-const OPENCODE_RUNTIME = 'opencode:latest';
+// Snapshot ID for opencode-chromium:latest (opencode:latest + chromium + fonts-liberation).
+// The platform API requires a snapshot ID (snp_xxx), not name:tag.
+// Update this after running: agentuity cloud sandbox snapshot build .
+const OPENCODE_SNAPSHOT = 'snp_0aea968d650c96c7b370d0de677beffd553a8cadc92d70bc4dbcc68a6bc0';
 const OPENCODE_USERNAME = 'opencode';
 
 /** Generate a short random password for OpenCode server auth. */
@@ -37,7 +40,7 @@ export interface SandboxConfig {
   branch?: string;
   opencodeConfigJson: string;
   env?: Record<string, string>;
-  customSkills?: Array<{ name: string; content: string }>;
+  customSkills?: Array<{ name: string; content: string; description?: string }>;
   registrySkills?: Array<{ repo: string; skillName: string }>;
   githubToken?: string;
 }
@@ -74,13 +77,14 @@ export async function createSandbox(
   // 1. Create the sandbox with org-level secrets for provider API keys.
   //    Uses Agentuity ${secret:KEY} interpolation to inject org secrets.
   const sandbox = await ctx.sandbox.create({
-    runtime: OPENCODE_RUNTIME,
+    snapshot: OPENCODE_SNAPSHOT,
     network: { enabled: true, port: OPENCODE_PORT },
     resources: { memory: '4Gi', cpu: '4000m' },
     timeout: { idle: '2h' },
     env: {
-      ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '${secret:ANTHROPIC_API_KEY}',
       OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      AGENTMAIL_API_KEY: process.env.AGENTMAIL_API_KEY || '${secret:AGENTMAIL_API_KEY}',
       OPENCODE_SERVER_PASSWORD: password,
       OPENCODE_SERVER_USERNAME: OPENCODE_USERNAME,
       ...(config.githubToken
@@ -88,13 +92,13 @@ export async function createSandbox(
         : {}),
       ...(config.env || {}),
     },
-    dependencies: ['git', 'gh'],
   });
 
   const sandboxId = sandbox.id as string;
   ctx.logger.info(`Sandbox created: ${sandboxId}`);
+  ctx.logger.info(`AGENTMAIL_API_KEY: ${process.env.AGENTMAIL_API_KEY ?? '(not set)'}`);
 
-  // Note: ANTHROPIC_API_KEY and OPENAI_API_KEY are injected via ${secret:...} interpolation.
+  // Note: ANTHROPIC_API_KEY, OPENAI_API_KEY, and AGENTMAIL_API_KEY are injected via ${secret:...} interpolation.
   // If org secrets are not configured, the sandbox will start but API calls will fail.
   // There's no way to validate the interpolated values here — if the OpenCode session fails
   // to connect or returns auth errors, check that org secrets are set via:
@@ -122,7 +126,7 @@ export async function createSandbox(
     let cloneError: string | undefined;
 
     // 1. Write opencode.json + gh auth
-    setupScriptParts.push(`mkdir -p ~/.config/opencode/skills`);
+    setupScriptParts.push(`mkdir -p $HOME/.config/opencode/skills`);
     setupScriptParts.push(
       `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
     );
@@ -153,10 +157,12 @@ export async function createSandbox(
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, '-')
           .replace(/^-|-$/g, '');
-        const skillDir = `~/.config/opencode/skills/custom-${slug}`;
+        const skillDir = `$HOME/.config/opencode/skills/custom-${slug}`;
         const skillContent = skill.content.startsWith('---')
           ? skill.content
-          : `---\nname: "${skill.name}"\n---\n\n${skill.content}`;
+          : skill.description
+            ? `---\nname: "${skill.name}"\ndescription: "${skill.description}"\n---\n\n${skill.content}`
+            : `---\nname: "${skill.name}"\n---\n\n${skill.content}`;
         setupScriptParts.push(
           `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'SKILLEOF_${i}'\n${skillContent}\nSKILLEOF_${i}`,
         );
@@ -167,7 +173,7 @@ export async function createSandbox(
     if (config.registrySkills && config.registrySkills.length > 0) {
       for (const skill of config.registrySkills) {
         setupScriptParts.push(
-          `cd /tmp && bunx skills add "${skill.repo}" --skill "${skill.skillName}" --agent opencode -y 2>/dev/null && cp -r /tmp/.agents/skills/* ~/.config/opencode/skills/ 2>/dev/null || true`,
+          `cd /tmp && bunx skills add "${skill.repo}" --skill "${skill.skillName}" --agent opencode -y 2>/dev/null && cp -r /tmp/.agents/skills/* $HOME/.config/opencode/skills/ 2>/dev/null || true`,
         );
       }
     }
@@ -175,7 +181,7 @@ export async function createSandbox(
     // 3e. json-render skills — write skill files with unique heredoc delimiters
     const jsonRenderSkills = getJsonRenderSkills();
     for (const [i, jrSkill] of jsonRenderSkills.entries()) {
-      const skillDir = `~/.config/opencode/skills/${jrSkill.slug}`;
+      const skillDir = `$HOME/.config/opencode/skills/${jrSkill.slug}`;
       setupScriptParts.push(
         `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'JREOF_${i}'\n${jrSkill.content}\nJREOF_${i}`,
       );
@@ -189,14 +195,21 @@ export async function createSandbox(
     // 4. Start OpenCode server with watchdog (auto-restarts on crash)
     setupScriptParts.push(buildWatchdogCommand(workDir));
 
-    // Fire the single combined script
+    // Fire the single combined script.
+    // The platform exec API can be intermittent (500s / drops), so we build
+    // a helper that retries the execute call and re-fire during health polling
+    // if OpenCode hasn't started after a reasonable delay.
+    const setupCommand = ['bash', '-c', setupScriptParts.join('\n')];
+    const fireSetupScript = () => {
+      try {
+        sandbox.execute({ command: setupCommand });
+      } catch (execErr) {
+        ctx.logger.warn('sandbox.execute() threw — will retry during health poll', { error: String(execErr) });
+      }
+    };
+
     ctx.logger.info('Executing combined setup script (config + clone + skills + server start)...');
-    sandbox.execute({
-      command: [
-        'bash', '-c',
-        setupScriptParts.join('\n'),
-      ],
-    });
+    fireSetupScript();
 
     // Get the sandbox's public URL for external health polling.
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
@@ -204,10 +217,17 @@ export async function createSandbox(
 
     // Poll the sandbox's public URL until the OpenCode server is ready.
     // This is the ONLY reliable approach — sandbox.execute() returns immediately.
+    // If the server isn't responding after 20s or 45s, re-fire the setup script
+    // in case the platform dropped the original execute call.
     const authHeader = buildBasicAuthHeader(password);
     ctx.logger.info(`Polling OpenCode server health at ${sandboxUrl}...`);
     let serverReady = false;
+    const RETRY_AT = [20, 45]; // seconds at which to re-fire setup script
     for (let i = 0; i < 90; i++) {
+      if (RETRY_AT.includes(i)) {
+        ctx.logger.warn(`OpenCode not ready after ${i}s — re-firing setup script (retry)`);
+        fireSetupScript();
+      }
       try {
         const resp = await fetch(`${sandboxUrl}/global/health`, {
           signal: AbortSignal.timeout(3000),
@@ -287,8 +307,9 @@ export async function forkSandbox(
     resources: { memory: '4Gi', cpu: '4000m' },
     timeout: { idle: '2h' },
     env: {
-      ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '${secret:ANTHROPIC_API_KEY}',
       OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      AGENTMAIL_API_KEY: process.env.AGENTMAIL_API_KEY || '${secret:AGENTMAIL_API_KEY}',
       OPENCODE_SERVER_PASSWORD: password,
       OPENCODE_SERVER_USERNAME: OPENCODE_USERNAME,
       ...(config.githubToken
@@ -310,16 +331,28 @@ export async function forkSandbox(
       forkSetupParts.push('gh auth setup-git 2>/dev/null || true');
     }
     forkSetupParts.push(buildWatchdogCommand(config.workDir));
-    sandbox.execute({
-      command: ['bash', '-c', forkSetupParts.join('\n')],
-    });
+    const forkCommand = ['bash', '-c', forkSetupParts.join('\n')];
+    const fireForkScript = () => {
+      try {
+        sandbox.execute({ command: forkCommand });
+      } catch (execErr) {
+        ctx.logger.warn('fork sandbox.execute() threw — will retry during health poll', { error: String(execErr) });
+      }
+    };
+    fireForkScript();
 
     // 5. Poll the sandbox's public URL until the OpenCode server is ready.
+    // Re-fire setup script at 20s and 45s if not ready (platform may drop execute calls).
     const authHeader = buildBasicAuthHeader(password);
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
     ctx.logger.info(`Polling fork sandbox health at ${sandboxUrl}...`);
+    const FORK_RETRY_AT = [20, 45];
     for (let i = 0; i < 90; i++) {
+      if (FORK_RETRY_AT.includes(i)) {
+        ctx.logger.warn(`Fork sandbox not ready after ${i}s — re-firing setup script`);
+        fireForkScript();
+      }
       try {
         const resp = await fetch(`${sandboxUrl}/global/health`, {
           signal: AbortSignal.timeout(3000),
@@ -371,6 +404,10 @@ export interface SnapshotSandboxConfig {
   githubToken?: string;
   /** OpenCode config JSON to write (may have changed since snapshot) */
   opencodeConfigJson: string;
+  /** Custom skills to install */
+  customSkills?: Array<{ name: string; content: string; description?: string }>;
+  /** Registry skills to install */
+  registrySkills?: Array<{ repo: string; skillName: string }>;
 }
 
 /**
@@ -393,8 +430,9 @@ export async function createSandboxFromSnapshot(
     resources: { memory: '4Gi', cpu: '4000m' },
     timeout: { idle: '2h' },
     env: {
-      ANTHROPIC_API_KEY: '${secret:ANTHROPIC_API_KEY}',
+      ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY || '${secret:ANTHROPIC_API_KEY}',
       OPENAI_API_KEY: '${secret:OPENAI_API_KEY}',
+      AGENTMAIL_API_KEY: process.env.AGENTMAIL_API_KEY || '${secret:AGENTMAIL_API_KEY}',
       OPENCODE_SERVER_PASSWORD: password,
       OPENCODE_SERVER_USERNAME: OPENCODE_USERNAME,
       ...(config.githubToken
@@ -411,24 +449,82 @@ export async function createSandboxFromSnapshot(
     // 2. Write updated opencode config + setup gh auth + start server in ONE call.
     // CRITICAL: Multiple back-to-back sandbox.execute() calls are unreliable —
     // the platform may silently drop subsequent commands. Combine into single script.
-    sandbox.execute({
-      command: [
-        'bash', '-c',
-        [
-          `mkdir -p ~/.config/opencode/skills`,
-          `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
-          `gh auth setup-git 2>/dev/null || true`,
-          buildWatchdogCommand(config.workDir),
-        ].join('\n'),
-      ],
-    });
+    const setupScriptParts: string[] = [];
+
+    // 1. Write opencode config + gh auth
+    setupScriptParts.push(`mkdir -p $HOME/.config/opencode/skills`);
+    setupScriptParts.push(
+      `cat > ~/.config/opencode/opencode.json << 'OPENCODEEOF'\n${config.opencodeConfigJson}\nOPENCODEEOF`,
+    );
+    setupScriptParts.push(`gh auth setup-git 2>/dev/null || true`);
+
+    // 2. Custom skills — write each SKILL.md via heredoc with unique delimiter
+    if (config.customSkills && config.customSkills.length > 0) {
+      for (const [i, skill] of config.customSkills.entries()) {
+        const slug = skill.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, '');
+        const skillDir = `$HOME/.config/opencode/skills/custom-${slug}`;
+        const skillContent = skill.content.startsWith('---')
+          ? skill.content
+          : skill.description
+            ? `---\nname: "${skill.name}"\ndescription: "${skill.description}"\n---\n\n${skill.content}`
+            : `---\nname: "${skill.name}"\n---\n\n${skill.content}`;
+        setupScriptParts.push(
+          `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'SKILLEOF_${i}'\n${skillContent}\nSKILLEOF_${i}`,
+        );
+      }
+    }
+
+    // 3. Registry skills — install via bunx (may fail, use || true)
+    if (config.registrySkills && config.registrySkills.length > 0) {
+      for (const skill of config.registrySkills) {
+        setupScriptParts.push(
+          `cd /tmp && bunx skills add "${skill.repo}" --skill "${skill.skillName}" --agent opencode -y 2>/dev/null && cp -r /tmp/.agents/skills/* $HOME/.config/opencode/skills/ 2>/dev/null || true`,
+        );
+      }
+    }
+
+    // 4. json-render skills
+    const jsonRenderSkills = getJsonRenderSkills();
+    for (const [i, jrSkill] of jsonRenderSkills.entries()) {
+      const skillDir = `$HOME/.config/opencode/skills/${jrSkill.slug}`;
+      setupScriptParts.push(
+        `mkdir -p "${skillDir}" && cat > "${skillDir}/SKILL.md" << 'JREOF_${i}'\n${jrSkill.content}\nJREOF_${i}`,
+      );
+    }
+
+    // 5. ui-spec instructions
+    setupScriptParts.push(
+      `cat > ~/.config/opencode/ui-spec-instructions.md << 'UISPECEOF'\n${getUISpecInstructions()}\nUISPECEOF`,
+    );
+
+    // 6. Start OpenCode server with watchdog
+    setupScriptParts.push(buildWatchdogCommand(config.workDir));
+
+    const snapCommand = ['bash', '-c', setupScriptParts.join('\n')];
+    const fireSnapScript = () => {
+      try {
+        sandbox.execute({ command: snapCommand });
+      } catch (execErr) {
+        ctx.logger.warn('snapshot sandbox.execute() threw — will retry during health poll', { error: String(execErr) });
+      }
+    };
+    fireSnapScript();
 
     // 4. Get sandbox URL and poll until the OpenCode server is ready.
+    // Re-fire setup script at 20s and 45s if not ready (platform may drop execute calls).
     const authHeader = buildBasicAuthHeader(password);
     const sandboxInfo = await ctx.sandbox.get(sandboxId);
     const sandboxUrl = (sandboxInfo.url as string) || `http://localhost:${OPENCODE_PORT}`;
     ctx.logger.info(`Polling snapshot sandbox health at ${sandboxUrl}...`);
+    const SNAP_RETRY_AT = [20, 45];
     for (let i = 0; i < 90; i++) {
+      if (SNAP_RETRY_AT.includes(i)) {
+        ctx.logger.warn(`Snapshot sandbox not ready after ${i}s — re-firing setup script`);
+        fireSnapScript();
+      }
       try {
         const resp = await fetch(`${sandboxUrl}/global/health`, {
           signal: AbortSignal.timeout(3000),

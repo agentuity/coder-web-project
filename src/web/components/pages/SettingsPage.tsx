@@ -8,6 +8,7 @@ import { VoiceSettings } from '../settings/VoiceSettings';
 import { DefaultAgentSetting } from '../settings/DefaultAgentSetting';
 import { KeybindingsSettings } from '../settings/KeybindingsSettings';
 import { EditorPreferencesSettings } from '../settings/EditorPreferencesSettings';
+import { WorkspaceEnvVars } from '../settings/WorkspaceEnvVars';
 
 interface Workspace {
 	id: string;
@@ -370,6 +371,11 @@ export function SettingsPage({ workspaceId, onWorkspaceChange }: SettingsPagePro
 				</p>
 				<KeybindingsSettings />
 			</Card>
+
+			{/* Environment Variables */}
+			<div className="mt-8 mb-6">
+				<WorkspaceEnvVars workspaceId={workspaceId} />
+			</div>
 
 			{/* Danger Zone */}
 			<Card className="p-4 mt-8 border-red-500/20">

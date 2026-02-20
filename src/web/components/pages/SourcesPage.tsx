@@ -127,7 +127,7 @@ export function SourcesPage({ workspaceId }: SourcesPageProps) {
 			const args = parseArgsString(formArgs);
 			if (args.length > 0) config.args = args;
 			const env = parseEnvString(formEnv);
-			if (Object.keys(env).length > 0) config.env = env;
+			if (Object.keys(env).length > 0) config.environment = env;
 			return config;
 		}
 		return { url: formUrl };
@@ -211,7 +211,7 @@ export function SourcesPage({ workspaceId }: SourcesPageProps) {
 		if (source.type === 'stdio') {
 			setFormCommand((cfg.command as string) || '');
 			setFormArgs(Array.isArray(cfg.args) ? (cfg.args as string[]).join(', ') : '');
-			setFormEnv(envToString(cfg.env as Record<string, string> | undefined));
+			setFormEnv(envToString((cfg.environment ?? cfg.env) as Record<string, string> | undefined));
 			setFormUrl('');
 		} else {
 			setFormUrl((cfg.url as string) || '');

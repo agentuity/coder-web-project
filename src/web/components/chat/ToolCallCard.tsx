@@ -46,6 +46,12 @@ const toolCallCodePlugin = createCodePlugin({
   themes: ["github-dark", "github-light"],
 });
 
+/** Chrome DevTools screenshot tool name. */
+const SCREENSHOT_TOOL = "chrome-devtools_take_screenshot";
+
+/** Chrome DevTools a11y snapshot tool name. */
+const SNAPSHOT_TOOL = "chrome-devtools_take_snapshot";
+
 /** Sub-agent tool names that create child sessions. */
 const SUB_AGENT_TOOLS = new Set(["task", "agentuity_background_task"]);
 
@@ -803,6 +809,206 @@ function BashView({ command, output }: { command: string; output?: string }) {
   );
 }
 
+/** Renders Chrome DevTools screenshot output as an inline image. */
+function ScreenshotView({ part }: { part: ToolPart }) {
+  const [expanded, setExpanded] = useState(false);
+  const [imgError, setImgError] = useState(false);
+
+  const output = part.state.status === "completed" ? part.state.output : "";
+
+  const imageSrc = useMemo(() => {
+    // 1. Check attachments first (OpenCode sends MCP images as FilePart attachments)
+    if (part.state.status === "completed" && part.state.attachments?.length) {
+      const imageAttachment = part.state.attachments.find((a) =>
+        a.mime?.startsWith("image/")
+      );
+      if (imageAttachment?.url) return imageAttachment.url;
+    }
+
+    // 2. Fall back to parsing the output string
+    if (!output) return null;
+    const trimmed = output.trim();
+
+    // Direct data URL
+    if (trimmed.startsWith("data:image/")) return trimmed;
+
+    // Try JSON parse
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed.data && parsed.mimeType?.startsWith("image/")) {
+        return `data:${parsed.mimeType};base64,${parsed.data}`;
+      }
+      if (typeof parsed.image === "string" && parsed.image.startsWith("data:image/")) {
+        return parsed.image;
+      }
+      if (typeof parsed.url === "string" && parsed.url.startsWith("data:image/")) {
+        return parsed.url;
+      }
+    } catch {
+      // Not JSON — try other patterns
+    }
+
+    // Markdown image syntax: ![alt](data:image/...)
+    const mdMatch = trimmed.match(/!\[.*?\]\((data:image\/[^)]+)\)/);
+    if (mdMatch) return mdMatch[1];
+
+    // Data URL anywhere in string
+    const dataUrlMatch = trimmed.match(/(data:image\/[a-z+]+;base64,[A-Za-z0-9+/=]+)/);
+    if (dataUrlMatch) return dataUrlMatch[1];
+
+    return null;
+  }, [part.state, output]);
+
+  if (!imageSrc || imgError) {
+    // Fallback to text output if we can't extract an image
+    return (
+      <div className="px-3 py-2">
+        <ToolOutput output={output} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-3 py-2 space-y-2">
+      <button
+        type="button"
+        onClick={() => setExpanded(!expanded)}
+        className="block cursor-pointer rounded-lg border border-[var(--border)] overflow-hidden hover:opacity-90 transition-opacity"
+      >
+        <img
+          src={imageSrc}
+          alt="Screenshot"
+          loading="lazy"
+          className={expanded ? "max-w-full" : "max-w-sm max-h-64 object-contain"}
+          onError={() => setImgError(true)}
+        />
+      </button>
+      <p className="text-[10px] text-[var(--muted-foreground)]">
+        {expanded ? "Click to collapse" : "Click to expand"}
+      </p>
+    </div>
+  );
+}
+
+/** Renders Chrome DevTools a11y tree snapshot in a human-readable format. */
+function SnapshotView({ output }: { output: string }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const nodes = useMemo(() => {
+    if (!output) return [];
+    // Split on uid= boundaries to get individual nodes
+    // Each node looks like: uid=X_Y role "name" attr1 attr2="value" ...
+    const nodeRegex = /uid=(\S+)\s+(\w+)(?:\s+"([^"]*)")?([^\n]*?)(?=(?:\s+uid=)|$)/g;
+    const results: Array<{
+      uid: string;
+      role: string;
+      name: string;
+      attrs: Record<string, string>;
+      depth: number;
+    }> = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = nodeRegex.exec(output)) !== null) {
+      const uid = match[1] ?? "";
+      const role = match[2] ?? "";
+      const name = match[3] ?? "";
+      const attrStr = match[4] ?? "";
+
+      // Parse attributes like url="..." description="..." expandable haspopup="menu"
+      const attrs: Record<string, string> = {};
+      const attrRegex = /(\w+)(?:="([^"]*)")?/g;
+      let attrMatch: RegExpExecArray | null;
+      while ((attrMatch = attrRegex.exec(attrStr.trim())) !== null) {
+        const key = attrMatch[1];
+        if (key) attrs[key] = attrMatch[2] ?? "true";
+      }
+
+      // Depth from uid: "1_0" = depth 0, "10_0" = depth 1, "11_0" = depth 1
+      // Use the prefix before underscore — single digit = root, double digit = child
+      const uidParts = uid.split("_");
+      const prefix = uidParts[0] ?? "";
+      const depth = prefix.length > 1 ? 1 : 0;
+
+      results.push({ uid, role, name, attrs, depth });
+    }
+    return results;
+  }, [output]);
+
+  // Role badge colors
+  const roleColor = (role: string): string => {
+    switch (role) {
+      case "button": return "bg-blue-500/15 text-blue-400 border-blue-500/30";
+      case "link": return "bg-purple-500/15 text-purple-400 border-purple-500/30";
+      case "heading": return "bg-amber-500/15 text-amber-400 border-amber-500/30";
+      case "textbox":
+      case "input": return "bg-green-500/15 text-green-400 border-green-500/30";
+      case "image": return "bg-pink-500/15 text-pink-400 border-pink-500/30";
+      case "main":
+      case "region":
+      case "navigation": return "bg-cyan-500/15 text-cyan-400 border-cyan-500/30";
+      case "list":
+      case "listitem": return "bg-orange-500/15 text-orange-400 border-orange-500/30";
+      case "RootWebArea": return "bg-gray-500/15 text-gray-400 border-gray-500/30";
+      default: return "bg-gray-500/10 text-gray-500 border-gray-500/20";
+    }
+  };
+
+  if (!nodes.length) {
+    return (
+      <div className="px-3 py-2">
+        <ToolOutput output={output} />
+      </div>
+    );
+  }
+
+  const visibleNodes = expanded ? nodes : nodes.slice(0, 20);
+  const hasMore = nodes.length > 20;
+
+  return (
+    <div className="px-3 py-2 space-y-1">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-[10px] font-medium text-[var(--muted-foreground)] uppercase tracking-wide">
+          Page Snapshot — {nodes.length} elements
+        </span>
+      </div>
+      <div className="max-h-80 overflow-auto rounded-md bg-[var(--background)] border border-[var(--border)] p-2 space-y-0.5">
+        {visibleNodes.map((node, i) => (
+          <div
+            key={`${node.uid}-${i}`}
+            className="flex items-start gap-1.5 py-0.5"
+            style={{ paddingLeft: `${node.depth * 16}px` }}
+          >
+            <span
+              className={`inline-flex items-center shrink-0 px-1.5 py-0 rounded text-[10px] font-mono border ${roleColor(node.role)}`}
+            >
+              {node.role}
+            </span>
+            {node.name && (
+              <span className="text-xs text-[var(--foreground)] truncate">
+                {node.name}
+              </span>
+            )}
+            {node.attrs.url && (
+              <span className="text-[10px] text-[var(--muted-foreground)] truncate ml-auto shrink-0 max-w-[200px]">
+                {node.attrs.url}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      {hasMore && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="text-[10px] text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors cursor-pointer"
+        >
+          {expanded ? "Show less" : `Show all ${nodes.length} elements…`}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function FileListView({ title, output }: { title: string; output?: string }) {
   const items = output ? output.split("\n").filter(Boolean) : [];
   return (
@@ -1146,6 +1352,16 @@ export const ToolCallCard = React.memo(function ToolCallCard({
           comments={getFileComments?.(input.filePath)}
         />
       );
+    }
+
+    // Chrome DevTools screenshot — render image inline
+    if (part.tool === SCREENSHOT_TOOL) {
+      return <ScreenshotView part={part} />;
+    }
+
+    // Chrome DevTools snapshot — render accessible tree view
+    if (part.tool === SNAPSHOT_TOOL && output) {
+      return <SnapshotView output={output} />;
     }
 
     if (part.tool === "glob" || part.tool === "grep") {

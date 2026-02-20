@@ -6,6 +6,7 @@ export const COMMAND_TO_AGENT: Record<string, string> = {
 	'agentuity-memory-share': 'Agentuity Coder Lead',
 	'agentuity-cloud': 'Agentuity Coder Lead',
 	'agentuity-sandbox': 'Agentuity Coder Lead',
+	'agentuity-qa': 'Agentuity Coder QA',
 };
 
 /**

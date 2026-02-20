@@ -9,6 +9,7 @@ import {
   skills,
   sources,
   userSettings,
+  workspaces,
 } from "../db/schema";
 import { eq, desc, and, ne } from "@agentuity/drizzle";
 import {
@@ -56,13 +57,20 @@ api.post("/", async (c) => {
     .json<CreateSessionBody>()
     .catch(() => ({}));
 
-  // Fetch workspace skills, sources, and user settings for config
-  const [workspaceSkills, workspaceSources, [userSettingsRow]] =
+  // Fetch workspace skills, sources, user settings, and workspace row for config
+  const [workspaceSkills, workspaceSources, [userSettingsRow], [workspaceRow]] =
     await Promise.all([
       db.select().from(skills).where(eq(skills.workspaceId, workspaceId)),
       db.select().from(sources).where(eq(sources.workspaceId, workspaceId)),
       db.select().from(userSettings).where(eq(userSettings.userId, user.id)),
+      db.select().from(workspaces).where(eq(workspaces.id, workspaceId)),
     ]);
+
+  // Extract workspace-level settings (env vars)
+  const workspaceSettings = (workspaceRow?.settings ?? {}) as {
+    envVars?: Record<string, string>;
+  };
+  const workspaceEnvVars = workspaceSettings.envVars ?? {};
 
   // Generate OpenCode config
   const opencodeConfig = generateOpenCodeConfig(
@@ -78,7 +86,7 @@ api.post("/", async (c) => {
   const enabledSkills = workspaceSkills.filter((s) => s.enabled ?? true);
   const customSkills = enabledSkills
     .filter((s) => s.type !== "registry")
-    .map((s) => ({ name: s.name, content: s.content }));
+    .map((s) => ({ name: s.name, content: s.content, description: s.description ?? undefined }));
   const registrySkills = enabledSkills
     .filter((s) => s.type === "registry" && s.repo)
     .map((s) => ({ repo: s.repo as string, skillName: s.name }));
@@ -207,6 +215,9 @@ api.post("/", async (c) => {
               workDir,
               githubToken,
               opencodeConfigJson: serializeOpenCodeConfig(opencodeConfig),
+              customSkills,
+              registrySkills,
+              env: workspaceEnvVars,
             });
             sandboxId = result.sandboxId;
             sandboxUrl = result.sandboxUrl;
@@ -220,6 +231,7 @@ api.post("/", async (c) => {
               customSkills,
               registrySkills,
               githubToken,
+              env: workspaceEnvVars,
             });
             sandboxId = result.sandboxId;
             sandboxUrl = result.sandboxUrl;
