@@ -47,14 +47,7 @@ const toolCallCodePlugin = createCodePlugin({
 });
 
 /** Sub-agent tool names that create child sessions. */
-const SUB_AGENT_TOOLS = new Set(["task", "agentuity_background_task"]);
-
-/** Background task management tools that show task status/results. */
-const BG_STATUS_TOOLS = new Set([
-  "agentuity_background_output",
-  "agentuity_background_inspect",
-  "agentuity_background_cancel",
-]);
+const SUB_AGENT_TOOLS = new Set(["task"]);
 
 interface ToolCallCardProps {
   part: ToolPart;
@@ -178,26 +171,20 @@ function isAgentInvocation(input: Record<string, unknown>): input is Record<
   unknown
 > & {
   subagent_type?: string;
-  agent?: string;
   description?: string;
   prompt?: string;
-  task?: string;
 } {
-  return (
-    typeof input.subagent_type === "string" || typeof input.agent === "string"
-  );
+  return typeof input.subagent_type === "string";
 }
 
-/** Extract the agent name from either `subagent_type` (task tool) or `agent` (background task) */
+/** Extract the agent name from `subagent_type` (task tool). */
 function getAgentName(input: Record<string, unknown>): string {
-  return (
-    (input.subagent_type as string) ?? (input.agent as string) ?? "unknown"
-  );
+  return (input.subagent_type as string) ?? "unknown";
 }
 
-/** Extract the prompt/task content from either `prompt` (task tool) or `task` (background task) */
+/** Extract the prompt content from `prompt` (task tool). */
 function getAgentPrompt(input: Record<string, unknown>): string | undefined {
-  return (input.prompt as string) ?? (input.task as string) ?? undefined;
+  return (input.prompt as string) ?? undefined;
 }
 
 function isGitCommand(command: string) {
@@ -310,27 +297,6 @@ function cleanChildTitle(
   maxLen = 50,
 ): string {
   if (!title) return "";
-  // Handle JSON metadata titles from background task sessions
-  if (title.startsWith("{")) {
-    try {
-      const meta = JSON.parse(title) as {
-        taskId?: string;
-        agent?: string;
-        description?: string;
-      };
-      if (meta.taskId?.startsWith("bg_")) {
-        const agentName =
-          meta.agent?.replace("Agentuity Coder ", "") ?? "Agent";
-        const friendly = meta.description
-          ? `${agentName}: ${meta.description}`
-          : `Background · ${agentName}`;
-        if (friendly.length <= maxLen) return friendly;
-        return friendly.slice(0, maxLen - 1) + "\u2026";
-      }
-    } catch {
-      // Not JSON, fall through to normal cleaning
-    }
-  }
   const cleaned = title
     .replace(/\s*\(@Agentuity Coder\s+\w+\s+subagent\)/i, "")
     .trim();
@@ -385,10 +351,8 @@ function AgentInvocationView({
 }: {
   input: {
     subagent_type?: string;
-    agent?: string;
     description?: string;
     prompt?: string;
-    task?: string;
   };
 }) {
   const prompt = getAgentPrompt(input);
@@ -403,264 +367,6 @@ function AgentInvocationView({
             {prompt}
           </Streamdown>
         </div>
-      )}
-    </div>
-  );
-}
-
-/** Renders background task output/inspect/cancel results in a structured format. */
-function BackgroundOutputView({
-  tool,
-  input,
-  output,
-  status,
-  childSessions,
-  sessionId,
-  fetchChildData,
-  getChildMessages,
-  getChildPartsForMessage,
-  getChildStatus,
-  liveChildSessionIds,
-  archived,
-}: {
-  tool: string;
-  input: Record<string, unknown>;
-  output?: string;
-  status: string;
-  childSessions?: ToolCallCardProps["childSessions"];
-  sessionId?: string;
-  fetchChildData?: (
-    childId: string,
-  ) => Promise<import("../../hooks/useChildSessions").ChildSessionData | null>;
-  getChildMessages?: (
-    childSessionId: string,
-  ) => import("../../types/opencode").Message[] | undefined;
-  getChildPartsForMessage?: (
-    childSessionId: string,
-    messageID: string,
-  ) => import("../../types/opencode").Part[];
-  getChildStatus?: (childSessionId: string) => { type: string } | undefined;
-  liveChildSessionIds?: Set<string>;
-  archived?: boolean;
-}) {
-  const taskId =
-    (input.task_id as string) ?? (input.taskId as string) ?? "\u2014";
-
-  // Parse the output JSON
-  const parsed = useMemo(() => {
-    if (!output) return null;
-    try {
-      return typeof output === "string" ? JSON.parse(output) : output;
-    } catch {
-      return null;
-    }
-  }, [output]);
-
-  // Try to match this task to a child session
-  const matchedChild = useMemo(() => {
-    if (!childSessions?.length) return null;
-    const id = taskId === "\u2014" ? null : taskId;
-    if (!id) return null;
-
-    // Match by taskId embedded in child session title (JSON metadata)
-    return (
-      childSessions.find((c) => {
-        if (!c.title) return false;
-        try {
-          const titleData = JSON.parse(c.title);
-          return titleData?.taskId === id;
-        } catch {
-          return false;
-        }
-      }) ?? null
-    );
-  }, [childSessions, taskId]);
-
-  const [inspectOpen, setInspectOpen] = useState(false);
-
-  const taskStatus =
-    parsed?.status ?? (status === "running" ? "running" : "pending");
-  const result = parsed?.result as string | undefined;
-  const error = parsed?.error as string | undefined;
-
-  // Status styling
-  const statusConfig: Record<
-    string,
-    { label: string; color: string; icon: React.ReactNode }
-  > = {
-    completed: {
-      label: "Completed",
-      color: "text-green-500",
-      icon: <CheckCircle2 className="h-3.5 w-3.5" />,
-    },
-    running: {
-      label: "Running",
-      color: "text-blue-400",
-      icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />,
-    },
-    pending: {
-      label: "Pending",
-      color: "text-yellow-500",
-      icon: <Circle className="h-3.5 w-3.5" />,
-    },
-    error: {
-      label: "Error",
-      color: "text-red-500",
-      icon: <Circle className="h-3.5 w-3.5" />,
-    },
-    cancelled: {
-      label: "Cancelled",
-      color: "text-[var(--muted-foreground)]",
-      icon: <Circle className="h-3.5 w-3.5" />,
-    },
-  };
-
-  const sc = statusConfig[taskStatus] ??
-    statusConfig.pending ?? {
-      label: "Pending",
-      color: "text-yellow-500",
-      icon: <Circle className="h-3.5 w-3.5" />,
-    };
-
-  return (
-    <div className="space-y-2 px-3 py-2">
-      {/* Task info row */}
-      <div className="flex items-center gap-2 text-xs">
-        <span className="font-mono text-[var(--muted-foreground)]">
-          {taskId}
-        </span>
-        <span className={`flex items-center gap-1 font-medium ${sc.color}`}>
-          {sc.icon}
-          {sc.label}
-        </span>
-      </div>
-
-      {/* Result content */}
-      {result && (
-        <div className="rounded-md border border-[var(--border)] bg-[var(--background)] p-2 text-xs text-[var(--foreground)]">
-          <div className="mb-1 text-[10px] font-medium uppercase text-[var(--muted-foreground)]">
-            Result
-          </div>
-          <div className="max-h-64 overflow-auto whitespace-pre-wrap">
-            {result}
-          </div>
-        </div>
-      )}
-
-      {/* Error content */}
-      {error && (
-        <div className="rounded-md border border-red-500/30 bg-red-500/5 p-2 text-xs">
-          <div className="mb-1 text-[10px] font-medium uppercase text-red-500">
-            Error
-          </div>
-          <div className="max-h-48 overflow-auto whitespace-pre-wrap text-red-400">
-            {error}
-          </div>
-        </div>
-      )}
-
-      {/* Show raw output only if we have output but couldn't extract result/error */}
-      {output && !result && !error && parsed && (
-        <div className="rounded-md border border-[var(--border)] bg-[var(--background)] p-2 text-xs">
-          <div className="mb-1 text-[10px] font-medium uppercase text-[var(--muted-foreground)]">
-            Response
-          </div>
-          <pre className="max-h-48 overflow-auto whitespace-pre-wrap font-mono text-[var(--foreground)]">
-            {JSON.stringify(parsed, null, 2)}
-          </pre>
-        </div>
-      )}
-
-      {/* Inspect child session button */}
-      {matchedChild && sessionId && (
-        <>
-          <button
-            type="button"
-            onClick={() => setInspectOpen(true)}
-            className="flex items-center gap-1.5 text-[10px] font-medium text-[var(--primary)] hover:underline w-full text-left mt-1"
-          >
-            <Bot className="h-3 w-3 shrink-0" />
-            <span className="truncate">
-              {cleanChildTitle(matchedChild.title) || "Inspect Agent Session"}
-            </span>
-            {matchedChild.messageCount > 0 && (
-              <span className="flex items-center gap-0.5 text-[var(--muted-foreground)] font-normal shrink-0">
-                <MessageSquare className="h-2.5 w-2.5" />
-                {matchedChild.messageCount}
-              </span>
-            )}
-            {matchedChild.totalCost > 0 && (
-              <span className="text-[var(--muted-foreground)] font-normal shrink-0">
-                {formatCost(matchedChild.totalCost)}
-              </span>
-            )}
-          </button>
-
-          <Dialog open={inspectOpen} onOpenChange={setInspectOpen}>
-            <DialogContent className="max-w-5xl w-[90vw] h-[85vh] flex flex-col p-0 gap-0">
-              <DialogHeader className="px-6 py-4 border-b border-[var(--border)] shrink-0">
-                <div className="flex items-center gap-3">
-                  <Bot className="h-5 w-5 text-[var(--primary)]" />
-                  <div className="flex-1 min-w-0">
-                    <DialogTitle className="text-base">
-                      {cleanChildTitle(matchedChild.title, 100) ||
-                        "Background Task Session"}
-                    </DialogTitle>
-                    <DialogDescription asChild>
-                      <div className="flex items-center gap-3 mt-1 text-sm text-[var(--muted-foreground)]">
-                        <Badge variant="secondary" className="text-[10px]">
-                          {taskId}
-                        </Badge>
-                        {matchedChild.messageCount > 0 && (
-                          <span className="flex items-center gap-1 text-xs">
-                            <MessageSquare className="h-3 w-3" />{" "}
-                            {matchedChild.messageCount} messages
-                          </span>
-                        )}
-                        {matchedChild.totalCost > 0 && (
-                          <span className="text-xs">
-                            {formatCost(matchedChild.totalCost)}
-                          </span>
-                        )}
-                      </div>
-                    </DialogDescription>
-                  </div>
-                </div>
-              </DialogHeader>
-              <div className="flex-1 overflow-y-auto px-6 py-4">
-                <ChildSessionView
-                  childSessionId={matchedChild.id}
-                  parentSessionId={sessionId}
-                  archived={archived}
-                  fetchChildData={
-                    fetchChildData as
-                      | ((
-                          childId: string,
-                        ) => Promise<
-                          | import("../../hooks/useChildSessions").ChildSessionData
-                          | null
-                        >)
-                      | undefined
-                  }
-                  liveMessages={getChildMessages?.(
-                    matchedChild.opencodeSessionId,
-                  )}
-                  liveGetParts={
-                    getChildPartsForMessage
-                      ? (messageID: string) =>
-                          getChildPartsForMessage(
-                            matchedChild.opencodeSessionId,
-                            messageID,
-                          )
-                      : undefined
-                  }
-                  liveStatus={getChildStatus?.(matchedChild.opencodeSessionId)}
-                  isModal={true}
-                />
-              </div>
-            </DialogContent>
-          </Dialog>
-        </>
       )}
     </div>
   );
@@ -1156,34 +862,6 @@ export const ToolCallCard = React.memo(function ToolCallCard({
       return <WebFetchView url={input.url} output={output} />;
     }
 
-    // Background task output/inspect/cancel — structured status view
-    if (BG_STATUS_TOOLS.has(part.tool)) {
-      return (
-        <BackgroundOutputView
-          tool={part.tool}
-          input={input}
-          output={output}
-          status={part.state.status}
-          childSessions={childSessions}
-          sessionId={sessionId}
-          fetchChildData={
-            fetchChildData as
-              | ((
-                  childId: string,
-                ) => Promise<
-                  import("../../hooks/useChildSessions").ChildSessionData | null
-                >)
-              | undefined
-          }
-          getChildMessages={getChildMessages}
-          getChildPartsForMessage={getChildPartsForMessage}
-          getChildStatus={getChildStatus}
-          liveChildSessionIds={liveChildSessionIds}
-          archived={archived}
-        />
-      );
-    }
-
     if (SUB_AGENT_TOOLS.has(part.tool) && isAgentInvocation(input)) {
       return <AgentInvocationView input={input} />;
     }
@@ -1221,10 +899,6 @@ export const ToolCallCard = React.memo(function ToolCallCard({
     if (SUB_AGENT_TOOLS.has(part.tool) && isAgentInvocation(input)) {
       return `Agent \u00b7 ${getAgentBadge(getAgentName(input))}`;
     }
-    if (BG_STATUS_TOOLS.has(part.tool)) {
-      const taskId = (input.task_id as string) ?? (input.taskId as string);
-      return taskId ? `Background Task \u00b7 ${taskId}` : "Background Task";
-    }
     return title;
   }, [part.tool, input, title]);
 
@@ -1234,7 +908,6 @@ export const ToolCallCard = React.memo(function ToolCallCard({
 
   // Try to find the matching child session from the provided list.
   // For "task" tools, the output often contains a task_id that maps to the child session.
-  // For background tasks, match by description or agent type.
   const matchedChild = useMemo(() => {
     if (!isSubAgentTool || !childSessions || childSessions.length === 0)
       return null;
@@ -1249,19 +922,6 @@ export const ToolCallCard = React.memo(function ToolCallCard({
             (c) => c.opencodeSessionId === outputId || c.id === outputId,
           );
           if (match) return match;
-
-          // Also match background tasks by taskId embedded in child session title
-          // (SDK stores JSON metadata as session title for background tasks)
-          const titleMatch = childSessions.find((c) => {
-            if (!c.title) return false;
-            try {
-              const titleData = JSON.parse(c.title);
-              return titleData?.taskId === outputId;
-            } catch {
-              return false;
-            }
-          });
-          if (titleMatch) return titleMatch;
         }
       } catch {
         // Output might not be JSON — that's fine
@@ -1446,23 +1106,7 @@ export const ToolCallCard = React.memo(function ToolCallCard({
             <div className="border-t border-[var(--border)] px-3 py-2">
               <div className="flex items-center gap-1.5 text-[10px] text-[var(--muted-foreground)]">
                 <Bot className="h-3 w-3 shrink-0" />
-                {isAgentInvocation(input) ? (
-                  <>
-                    <Badge
-                      variant="secondary"
-                      className="text-[9px] px-1.5 py-0"
-                    >
-                      {getAgentBadge(getAgentName(input))}
-                    </Badge>
-                    {input.description && (
-                      <span className="truncate">
-                        {String(input.description).slice(0, 60)}
-                      </span>
-                    )}
-                  </>
-                ) : (
-                  <span>Sub-agent task</span>
-                )}
+                <span>Sub-agent task</span>
                 <span className="ml-auto italic shrink-0">
                   {childSessions && childSessions.length > 0
                     ? "Session not matched"

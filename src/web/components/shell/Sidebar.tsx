@@ -86,26 +86,8 @@ function SessionSkeleton({ isCollapsed }: { isCollapsed: boolean }) {
   );
 }
 
-/** Parse a background task session title from JSON metadata to a friendly display string. */
 function parseSessionTitle(title: string | null): string {
-  if (!title) return "Untitled Session";
-  if (!title.startsWith("{")) return title;
-  try {
-    const meta = JSON.parse(title) as {
-      taskId?: string;
-      agent?: string;
-      description?: string;
-    };
-    if (meta.taskId && meta.taskId.startsWith("bg_")) {
-      const agentName = meta.agent?.replace("Agentuity Coder ", "") ?? "Agent";
-      return meta.description
-        ? `🔄 ${agentName}: ${meta.description}`
-        : `🔄 Background · ${agentName}`;
-    }
-    return title;
-  } catch {
-    return title;
-  }
+  return title ?? "Untitled Session";
 }
 
 function getStatusColor(status: string) {
