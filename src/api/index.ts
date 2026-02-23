@@ -19,6 +19,9 @@ import userSettingsRoutes from "../routes/user-settings";
 import voiceRoutes from "../routes/voice";
 import voiceSettingsRoutes from "../routes/voice-settings";
 import snapshotRoutes from "../routes/snapshots";
+import workspaceSettingsRoutes from "../routes/workspace-settings";
+import webhookRoutes from "../routes/webhooks";
+import webhookTriggerRoutes from "../routes/webhook-trigger";
 
 const api = createRouter();
 
@@ -38,6 +41,9 @@ api.get("/auth-methods", (c) => {
 
 // Shared session routes (public — no authentication required)
 api.route("/shared", sharedRoutes);
+
+// Webhook trigger routes (public — authenticates via webhook secret)
+api.route("/webhooks", webhookTriggerRoutes);
 
 // Cron routes (no user auth — uses platform signature verification)
 api.route("/cron", cronRoutes);
@@ -87,6 +93,13 @@ api.route("/sessions", sessionMcpRoutes);
 // Sources routes (nested under workspaces + standalone)
 api.route("/workspaces/:wid/sources", sourceRoutes);
 api.route("/sources", sourceRoutes);
+
+// Workspace settings routes (env vars)
+api.route("/workspaces/:wid/settings", workspaceSettingsRoutes);
+
+// Webhooks CRUD routes (nested under workspaces + standalone)
+api.route("/workspaces/:wid/webhooks", webhookRoutes);
+api.route("/webhooks", webhookRoutes);
 
 // Snapshot routes (nested under workspaces)
 api.route("/workspaces/:wid/snapshots", snapshotRoutes);

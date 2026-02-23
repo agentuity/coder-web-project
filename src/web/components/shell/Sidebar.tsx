@@ -14,6 +14,7 @@ import {
   Sun,
   User,
   Keyboard,
+  Zap,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useAnalytics } from "@agentuity/react";
@@ -55,6 +56,7 @@ interface SidebarProps {
 function getCurrentPage(pathname: string) {
   if (pathname.startsWith("/skills")) return "skills";
   if (pathname.startsWith("/sources")) return "sources";
+  if (pathname.startsWith("/webhooks")) return "webhooks";
   if (pathname.startsWith("/settings")) return "settings";
   if (pathname.startsWith("/profile")) return "profile";
   return "chat";
@@ -162,7 +164,7 @@ export function Sidebar({
   };
 
   const handleNavigate = (
-    destination: "skills" | "sources" | "settings" | "profile",
+    destination: "skills" | "sources" | "webhooks" | "settings" | "profile",
   ) => {
     track("sidebar_navigation", { destination });
     navigate({ to: `/${destination}` });
@@ -422,6 +424,20 @@ export function Sidebar({
         >
           <Plug className="h-4 w-4" />
           {!isCollapsed && "Sources"}
+        </button>
+        <button
+          type="button"
+          onClick={() => handleNavigate("webhooks")}
+          className={cn(
+            "w-full flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors hover:bg-[var(--accent)]",
+            currentPage === "webhooks" ? "bg-[var(--accent)]" : "",
+            isCollapsed && "justify-center px-2",
+          )}
+          title="Webhooks"
+          aria-label={isCollapsed ? "Webhooks" : undefined}
+        >
+          <Zap className="h-4 w-4" />
+          {!isCollapsed && "Webhooks"}
         </button>
         <button
           type="button"

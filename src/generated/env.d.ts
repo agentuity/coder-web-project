@@ -5,17 +5,12 @@
 declare global {
 	namespace NodeJS {
 		interface ProcessEnv {
+		readonly AGENTMAIL_API_KEY: string;
 		readonly AGENTUITY_AUTH_SECRET: string;
 		readonly AGENTUITY_SDK_KEY: string;
 		readonly ANTHROPIC_API_KEY: string;
-		readonly AUTH_SECRET: string;
-		readonly AWS_ACCESS_KEY_ID: string;
-		readonly AWS_BUCKET: string;
-		readonly AWS_ENDPOINT: string;
-		readonly AWS_REGION: string;
-		readonly AWS_SECRET_ACCESS_KEY: string;
+		readonly BETTER_AUTH_URL: string;
 		readonly DATABASE_URL: string;
-		readonly OPENAI_API_KEY: string;
 		}
 	}
 }
